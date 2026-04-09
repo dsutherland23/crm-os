@@ -1,0 +1,29 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+.next
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Turbo
+.turbo
+
+# Supabase
+supabase/.temp
+supabase/.branches
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea

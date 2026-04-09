@@ -1,0 +1,141 @@
+export type ModuleId =
+  | 'core'
+  | 'crm'
+  | 'pos'
+  | 'inventory'
+  | 'products'
+  | 'finance'
+  | 'operations'
+  | 'pricing'
+  | 'analytics'
+  | 'branding'
+  | 'ai';
+
+export interface ModuleManifest {
+  id: ModuleId;
+  name: string;
+  description: string;
+  version: string;
+  alwaysOn: boolean;
+  dependencies: ModuleId[];
+  defaultEnabled: boolean;
+  requiredRoles?: string[];
+}
+
+export interface FeatureFlag {
+  moduleId: ModuleId;
+  tenantId: string;
+  enabled: boolean;
+  enabledForRoles?: string[];
+  enabledForUsers?: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface ToggleResolution {
+  moduleId: ModuleId;
+  enabled: boolean;
+  resolvedAt: 'user' | 'role' | 'tenant' | 'default';
+}
+
+// Registry of all module manifests
+export const MODULE_MANIFESTS: Record<ModuleId, ModuleManifest> = {
+  core: {
+    id: 'core',
+    name: 'Core Engine',
+    description: 'Authentication, permissions, audit, and platform infrastructure',
+    version: '1.0.0',
+    alwaysOn: true,
+    dependencies: [],
+    defaultEnabled: true,
+  },
+  crm: {
+    id: 'crm',
+    name: 'Customer Management',
+    description: 'Unified customer profiles, segmentation, and loyalty',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core'],
+    defaultEnabled: true,
+  },
+  pos: {
+    id: 'pos',
+    name: 'Point of Sale',
+    description: 'Touch-first POS with offline support and multi-payment',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core', 'products', 'inventory', 'pricing'],
+    defaultEnabled: false,
+  },
+  inventory: {
+    id: 'inventory',
+    name: 'Inventory Management',
+    description: 'Real-time stock ledger, multi-location, and supplier tracking',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core', 'products'],
+    defaultEnabled: true,
+  },
+  products: {
+    id: 'products',
+    name: 'Product Management',
+    description: 'Product catalog, variants, barcodes, and categories',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core'],
+    defaultEnabled: true,
+  },
+  finance: {
+    id: 'finance',
+    name: 'Finance & Accounting',
+    description: 'Double-entry accounting, invoices, and financial reports',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core'],
+    defaultEnabled: false,
+  },
+  operations: {
+    id: 'operations',
+    name: 'Operations',
+    description: 'Transfers, returns, cancellations, and approval workflows',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core', 'inventory'],
+    defaultEnabled: false,
+  },
+  pricing: {
+    id: 'pricing',
+    name: 'Dynamic Pricing Engine',
+    description: 'Wholesale/retail pricing, discounts, promos, and tier rules',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core', 'products'],
+    defaultEnabled: true,
+  },
+  analytics: {
+    id: 'analytics',
+    name: 'Analytics & Intelligence',
+    description: 'Real-time dashboards, revenue breakdown, and insights',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core'],
+    defaultEnabled: false,
+  },
+  branding: {
+    id: 'branding',
+    name: 'Branding & Customization',
+    description: 'Logo, invoice templates, receipts, and white-label support',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core'],
+    defaultEnabled: false,
+  },
+  ai: {
+    id: 'ai',
+    name: 'AI Layer',
+    description: 'Agentic AI for bookkeeping, forecasting, and recommendations',
+    version: '1.0.0',
+    alwaysOn: false,
+    dependencies: ['core', 'analytics'],
+    defaultEnabled: false,
+  },
+};
