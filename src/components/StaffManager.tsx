@@ -63,7 +63,7 @@ export default function StaffManager() {
         enterprise_id: enterpriseId
       });
       
-      // Log to audit logs and notifications
+      const logData = {
         action: "Staff Access Created",
         details: `Created new ${newUser.role} access for ${newUser.name}`,
         timestamp: new Date().toISOString(),
