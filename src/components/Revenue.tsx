@@ -197,12 +197,8 @@ export default function Revenue() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Bank Accounts (Mock data for Treasury)
-  const bankAccounts = [
-    { id: "1", name: "Main Operating Account", bank: "Chase Bank", balance: 125450.00, type: "Checking", status: "Active" },
-    { id: "2", name: "Payroll Reserve", bank: "Wells Fargo", balance: 45000.00, type: "Savings", status: "Active" },
-    { id: "3", name: "Tax Reserve", bank: "Chase Bank", balance: 12000.00, type: "Savings", status: "Active" },
-  ];
+  // Bank Accounts (Real Treasury Accounts from Firestore)
+  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
 
   useEffect(() => {
     if (!enterpriseId) return;

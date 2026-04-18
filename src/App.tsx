@@ -111,6 +111,48 @@ function AppContent() {
     return <Auth />;
   }
 
+  const handleCreateProfile = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const { setDoc, db, doc } = await import("@/lib/firebase");
+      const { seedClientData } = await import("./lib/seed");
+      
+      const defaultEnterpriseId = `ent-${user.email?.split('@')[0].replace(/[^a-zA-Z0-9]/g, '-') || user.uid.substring(0, 8)}`;
+      
+      // 1. Create User Profile
+      await setDoc(doc(db, "users", user.uid), {
+        fullName: user.displayName || user.email?.split('@')[0] || "User",
+        email: user.email,
+        enterprise_id: defaultEnterpriseId,
+        enterpriseName: "My Organization",
+        role: "Owner",
+        status: "ACTIVE",
+        createdAt: new Date().toISOString()
+      });
+
+      // 2. Initialize Enterprise Settings
+      await setDoc(doc(db, "enterprise_settings", defaultEnterpriseId), {
+        enterpriseName: "My Organization",
+        enterprise_id: defaultEnterpriseId,
+        setupCompleted: true,
+        createdAt: new Date().toISOString()
+      }, { merge: true });
+
+      // 3. Seed initial data
+      await seedClientData(defaultEnterpriseId);
+
+      // 4. Update local state and reload
+      setEnterpriseId(defaultEnterpriseId);
+      window.location.reload();
+    } catch (error) {
+      console.error("Provisioning failed:", error);
+      alert("Failed to initialize workspace. Please check your connection.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!enterpriseId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
@@ -122,15 +164,27 @@ function AppContent() {
             <h2 className="text-2xl font-bold text-zinc-900">Initialize Workspace</h2>
             <p className="text-sm text-zinc-500 mt-2">We couldn't find an existing enterprise profile for your account. Let's get you set up.</p>
           </div>
-          <Button 
-            className="w-full h-12 rounded-xl bg-zinc-900 text-white font-bold hover:bg-zinc-800 transition-all shadow-lg"
-            onClick={() => window.location.reload()}
-          >
-            Retry Synchronization
-          </Button>
+          
+          <div className="space-y-3">
+            <Button 
+              className="w-full h-12 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-all shadow-lg"
+              onClick={handleCreateProfile}
+            >
+              Setup My Enterprise
+            </Button>
+            
+            <Button 
+              variant="outline"
+              className="w-full h-12 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-all"
+              onClick={() => window.location.reload()}
+            >
+              Retry Sync
+            </Button>
+          </div>
+
           <Button 
             variant="ghost" 
-            className="w-full text-zinc-500 font-medium"
+            className="w-full text-zinc-400 text-xs font-medium"
             onClick={() => auth.signOut()}
           >
             Sign Out

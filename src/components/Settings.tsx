@@ -196,8 +196,47 @@ export default function Settings() {
   };
 
   const handleResetData = async () => {
-    toast.error("Data reset is disabled in this demo environment.");
+    if (!enterpriseId) return;
     setIsResetDialogOpen(false);
+    
+    const collectionsToWipe = [
+      "invoices", "expenses", "quotes", "recurring_billing",
+      "transactions", "pos_sessions", "audit_logs",
+      "customers", "products", "inventory", "interactions",
+      "branches", "roles", "staff", "campaigns"
+    ];
+
+    const loadingToast = toast.loading("Executing enterprise-wide data purge...", {
+      description: "Deleting records across all modules. This may take a moment."
+    });
+
+    try {
+      // We process each collection to find and delete docs matching this enterprise
+      for (const colName of collectionsToWipe) {
+        const q = query(collection(db, colName), where("enterprise_id", "==", enterpriseId));
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+          const batch = writeBatch(db);
+          snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+          await batch.commit();
+        }
+      }
+
+      toast.success("Enterprise data wiped successfully.", {
+        id: loadingToast,
+        description: "Your workspace has been returned to factory settings."
+      });
+
+      // Force a reload to clear all local state and caches
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 1500);
+
+    } catch (error: any) {
+      console.error("Purge failed:", error);
+      toast.error("Wipe failed: " + error.message, { id: loadingToast });
+    }
   };
 
   const handleAddRole = async () => {

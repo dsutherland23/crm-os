@@ -137,7 +137,7 @@ export default function POS() {
 
   useEffect(() => {
     const unsubProducts = onSnapshot(
-      collection(db, "products"),
+      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
         setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
@@ -146,32 +146,28 @@ export default function POS() {
     );
 
     const unsubInventory = onSnapshot(
-      collection(db, "inventory"),
+      query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("inventory:", err)
     );
 
     const unsubCustomers = onSnapshot(
-      collection(db, "customers"),
+      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("customers:", err)
     );
 
     const unsubCampaigns = onSnapshot(
-      query(collection(db, "campaigns"), where("status", "==", "ACTIVE")),
+      query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
       (snapshot) => setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("campaigns:", err)
     );
 
     const unsubStaff = onSnapshot(
-      query(collection(db, "staff"), where("status", "==", "ACTIVE")),
+      query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
       (snapshot) => {
         const dbStaff = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
-        if (dbStaff.length === 0) {
-          setStaffList([{ id: "admin1", name: "Daan Sutherland", role: "Business Admin", initials: "DS", pin: "1234" }]);
-        } else {
-          setStaffList(dbStaff.map(s => ({ ...s, initials: (s.name || '').substring(0, 2).toUpperCase() })));
-        }
+        setStaffList(dbStaff.map(s => ({ ...s, initials: (s.name || '').substring(0, 2).toUpperCase() })));
       },
       (err) => console.error("staff:", err)
     );
@@ -196,7 +192,7 @@ export default function POS() {
     );
 
     const unsubSessions = onSnapshot(
-      query(collection(db, "pos_sessions"), where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH", "IN_MEETING"])),
+      query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH", "IN_MEETING"])),
       (snapshot) => setActiveSessions(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("sessions:", err)
     );
