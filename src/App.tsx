@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Sidebar, Header } from "./components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { auth, db, doc, getDoc } from "@/lib/firebase";
+import { auth, db, doc, onSnapshot } from "@/lib/firebase";
 import { getMockUser } from "./lib/auth-mock";
 
 import Dashboard from "./components/Dashboard";
@@ -24,69 +24,84 @@ import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null | undefined>(undefined); // undefined = still loading
+  const [enterpriseLoading, setEnterpriseLoading] = useState(true);
   const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId } = useModules();
 
+  // ── Step 1: Auth State Listener ─────────────────────────────────
   useEffect(() => {
     const mockUser = getMockUser();
-    
-    // Use mock user if developer bypass is active
     if (mockUser) {
-      setUser(mockUser);
+      setUser(mockUser as unknown as User);
       setEnterpriseId("master-all");
-      setLoading(false);
+      setBranding({ name: "Developer Mode" });
+      setEnterpriseLoading(false);
       import("./lib/seed").then(({ seedClientData }) => seedClientData("master-all"));
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
-      console.log("Auth State Changed. User:", fbUser?.email);
-      setUser(fbUser);
-      try {
-        if (fbUser) {
-          console.log("Fetching profile for UID:", fbUser.uid);
-          const userDoc = await getDoc(doc(db, "users", fbUser.uid));
-          if (userDoc.exists()) {
-            const profile = userDoc.data() as any;
-            console.log("Profile found:", profile);
-            if (profile.enterprise_id) {
-              setEnterpriseId(profile.enterprise_id);
-              setBranding({ name: profile.enterpriseName || profile.enterprise_id });
-              const { seedClientData } = await import("./lib/seed");
-              seedClientData(profile.enterprise_id);
-            } else {
-              console.warn("Profile exists but enterprise_id is missing!");
-              setEnterpriseId(null);
-            }
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      setUser(fbUser); // null = logged out, User = logged in
+      if (!fbUser) {
+        setEnterpriseId(null);
+        setEnterpriseLoading(false);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // ── Step 2: Real-time Profile Listener (keyed to user.uid) ──────
+  // Separate effect so cleanup works correctly — the key insight:
+  // we watch the profile doc in real-time, so when Auth.tsx writes
+  // the enterprise_id to Firestore, this immediately picks it up
+  // and navigates the user forward without any reload.
+  useEffect(() => {
+    if (!user || getMockUser()) return;
+
+    setEnterpriseLoading(true);
+    const profileRef = doc(db, "users", user.uid);
+
+    const unsub = onSnapshot(
+      profileRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const profile = docSnap.data();
+          if (profile.enterprise_id) {
+            setEnterpriseId(profile.enterprise_id);
+            setBranding({ name: profile.enterpriseName || profile.enterprise_id });
+            import("./lib/seed").then(({ seedClientData }) =>
+              seedClientData(profile.enterprise_id)
+            );
           } else {
-            console.warn("No user profile found in Firestore for UID:", fbUser.uid);
             setEnterpriseId(null);
           }
         } else {
+          // Profile doesn't exist yet (mid-signup provisioning, wait for write)
           setEnterpriseId(null);
         }
-      } catch (error) {
-        console.error("Profile fetch failed:", error);
+        setEnterpriseLoading(false);
+      },
+      (err) => {
+        console.error("Profile sync failed:", err);
         setEnterpriseId(null);
-      } finally {
-        setLoading(false);
+        setEnterpriseLoading(false);
       }
-    });
-    return () => unsubscribe();
-  }, []);
+    );
+
+    return () => unsub();
+  }, [user?.uid]); // Only re-run when the user ID changes
 
   const renderContent = () => {
     switch (activeTab) {
       case "dashboard": return <Dashboard setActiveTab={setActiveTab} />;
       case "crm": return isModuleEnabled("crm") ? <CRM /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "revenue": 
+      case "revenue":
       case "finance": return isModuleEnabled("finance") ? <Revenue /> : <Dashboard setActiveTab={setActiveTab} />;
       case "groups": return <Groups />;
       case "loyalty": return <Loyalty />;
@@ -102,97 +117,58 @@ function AppContent() {
     }
   };
 
-  if (loading) {
+  // ── Guard 1: Auth state not yet resolved ─────────────────────────
+  if (user === undefined || (user && enterpriseLoading)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 gap-4">
         <RipplePulseLoader size="lg" />
+        <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest animate-pulse">
+          {user ? "Provisioning workspace…" : "Loading…"}
+        </p>
       </div>
     );
   }
 
+  // ── Guard 2: Not logged in ───────────────────────────────────────
   if (!user) {
     return <Auth />;
   }
 
-  // ── Verification Gate (2026 Best Practice) ──
-  // Skip if it's a mock user (developer bypass) or already verified
-  if (!user.emailVerified && !getMockUser()) {
+  // ── Guard 3: Email not verified (only for non-mock, returning users) ─
+  // IMPORTANT: We allow unverified users through if they have no enterprise yet
+  // (they just finished signing up and are in the provisioning flow).
+  // The VerificationGate will be shown AFTER their profile is written.
+  if (!user.emailVerified && !getMockUser() && enterpriseId) {
     return <VerificationGate user={user} />;
   }
 
-  const handleCreateProfile = async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const { setDoc, db, doc } = await import("@/lib/firebase");
-      const { seedClientData } = await import("./lib/seed");
-      
-      const defaultEnterpriseId = `ent-${user.email?.split('@')[0].replace(/[^a-zA-Z0-9]/g, '-') || user.uid.substring(0, 8)}`;
-      
-      // 1. Create User Profile
-      await setDoc(doc(db, "users", user.uid), {
-        fullName: user.displayName || user.email?.split('@')[0] || "User",
-        email: user.email,
-        enterprise_id: defaultEnterpriseId,
-        enterpriseName: "My Organization",
-        role: "Owner",
-        status: "ACTIVE",
-        createdAt: new Date().toISOString()
-      });
-
-      // 2. Initialize Enterprise Settings
-      await setDoc(doc(db, "enterprise_settings", defaultEnterpriseId), {
-        enterpriseName: "My Organization",
-        enterprise_id: defaultEnterpriseId,
-        setupCompleted: true,
-        createdAt: new Date().toISOString()
-      }, { merge: true });
-
-      // 3. Seed initial data
-      await seedClientData(defaultEnterpriseId);
-
-      // 4. Update local state and reload
-      setEnterpriseId(defaultEnterpriseId);
-      window.location.reload();
-    } catch (error) {
-      console.error("Provisioning failed:", error);
-      alert("Failed to initialize workspace. Please check your connection.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // ── Guard 4: Verified but no enterprise profile yet ──────────────
   if (!enterpriseId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
         <Card className="max-w-md w-full card-modern p-6 sm:p-10 text-center space-y-6">
-          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
+          <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto text-amber-500">
             <Sparkles className="w-8 h-8" />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-zinc-900">Initialize Workspace</h2>
-            <p className="text-sm text-zinc-500 mt-2">We couldn't find an existing enterprise profile for your account. Let's get you set up.</p>
+            <h2 className="text-2xl font-bold text-zinc-900">Workspace not found</h2>
+            <p className="text-sm text-zinc-500 mt-2">
+              We couldn't find an enterprise profile linked to <strong>{user.email}</strong>.
+              This can happen if setup didn't complete. Please try signing out and signing back in,
+              or contact support.
+            </p>
           </div>
-          
           <div className="space-y-3">
-            <Button 
-              className="w-full h-12 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition-all shadow-lg"
-              onClick={handleCreateProfile}
-            >
-              Setup My Enterprise
-            </Button>
-            
-            <Button 
+            <Button
               variant="outline"
               className="w-full h-12 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-all"
               onClick={() => window.location.reload()}
             >
-              Retry Sync
+              Retry
             </Button>
           </div>
-
-          <Button 
-            variant="ghost" 
+          <Button
+            variant="ghost"
             className="w-full text-zinc-400 text-xs font-medium"
             onClick={() => auth.signOut()}
           >
@@ -203,18 +179,19 @@ function AppContent() {
     );
   }
 
+  // ── Authenticated & provisioned: render the app ──────────────────
   return (
     <div className="h-screen bg-background font-sans text-foreground antialiased transition-colors duration-300">
-      <Sidebar 
-        activeTab={activeTab} 
-        setActiveTab={setActiveTab} 
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
         isMobileOpen={isMobileOpen}
         setIsMobileOpen={setIsMobileOpen}
       />
-      
+
       <div className="lg:pl-72 flex flex-col h-screen">
         <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} />
-        
+
         <main className="flex-1 overflow-hidden">
           {renderContent()}
         </main>
@@ -225,7 +202,7 @@ function AppContent() {
         <Dialog>
           <DialogTrigger
             render={
-              <Button 
+              <Button
                 className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:scale-110 active:scale-95 transition-all duration-300 group z-50 p-0 flex items-center justify-center border-none"
               >
                 <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform text-blue-400" />

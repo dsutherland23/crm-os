@@ -228,6 +228,10 @@ export default function Auth() {
       const user = cred.user;
       const finalId = enterpriseSlug || toSlug(enterpriseName) || `ent-${user.uid.substring(0, 8)}`;
       
+      // 2026 Best Practice: Show "Provisioning" state while backend operations finish
+      // The use of onSnapshot in App.tsx will automatically bridge the navigation
+      // as soon as the Firestore writes below are committed.
+      
       await setDoc(doc(db, "users", user.uid), {
         fullName,
         email,
@@ -255,9 +259,6 @@ export default function Auth() {
       setDone(true);
       setVerificationSent(true);
       toast.success("Enterprise configured successfully!");
-      
-      // No reload needed. App.tsx will detect the new auth state 
-      // and show the VerificationGate automatically.
     } catch (error: any) {
       let msg = error.message;
       if (error.code === "auth/email-already-in-use") msg = "This email is already registered. Sign in instead.";
@@ -268,37 +269,80 @@ export default function Auth() {
     }
   };
 
-  // ─── Success Screen ──────────────────────────────────────────────
+  // ─── Success / Verification Screen ───────────────────────────────
   if (done) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-950 relative overflow-hidden">
+      <div className="min-h-screen flex items-center justify-center bg-zinc-950 relative overflow-hidden p-6">
         <div className="absolute inset-0 bg-gradient-to-br from-blue-600/20 via-purple-600/10 to-zinc-950" />
-        {/* Confetti dots */}
-        {Array.from({ length: 24 }).map((_, i) => (
-          <div
-            key={i}
-            className="absolute w-2 h-2 rounded-full animate-ping"
-            style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`,
-              backgroundColor: ["#3b82f6", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"][i % 5],
-              animationDelay: `${Math.random() * 1}s`,
-              animationDuration: `${0.8 + Math.random() * 0.6}s`,
-              opacity: 0.7,
-            }}
-          />
-        ))}
-        <div className="relative z-10 text-center space-y-6 px-8">
-          <div className="w-24 h-24 rounded-3xl bg-emerald-500 flex items-center justify-center mx-auto shadow-2xl shadow-emerald-500/30 animate-bounce">
-            <Check className="w-12 h-12 text-white" strokeWidth={3} />
+        {/* Animated orbs */}
+        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[40%] h-[40%] bg-purple-600/15 rounded-full blur-[100px] pointer-events-none" />
+
+        <div className="relative z-10 w-full max-w-md space-y-8 text-center">
+          {/* Icon */}
+          <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center mx-auto shadow-2xl shadow-blue-500/30">
+            <Mail className="w-10 h-10 text-white" />
           </div>
-          <div className="space-y-2">
-            <h1 className="text-4xl font-black text-white tracking-tight">Enterprise Launched! 🚀</h1>
-            <p className="text-zinc-400 text-lg">Welcome, {fullName.split(" ")[0]}. Your CRM is spinning up…</p>
+
+          {/* Heading */}
+          <div className="space-y-3">
+            <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
+              Check your inbox 📬
+            </h1>
+            <p className="text-zinc-400 text-base leading-relaxed">
+              We sent a verification link to{" "}
+              <span className="text-white font-bold">{email}</span>.
+              <br />
+              Click the link in that email to activate your enterprise workspace.
+            </p>
           </div>
-          <div className="flex items-center justify-center gap-2 text-zinc-500 text-sm">
-            <RefreshCw className="w-4 h-4 animate-spin" />
-            Redirecting to dashboard
+
+          {/* Steps */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-6 space-y-4 text-left">
+            {[
+              { n: "1", text: "Open the email from Orivo CRM" },
+              { n: "2", text: "Click \"Verify my email\" in the message" },
+              { n: "3", text: "Come back here and sign in" },
+            ].map((step) => (
+              <div key={step.n} className="flex items-center gap-4">
+                <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-black shrink-0">
+                  {step.n}
+                </div>
+                <span className="text-zinc-300 text-sm font-medium">{step.text}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* CTA */}
+          <div className="space-y-3">
+            <Button
+              className="w-full h-14 rounded-2xl bg-white text-zinc-900 font-black text-base hover:bg-zinc-100 transition-all shadow-xl"
+              onClick={() => {
+                setDone(false);
+                setStep(1);
+                setIsLogin(true);
+              }}
+            >
+              I verified my email — Sign In
+              <ArrowRight className="w-5 h-5 ml-2" />
+            </Button>
+            <button
+              type="button"
+              className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors font-medium"
+              onClick={async () => {
+                try {
+                  const user = (await import("firebase/auth")).getAuth().currentUser;
+                  if (user) {
+                    await (await import("firebase/auth")).sendEmailVerification(user);
+                    toast.success("Verification email resent!");
+                  }
+                } catch {
+                  toast.error("Couldn't resend. Try again in a minute.");
+                }
+              }}
+            >
+              Didn't get it? <span className="underline underline-offset-4">Resend email</span>
+            </button>
           </div>
         </div>
       </div>
