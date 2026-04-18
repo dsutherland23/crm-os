@@ -1,0 +1,7 @@
+{
+  "name": "CRM OS",
+  "description": "A unified, modular business operating system that automates operations, finances, sales, and customer management with AI-driven intelligence.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

@@ -1,0 +1,233 @@
+{
+  "entities": {
+    "campaigns": {
+      "title": "Campaign",
+      "description": "Discount and loyalty campaigns.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["Standard", "Action"] },
+        "action_type": { "type": "string" },
+        "start_date": { "type": "string", "format": "date-time" },
+        "end_date": { "type": "string", "format": "date-time" },
+        "rules": { "type": "object" },
+        "branches": { "type": "array", "items": { "type": "string" } },
+        "target_products": { "type": "array", "items": { "type": "string" } },
+        "target_customers": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "DRAFT", "ARCHIVED"] },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type", "status"]
+    },
+    "customer_groups": {
+      "title": "Customer Group",
+      "description": "Dynamic rule-based segments and manual customer groups.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "type": { "type": "string", "enum": ["Dynamic", "Manual"] },
+        "rules": { "type": "array", "items": { "type": "object" } },
+        "last_synced": { "type": "string", "format": "date-time" },
+        "member_count": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type"]
+    },
+    "users": {
+      "title": "User",
+      "description": "System users and their roles.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["Super Admin", "Admin", "Manager", "Staff", "Accountant"] },
+        "branch_id": { "type": "string" },
+        "company_id": { "type": "string" }
+      },
+      "required": ["name", "email", "role", "company_id"]
+    },
+    "branches": {
+      "title": "Branch",
+      "description": "Business locations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "manager_id": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "customers": {
+      "title": "Customer",
+      "description": "Customer profiles and loyalty data.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "segment": { "type": "string", "enum": ["RETAIL", "WHOLESALE", "VIP"] },
+        "balance": { "type": "number" },
+        "loyalty_points": { "type": "number" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "notes": { "type": "array", "items": { "type": "object" } },
+        "communications": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["name"]
+    },
+    "products": {
+      "title": "Product",
+      "description": "Product catalog items.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "barcode": { "type": "string" },
+        "retail_price": { "type": "number" },
+        "wholesale_price": { "type": "number" },
+        "category": { "type": "string" },
+        "image_url": { "type": "string", "format": "uri" },
+        "min_stock_level": { "type": "number" }
+      },
+      "required": ["name", "retail_price", "sku"]
+    },
+    "inventory": {
+      "title": "Inventory",
+      "description": "Stock levels for products at specific branches.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "product_id": { "type": "string" },
+        "branch_id": { "type": "string" },
+        "stock": { "type": "number" }
+      },
+      "required": ["product_id", "branch_id", "stock"]
+    },
+    "transactions": {
+      "title": "Transaction",
+      "description": "Sales and movement logs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["SALE", "RETURN", "TRANSFER", "ADJUSTMENT"] },
+        "branch_id": { "type": "string" },
+        "customer_id": { "type": "string" },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "subtotal": { "type": "number" },
+        "tax": { "type": "number" },
+        "total": { "type": "number" },
+        "payment_method": { "type": "string" },
+        "status": { "type": "string", "enum": ["COMPLETED", "PENDING", "CANCELLED"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["type", "total", "status", "branch_id"]
+    },
+    "invoices": {
+      "title": "Invoice",
+      "description": "Financial billing documents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "transaction_id": { "type": "string" },
+        "customer_id": { "type": "string" },
+        "due_date": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["PAID", "UNPAID", "OVERDUE", "PARTIAL"] }
+      },
+      "required": ["transaction_id", "customer_id", "status"]
+    },
+    "quotes": {
+      "title": "Quote",
+      "description": "Sales estimates and quotes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customer_id": { "type": "string" },
+        "items": { "type": "array", "items": { "type": "object" } },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["DRAFT", "SENT", "ACCEPTED", "REJECTED", "EXPIRED"] },
+        "valid_until": { "type": "string", "format": "date-time" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customer_id", "total", "status"]
+    },
+    "recurring_billing": {
+      "title": "Recurring Billing",
+      "description": "Subscription and recurring invoice settings.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customer_id": { "type": "string" },
+        "plan_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "PAUSED", "CANCELLED", "PAST_DUE"] },
+        "next_billing_date": { "type": "string", "format": "date-time" },
+        "amount": { "type": "number" },
+        "frequency": { "type": "string", "enum": ["MONTHLY", "QUARTERLY", "ANNUALLY"] }
+      },
+      "required": ["customer_id", "plan_id", "status", "amount", "frequency"]
+    },
+    "expenses": {
+      "title": "Expense",
+      "description": "Business expenditures.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "branch_id": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["amount", "category", "branch_id"]
+    },
+    "workflows": {
+      "title": "Workflow",
+      "description": "Order lifecycle and tasks.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "PROCESSING", "COMPLETED", "CANCELLED"] },
+        "assigned_to": { "type": "string" },
+        "related_id": { "type": "string" },
+        "history": { "type": "array", "items": { "type": "object" } }
+      },
+      "required": ["title", "status"]
+    },
+    "audit_logs": {
+      "title": "Audit Log",
+      "description": "System activity logs.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user_id", "action", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "users", "description": "User profile data" },
+    "/branches/{branchId}": { "schema": "branches", "description": "Branch locations" },
+    "/customers/{customerId}": { "schema": "customers", "description": "Customer records" },
+    "/products/{productId}": { "schema": "products", "description": "Product catalog" },
+    "/inventory/{inventoryId}": { "schema": "inventory", "description": "Stock records" },
+    "/transactions/{transactionId}": { "schema": "transactions", "description": "Sales logs" },
+    "/invoices/{invoiceId}": { "schema": "invoices", "description": "Billing documents" },
+    "/quotes/{quoteId}": { "schema": "quotes", "description": "Sales quotes" },
+    "/recurring_billing/{billingId}": { "schema": "recurring_billing", "description": "Recurring billing profiles" },
+    "/expenses/{expenseId}": { "schema": "expenses", "description": "Expense records" },
+    "/workflows/{workflowId}": { "schema": "workflows", "description": "Task management" },
+    "/audit_logs/{logId}": { "schema": "audit_logs", "description": "System activity logs" },
+    "/campaigns/{campaignId}": { "schema": "campaigns", "description": "Loyalty and Discount Campaigns" },
+    "/customer_groups/{groupId}": { "schema": "customer_groups", "description": "Customer groups definitions" }
+  }
+}
