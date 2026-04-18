@@ -269,7 +269,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     setErrorMap({ transactions: null, customers: null, inventory: null, logs: null });
 
     // 1. Transactions
-    const txQuery = activeBranch === "ALL"
+    const txQuery = activeBranch === "all"
         ? query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(100))
         : query(
             collection(db, "transactions"),
