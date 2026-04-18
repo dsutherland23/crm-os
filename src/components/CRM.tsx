@@ -97,7 +97,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, where, addDoc, serverTimestamp, deleteDoc } from "@/lib/firebase";
 
 export default function CRM() {
-  const { activeBranch, formatCurrency, topSpenderThreshold } = useModules();
+  const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSegment, setSelectedSegment] = useState("All");
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -195,7 +195,8 @@ export default function CRM() {
         status: "Active",
         createdAt: serverTimestamp(),
         lastContact: new Date().toISOString(),
-        loyalty: 0
+        loyalty: 0,
+        enterprise_id: enterpriseId
       });
       toast.success("Customer added successfully");
       setIsAddCustomerOpen(false);
@@ -251,9 +252,10 @@ export default function CRM() {
     setActiveTab("overview"); // Reset tab context when switching customers
   };
 
-  useEffect(() => {
+    if (!enterpriseId) return;
     const q = query(
       collection(db, "customers"), 
+      where("enterprise_id", "==", enterpriseId),
       where("status", "!=", "Archived"),
       orderBy("status"),
       orderBy("name", "asc")
@@ -272,7 +274,7 @@ export default function CRM() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [enterpriseId]);
 
   useEffect(() => {
     const handleAction = (e: any) => {
@@ -288,6 +290,7 @@ export default function CRM() {
     if (!selectedCustomer) return;
     const q = query(
       collection(db, "transactions"), 
+      where("enterprise_id", "==", enterpriseId),
       where("customer_id", "==", selectedCustomer.id)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -304,6 +307,7 @@ export default function CRM() {
 
     const qInv = query(
       collection(db, "invoices"),
+      where("enterprise_id", "==", enterpriseId),
       where("customer_id", "==", selectedCustomer.id)
     );
     const unsubscribeInv = onSnapshot(qInv, (snapshot) => {
@@ -318,12 +322,13 @@ export default function CRM() {
       unsubscribe();
       unsubscribeInv();
     };
-  }, [selectedCustomer]);
+  }, [selectedCustomer, enterpriseId]);
 
   useEffect(() => {
     if (!selectedCustomer) return;
     const q = query(
       collection(db, "documents"),
+      where("enterprise_id", "==", enterpriseId),
       where("customer_id", "==", selectedCustomer.id)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {

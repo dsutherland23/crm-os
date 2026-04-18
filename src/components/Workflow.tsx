@@ -71,6 +71,8 @@ import {
 } from "@/lib/firebase";
 import { db, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { useEffect } from "react";
+import { useModules } from "@/context/ModuleContext";
+import { where } from "firebase/firestore";
 
 /* ─────────────────────────────────────────
    Types
@@ -153,6 +155,7 @@ interface BuilderProps {
 }
 
 function WorkflowBuilderDialog({ open, onClose, onSaved, editing }: BuilderProps) {
+  const { enterpriseId } = useModules();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [trigger, setTrigger] = useState("");
@@ -195,13 +198,13 @@ function WorkflowBuilderDialog({ open, onClose, onSaved, editing }: BuilderProps
         status: "ACTIVE" as const,
         runs: editing?.runs ?? 0,
         successRate: editing?.successRate ?? 100,
+        enterprise_id: enterpriseId
       };
 
       if (isEdit && editing) {
         await updateDoc(doc(db, "workflows", editing.id), payload);
         toast.success("Workflow updated successfully!");
       } else {
-        await addDoc(collection(db, "workflows"), {
           ...payload,
           created_at: serverTimestamp(),
         });
@@ -346,6 +349,7 @@ function WorkflowBuilderDialog({ open, onClose, onSaved, editing }: BuilderProps
    Main Component
 ───────────────────────────────────────── */
 export default function Workflow() {
+  const { enterpriseId } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [workflows, setWorkflows] = useState<WorkflowDoc[]>([]);
   const [workflowLogs, setWorkflowLogs] = useState<LogDoc[]>([]);
@@ -357,8 +361,10 @@ export default function Workflow() {
 
   /* ── Real-time subscriptions ── */
   useEffect(() => {
+    if (!enterpriseId) return;
+
     const unsubscribeWf = onSnapshot(
-      query(collection(db, "workflows"), orderBy("created_at", "desc")),
+      query(collection(db, "workflows"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc")),
       (snapshot) => {
         setWorkflows(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as WorkflowDoc)));
         setLoading(false);
@@ -371,7 +377,7 @@ export default function Workflow() {
     );
 
     const unsubscribeLogs = onSnapshot(
-      query(collection(db, "workflow_logs"), orderBy("timestamp", "desc")),
+      query(collection(db, "workflow_logs"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc")),
       (snapshot) => {
         setWorkflowLogs(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LogDoc)));
       },
@@ -381,7 +387,7 @@ export default function Workflow() {
     );
 
     return () => { unsubscribeWf(); unsubscribeLogs(); };
-  }, []);
+  }, [enterpriseId]);
 
   /* ── Toggle: idempotent, prevents double-click ── */
   const handleToggle = useCallback(async (wf: WorkflowDoc) => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Sidebar, Header } from "./components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, db, doc, getDoc } from "@/lib/firebase";
 import { getMockUser } from "./lib/auth-mock";
 
 import Dashboard from "./components/Dashboard";
@@ -29,12 +29,13 @@ function AppContent() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const { isModuleEnabled } = useModules();
+  const { isModuleEnabled, setEnterpriseId, setBranding } = useModules();
 
   useEffect(() => {
     const mockUser = getMockUser();
     
-    if (mockUser) {
+    // Only use mock user if we're not in forced Live Mode
+    if (mockUser && auth.app.options.projectId === "mock-project") {
       setUser(mockUser);
       setLoading(false);
       import("./lib/seed").then(({ seedClientData }) => seedClientData());
@@ -42,10 +43,22 @@ function AppContent() {
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setUser(fbUser);
       if (fbUser) {
-        setUser(fbUser);
+        // Fetch user profile to get enterprise_id
+        const userDoc = await getDoc(doc(db, "users", fbUser.uid));
+        if (userDoc.exists()) {
+          const profile = userDoc.data();
+          if (profile.enterprise_id) {
+            setEnterpriseId(profile.enterprise_id);
+            setBranding({ name: profile.enterpriseName || profile.enterprise_id });
+          }
+        }
+
         const { seedClientData } = await import("./lib/seed");
-        seedClientData();
+        seedClientData(profile.enterprise_id);
+      } else {
+        setEnterpriseId(null);
       }
       setLoading(false);
     });

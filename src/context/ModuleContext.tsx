@@ -21,6 +21,8 @@ interface ModuleContextType {
   setTheme: (theme: "light" | "dark" | "system") => void;
   branding: BrandingConfig;
   setBranding: (branding: Partial<BrandingConfig>) => void;
+  enterpriseId: string | null;
+  setEnterpriseId: (id: string | null) => void;
 }
 
 export interface BrandingConfig {
@@ -87,6 +89,10 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     return saved ? JSON.parse(saved) : DEFAULT_BRANDING;
   });
 
+  const [enterpriseId, setEnterpriseId] = useState<string | null>(() => {
+    return localStorage.getItem("crm_enterprise_id") || null;
+  });
+
   const setBranding = (update: Partial<BrandingConfig>) => {
     setBrandingState(prev => ({ ...prev, ...update }));
   };
@@ -133,6 +139,11 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("crm_branding", JSON.stringify(branding));
   }, [branding]);
 
+  useEffect(() => {
+    if (enterpriseId) localStorage.setItem("crm_enterprise_id", enterpriseId);
+    else localStorage.removeItem("crm_enterprise_id");
+  }, [enterpriseId]);
+
   const toggleModule = (moduleName: keyof ModuleConfig) => {
     setConfig(prev => ({ ...prev, [moduleName]: !prev[moduleName] }));
   };
@@ -174,7 +185,9 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       theme,
       setTheme,
       branding,
-      setBranding
+      setBranding,
+      enterpriseId,
+      setEnterpriseId
     }}>
       {children}
     </ModuleContext.Provider>

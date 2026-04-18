@@ -58,7 +58,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useModules } from "@/context/ModuleContext";
-import { collection, onSnapshot, query, orderBy } from "@/lib/firebase";
+import { collection, onSnapshot, query, orderBy, where } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { toast } from "sonner";
 
@@ -88,20 +88,22 @@ const InsightCard = ({ title, description, icon: Icon, color }: any) => (
 );
 
 export default function Analytics() {
-  const { activeBranch, formatCurrency } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId } = useModules();
   const [transactions, setTransactions] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubTx = onSnapshot(query(collection(db, "transactions"), orderBy("timestamp", "asc")), (snapshot) => {
+    if (!enterpriseId) return;
+
+    const unsubTx = onSnapshot(query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "asc")), (snapshot) => {
       setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
-    const unsubProducts = onSnapshot(collection(db, "products"), (snapshot) => {
+    const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
-    const unsubBranches = onSnapshot(collection(db, "branches"), (snapshot) => {
+    const unsubBranches = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setBranches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
     });
@@ -111,7 +113,7 @@ export default function Analytics() {
       unsubProducts();
       unsubBranches();
     };
-  }, []);
+  }, [enterpriseId]);
 
   const performanceData = useMemo(() => {
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

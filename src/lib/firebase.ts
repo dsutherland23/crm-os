@@ -10,6 +10,11 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
+// Toggle this to switch between Live and Mock databases
+const USE_LIVE_DB = true; 
+
+const isMock = () => !USE_LIVE_DB && !!getMockUser();
+
 // Conditional Firestore Exports
 export const collection = (db: any, path: string) => fs.collection(db, path);
 export const query = (ref: any, ...constraints: any[]) => fs.query(ref, ...constraints);
@@ -20,19 +25,19 @@ export const limit = fs.limit;
 export const serverTimestamp = fs.serverTimestamp;
 
 export const onSnapshot = (q: any, cb: any, errorCb?: (error: any) => void) => 
-  getMockUser() ? demoFs.mockOnSnapshot(q, cb) : fs.onSnapshot(q, cb, errorCb);
+  isMock() ? demoFs.mockOnSnapshot(q, cb) : fs.onSnapshot(q, cb, errorCb);
 
 export const getDocs = (q: any) => 
-  getMockUser() ? demoFs.mockGetDocs(q) : fs.getDocs(q);
+  isMock() ? demoFs.mockGetDocs(q) : fs.getDocs(q);
 
 export const addDoc = (ref: any, data: any) => 
-  getMockUser() ? demoFs.mockAddDoc(ref, data) : fs.addDoc(ref, data);
+  isMock() ? demoFs.mockAddDoc(ref, data) : fs.addDoc(ref, data);
 
 export const updateDoc = (ref: any, data: any) => 
-  getMockUser() ? demoFs.mockUpdateDoc(ref, data) : fs.updateDoc(ref, data);
+  isMock() ? demoFs.mockUpdateDoc(ref, data) : fs.updateDoc(ref, data);
 
 export const writeBatch = (db: any) => 
-  getMockUser() ? { 
+  isMock() ? { 
     set: () => {}, 
     update: () => {}, 
     delete: () => {}, 
@@ -44,23 +49,23 @@ export const arrayRemove = fs.arrayRemove;
 export const getDocFromCache = fs.getDocFromCache;
 export const getDocFromServer = fs.getDocFromServer;
 export const getDoc = (ref: any) => 
-  getMockUser() ? Promise.resolve({ exists: () => true, data: () => ({}) }) : fs.getDoc(ref);
+  isMock() ? Promise.resolve({ exists: () => true, data: () => ({}) }) : fs.getDoc(ref);
 
 export const deleteDoc = (ref: any) =>
-  getMockUser() ? demoFs.mockDeleteDoc(ref) : fs.deleteDoc(ref);
+  isMock() ? demoFs.mockDeleteDoc(ref) : fs.deleteDoc(ref);
 
 export const setDoc = (ref: any, data: any, options?: any) =>
-  getMockUser() ? demoFs.mockUpdateDoc(ref, data) : fs.setDoc(ref, data, options);
+  isMock() ? demoFs.mockUpdateDoc(ref, data) : fs.setDoc(ref, data, options);
 
 // Storage Stubs for Demo Mode
 export const getStorage = () => ({});
 export const ref = (storage: any, path: string) => ({ path });
 export const uploadBytes = async (ref: any, file: Blob | Uint8Array | ArrayBuffer) => {
-  if (getMockUser()) return { ref };
+  if (isMock()) return { ref };
   throw new Error("Real storage not configured in this turn");
 };
 export const getDownloadURL = async (ref: any) => {
-  if (getMockUser()) return `https://firebasestorage.googleapis.com/v0/b/mock/o/${encodeURIComponent(ref.path)}?alt=media`;
+  if (isMock()) return `https://firebasestorage.googleapis.com/v0/b/mock/o/${encodeURIComponent(ref.path)}?alt=media`;
   return "";
 };
 

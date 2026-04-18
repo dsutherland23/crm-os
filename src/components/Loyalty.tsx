@@ -18,7 +18,11 @@ import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, setDoc, doc,
 import { db, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
 
+import { useModules } from "@/context/ModuleContext";
+import { where } from "firebase/firestore";
+
 export default function Loyalty() {
+  const { enterpriseId } = useModules();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [campaignCreationType, setCampaignCreationType] = useState<"Standard" | "Action">("Standard");
   const [branches, setBranches] = useState<any[]>([]);
@@ -56,12 +60,14 @@ export default function Loyalty() {
   });
 
   useEffect(() => {
-    const unsubBranches = onSnapshot(query(collection(db, "branches")), (snap) => setBranches(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "branches"));
-    const unsubGroups = onSnapshot(query(collection(db, "customer_groups")), (snap) => setGroups(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "customer_groups"));
-    const unsubProducts = onSnapshot(query(collection(db, "products")), (snap) => setProducts(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "products"));
-    const unsubCampaigns = onSnapshot(query(collection(db, "campaigns")), (snap) => setCampaigns(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "campaigns"));
+    if (!enterpriseId) return;
+
+    const unsubBranches = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snap) => setBranches(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "branches"));
+    const unsubGroups = onSnapshot(query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId)), (snap) => setGroups(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "customer_groups"));
+    const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)), (snap) => setProducts(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "products"));
+    const unsubCampaigns = onSnapshot(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId)), (snap) => setCampaigns(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "campaigns"));
     
-    const unsubSettings = onSnapshot(doc(db, "settings", "loyalty"), (docSnap) => {
+    const unsubSettings = onSnapshot(doc(db, "loyalty_settings", enterpriseId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         setRewardLogic({
@@ -73,7 +79,7 @@ export default function Loyalty() {
     });
 
     return () => { unsubBranches(); unsubGroups(); unsubProducts(); unsubCampaigns(); unsubSettings(); };
-  }, []);
+  }, [enterpriseId]);
 
   const handleOpenDialog = (type: "Standard" | "Action") => {
     setCampaignCreationType(type);
@@ -119,7 +125,8 @@ export default function Loyalty() {
         target_products: formData.selected_products,
         target_customers: formData.target_customers,
         status: "ACTIVE",
-        created_at: serverTimestamp()
+        created_at: serverTimestamp(),
+        enterprise_id: enterpriseId
       };
       await addDoc(collection(db, "campaigns"), payload);
       toast.success("Campaign created successfully!");
@@ -138,7 +145,8 @@ export default function Loyalty() {
     if (isSavingLogic) return;
     setIsSavingLogic(true);
     try {
-      await setDoc(doc(db, "settings", "loyalty"), rewardLogic, { merge: true });
+      if (!enterpriseId) return;
+      await setDoc(doc(db, "loyalty_settings", enterpriseId), rewardLogic, { merge: true });
       toast.success("Reward logic updated successfully");
       setIsRewardLogicOpen(false);
     } catch (error: any) {

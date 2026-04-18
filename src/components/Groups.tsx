@@ -41,6 +41,8 @@ import {
 import { db, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "motion/react";
+import { useModules } from "@/context/ModuleContext";
+import { where } from "firebase/firestore";
 
 /* ─────────────────────────────────────────
    Types
@@ -161,6 +163,7 @@ interface BuilderProps {
 }
 
 function GroupBuilderDialog({ open, onClose }: BuilderProps) {
+  const { enterpriseId } = useModules();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState<"Dynamic" | "Manual">("Dynamic");
@@ -204,6 +207,7 @@ function GroupBuilderDialog({ open, onClose }: BuilderProps) {
         member_count: 0,
         last_synced: new Date().toISOString(),
         created_at: serverTimestamp(),
+        enterprise_id: enterpriseId
       });
       toast.success("Group created successfully!");
       handleClose();
@@ -392,6 +396,7 @@ function DeleteConfirmDialog({ group, onConfirm, onCancel, deleting }: DeleteDia
    Main Component
 ───────────────────────────────────────── */
 export default function Groups() {
+  const { enterpriseId } = useModules();
   const [groups, setGroups] = useState<GroupDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
@@ -400,8 +405,9 @@ export default function Groups() {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
+    if (!enterpriseId) return;
     const unsub = onSnapshot(
-      query(collection(db, "customer_groups"), orderBy("created_at", "desc")),
+      query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc")),
       (snapshot) => {
         setGroups(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as GroupDoc)));
         setLoading(false);
@@ -413,7 +419,7 @@ export default function Groups() {
       }
     );
     return () => unsub();
-  }, []);
+  }, [enterpriseId]);
 
   const handleDeleteConfirm = async () => {
     if (!groupToDelete || deleting) return;

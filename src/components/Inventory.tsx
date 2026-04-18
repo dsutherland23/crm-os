@@ -94,7 +94,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { AreaChart, Area, LineChart, Line, BarChart, Bar, Legend, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
 
 export default function Inventory() {
-  const { activeBranch, formatCurrency } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId } = useModules();
   const [activeTab, setActiveTab] = useState("stock");
   const [searchTerm, setSearchTerm] = useState("");
   const [isTransferring, setIsTransferring] = useState(false);
@@ -150,8 +150,10 @@ export default function Inventory() {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
 
   useEffect(() => {
+    if (!enterpriseId) return;
+
     const unsubProducts = onSnapshot(
-      collection(db, "products"),
+      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
         setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
@@ -160,25 +162,25 @@ export default function Inventory() {
     );
 
     const unsubInventory = onSnapshot(
-      collection(db, "inventory"),
+      query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("inventory:", err)
     );
 
     const unsubBranches = onSnapshot(
-      collection(db, "branches"),
+      query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => setBranches(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("branches:", err)
     );
 
     const unsubMovements = onSnapshot(
-      query(collection(db, "inventory_movements"), orderBy("timestamp", "desc")),
+      query(collection(db, "inventory_movements"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc")),
       (snapshot) => setMovements(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("movements:", err)
     );
 
     const unsubSuppliers = onSnapshot(
-      collection(db, "suppliers"),
+      query(collection(db, "suppliers"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => setSuppliers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("suppliers:", err)
     );
@@ -190,7 +192,7 @@ export default function Inventory() {
       unsubMovements();
       unsubSuppliers();
     };
-  }, []);
+  }, [enterpriseId]);
 
   useEffect(() => {
     const handleAction = (e: any) => {
@@ -234,7 +236,8 @@ export default function Inventory() {
           reference: newPO.reference,
           notes: newPO.notes,
           timestamp: serverTimestamp(),
-          expectedDate: newPO.expectedDate
+          expectedDate: newPO.expectedDate,
+          enterprise_id: enterpriseId
         });
       });
 
@@ -336,7 +339,8 @@ export default function Inventory() {
         qty: transferData.qty,
         date: new Date().toISOString().split('T')[0],
         status: "PENDING",
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        enterprise_id: enterpriseId
       });
       toast.success("Stock transfer initiated successfully");
       setIsTransferDialogOpen(false);
@@ -360,7 +364,7 @@ export default function Inventory() {
     if (isSavingSupplier) return;
     setIsSavingSupplier(true);
     try {
-      await addDoc(collection(db, "suppliers"), { ...newSupplier, createdAt: serverTimestamp() });
+      await addDoc(collection(db, "suppliers"), { ...newSupplier, enterprise_id: enterpriseId, createdAt: serverTimestamp() });
       setIsSupplierDialogOpen(false);
       setNewSupplier({ name: "", contact: "", email: "", phone: "", status: "ACTIVE" });
       toast.success("Supplier added successfully!");
@@ -406,7 +410,7 @@ export default function Inventory() {
           if (toInventoryItem) {
             await updateDoc(doc(db, "inventory", toInventoryItem.id), { stock: toInventoryItem.stock + movement.qty });
           } else {
-             await addDoc(collection(db, "inventory"), { product_id: product.id, branch_id: toBranch.id, stock: movement.qty });
+             await addDoc(collection(db, "inventory"), { product_id: product.id, branch_id: toBranch.id, stock: movement.qty, enterprise_id: enterpriseId });
           }
         } else if (movement.type === "PURCHASE") {
            // Purchase order only goes to the destination branch
@@ -593,7 +597,8 @@ export default function Inventory() {
         await addDoc(collection(db, "inventory"), {
           product_id: selectedProduct.id,
           branch_id: updateStockData.branch_id,
-          stock: newStock
+          stock: newStock,
+          enterprise_id: enterpriseId
         });
       }
 
@@ -605,7 +610,8 @@ export default function Inventory() {
         qty: updateStockData.qty,
         date: new Date().toISOString().split('T')[0],
         status: "COMPLETED",
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        enterprise_id: enterpriseId
       });
 
       toast.success("Stock updated successfully.");
@@ -706,13 +712,15 @@ export default function Inventory() {
           min_stock_level: productForm.minStock,
           image_url: productForm.image_url,
           status: "ACTIVE",
-          createdAt: serverTimestamp()
+          createdAt: serverTimestamp(),
+          enterprise_id: enterpriseId
         });
         // Add initial inventory
         await addDoc(collection(db, "inventory"), {
           product_id: docRef.id,
           branch_id: activeBranch === "all" ? (branches[0]?.id || "main") : activeBranch,
-          stock: 0
+          stock: 0,
+          enterprise_id: enterpriseId
         });
         toast.success("Product created successfully!");
       }

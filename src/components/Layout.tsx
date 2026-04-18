@@ -121,7 +121,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                 )}
               </div>
               <div className="flex-1 min-w-0">
-                <h1 className="text-base font-bold text-white tracking-tight font-display truncate">{branding.name || 'CRM OS'}</h1>
+                <h1 className="text-base font-bold text-white tracking-tight font-display truncate">{branding.name || 'Orivo CRM'}</h1>
                 <p className="text-[9px] text-zinc-500 uppercase tracking-[0.2em] font-bold">Enterprise Suite</p>
               </div>
             </div>
@@ -216,7 +216,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
 }
 
 export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void, setActiveTab?: (tab: string) => void }) {
-  const { activeBranch, setActiveBranch, hasActiveTransaction, currency, setCurrency, formatCurrency } = useModules();
+  const { activeBranch, setActiveBranch, hasActiveTransaction, currency, setCurrency, formatCurrency, enterpriseId } = useModules();
   const [branches, setBranches] = useState<any[]>([]);
   const [pendingBranchTarget, setPendingBranchTarget] = useState<string | null>(null);
 
@@ -224,11 +224,12 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
   const [detectedCurrency, setDetectedCurrency] = useState<string | null>(null);
 
   useEffect(() => {
-    const unsubBranches = onSnapshot(collection(db, "branches"), (snapshot) => {
+    if (!enterpriseId) return;
+    const unsubBranches = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setBranches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
     return () => unsubBranches();
-  }, []);
+  }, [enterpriseId]);
 
   useEffect(() => {
     // Check if we already prompted the user

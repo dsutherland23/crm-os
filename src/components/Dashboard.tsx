@@ -232,7 +232,7 @@ const CustomChartTooltip = ({ active, payload, label, formatCurrency }: any) => 
 // MAIN DASHBOARD COMPONENT
 // ─────────────────────────────────────────────────────────────
 export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: string) => void }) {
-  const { activeBranch, formatCurrency } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId } = useModules();
 
   // ── State ──────────────────────────────────────────────────
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -263,15 +263,17 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     subscriptionRef.current.forEach((u) => u());
     subscriptionRef.current = [];
 
+    if (!enterpriseId) return;
+
     setLoadingMap({ transactions: true, customers: true, inventory: true, logs: true });
     setErrorMap({ transactions: null, customers: null, inventory: null, logs: null });
 
     // 1. Transactions
     const txQuery =
-      activeBranch === "all"
-        ? query(collection(db, "transactions"), orderBy("timestamp", "desc"), limit(100))
+        ? query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(100))
         : query(
             collection(db, "transactions"),
+            where("enterprise_id", "==", enterpriseId),
             where("branch_id", "==", activeBranch),
             orderBy("timestamp", "desc"),
             limit(100)
@@ -292,7 +294,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
     // 2. Customers
     const unsubCustomers = onSnapshot(
-      collection(db, "customers"),
+      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId)),
       (snap) => {
         setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setLoadingMap((p) => ({ ...p, customers: false }));
@@ -307,8 +309,8 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     // 3. Inventory
     const invQuery =
       activeBranch === "all"
-        ? query(collection(db, "inventory"))
-        : query(collection(db, "inventory"), where("branch_id", "==", activeBranch));
+        ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId))
+        : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch));
 
     const unsubInv = onSnapshot(
       invQuery,
@@ -325,7 +327,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
     // 4. Audit Logs
     const unsubLogs = onSnapshot(
-      query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(5)),
+      query(collection(db, "audit_logs"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(5)),
       (snap) => {
         setAuditLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setLoadingMap((p) => ({ ...p, logs: false }));
@@ -338,7 +340,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     );
 
     subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs];
-  }, [activeBranch]);
+  }, [activeBranch, enterpriseId]);
 
   useEffect(() => {
     subscribe();

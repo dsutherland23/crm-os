@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Bell, Check, Info, AlertTriangle, AlertCircle, CheckCircle2, X } from "lucide-react";
-import { collection, onSnapshot, query, orderBy, limit, updateDoc, doc, writeBatch } from "@/lib/firebase";
+import { collection, onSnapshot, query, orderBy, limit, updateDoc, doc, writeBatch, where } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
+import { useModules } from "@/context/ModuleContext";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,16 +19,18 @@ export interface SystemNotification {
 }
 
 export default function NotificationsMenu() {
+  const { enterpriseId } = useModules();
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
-    const q = query(collection(db, "notifications"), orderBy("createdAt", "desc"), limit(50));
+    if (!enterpriseId) return;
+    const q = query(collection(db, "notifications"), where("enterprise_id", "==", enterpriseId), orderBy("createdAt", "desc"), limit(50));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setNotifications(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as SystemNotification)));
     });
     return () => unsubscribe();
-  }, []);
+  }, [enterpriseId]);
 
   const unreadCount = notifications.filter(n => !n.isRead).length;
 

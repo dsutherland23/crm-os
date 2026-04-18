@@ -8,12 +8,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { collection, onSnapshot, addDoc, doc, setDoc, deleteDoc, serverTimestamp } from "@/lib/firebase";
+import { collection, onSnapshot, addDoc, doc, setDoc, deleteDoc, serverTimestamp, query, where } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
 
 export default function CommissionPartners() {
-  const { formatCurrency } = useModules();
+  const { formatCurrency, enterpriseId } = useModules();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [selectedAdmin, setSelectedAdmin] = useState<any>(null);
   const [pinEntry, setPinEntry] = useState("");
@@ -34,13 +34,15 @@ export default function CommissionPartners() {
   ];
 
   useEffect(() => {
-    const unsubSettings = onSnapshot(doc(db, "settings", "global"), (docSnapshot) => {
+    if (!enterpriseId) return;
+
+    const unsubSettings = onSnapshot(doc(db, "enterprise_settings", enterpriseId), (docSnapshot) => {
       if (docSnapshot.exists() && docSnapshot.data().commissionPin) {
         setAdminPin(docSnapshot.data().commissionPin);
       }
     });
 
-    const unsubPartners = onSnapshot(collection(db, "commission_partners"), (snapshot) => {
+    const unsubPartners = onSnapshot(query(collection(db, "commission_partners"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setPartners(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
@@ -48,7 +50,7 @@ export default function CommissionPartners() {
       unsubSettings();
       unsubPartners();
     };
-  }, []);
+  }, [enterpriseId]);
 
   const handlePinInput = (num: string) => {
     if (pinEntry.length < 4) {
@@ -84,7 +86,8 @@ export default function CommissionPartners() {
         ...newPartner,
         status: "ACTIVE",
         totalEarned: 0,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        enterprise_id: enterpriseId
       });
       toast.success("Partner created successfully!");
       setIsAddPartnerOpen(false);

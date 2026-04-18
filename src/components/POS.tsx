@@ -69,7 +69,7 @@ interface CartDiscount {
 }
 
 export default function POS() {
-  const { activeBranch, setHasActiveTransaction, formatCurrency, branding } = useModules();
+  const { activeBranch, hasActiveTransaction, setHasActiveTransaction, formatCurrency, enterpriseId, branding } = useModules();
   const [cart, setCart] = useState<{ product: any; quantity: number }[]>([]);
   
   useEffect(() => {
@@ -133,7 +133,7 @@ export default function POS() {
     meetingDuration: 60,
     gracePeriod: 10
   });
-  const [globalTaxRate, setGlobalTaxRate] = useState(8.0); // Fallback to 8%
+  const [globalTaxRate, setGlobalTaxRate] = useState(15.0); // Fallback to 15%
 
   useEffect(() => {
     const unsubProducts = onSnapshot(
@@ -432,7 +432,7 @@ export default function POS() {
 
   const taxableAmount = Math.max(0, subtotal - discountAmount);
   // Ensure we safely handle dividing by 100 for the percentage
-  const calculatedTaxRate = (globalTaxRate || 8) / 100;
+  const calculatedTaxRate = (globalTaxRate || 15) / 100;
   const tax = taxableAmount * calculatedTaxRate;
   const total = taxableAmount + tax;
 
@@ -466,7 +466,8 @@ export default function POS() {
         status: "COMPLETED",
         cashier_id: selectedAdmin?.id || null,
         cashier_name: selectedAdmin?.name || null,
-        timestamp: serverTimestamp()
+        timestamp: serverTimestamp(),
+        enterprise_id: enterpriseId
       });
 
       // 2. Deduct inventory stock for each item
@@ -496,7 +497,8 @@ export default function POS() {
         action: "Sale Completed",
         details: `${cart.length} item(s) sold for ${formatCurrency(total)} via ${paymentMethod}`,
         timestamp: serverTimestamp(),
-        user: selectedAdmin?.name || "Cashier"
+        user: selectedAdmin?.name || "Cashier",
+        enterprise_id: enterpriseId
       });
 
       setLastTransaction({
@@ -573,7 +575,8 @@ export default function POS() {
                 staffName: selectedAdmin.name,
                 branchId: activeBranch,
                 startTime: new Date().toISOString(),
-                status: "ACTIVE"
+                status: "ACTIVE",
+                enterprise_id: enterpriseId
               });
               await addDoc(collection(db, "audit_logs"), {
                 action: "Shift Started",

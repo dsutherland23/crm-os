@@ -34,7 +34,8 @@ import {
   Twitter,
   UserCheck,
   Info,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Percent
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -79,7 +80,7 @@ import { toast } from "sonner";
 import { motion } from "motion/react";
 
 
-import { collection, onSnapshot, doc, setDoc, getDocs, writeBatch, addDoc, deleteDoc } from "@/lib/firebase";
+import { collection, onSnapshot, doc, setDoc, getDocs, writeBatch, addDoc, deleteDoc, query, where } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 
 import CommissionPartners from "./CommissionPartners";
@@ -163,6 +164,8 @@ export default function Settings() {
   const [breakDuration, setBreakDuration] = useState("15");
   const [lunchDuration, setLunchDuration] = useState("30");
   const [gracePeriod, setGracePeriod] = useState("10");
+  const [taxRate, setTaxRate] = useState("15");
+
 
   const handleGenerateKey = () => {
     const newKey = "sk_test_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -180,7 +183,7 @@ export default function Settings() {
       return;
     }
     try {
-      await setDoc(doc(db, "settings", "global"), { commissionPin: newPinInput }, { merge: true });
+      await setDoc(doc(db, "enterprise_settings", enterpriseId), { commissionPin: newPinInput }, { merge: true });
       setCommissionPin(newPinInput);
       setIsCommissionPinDialogOpen(false);
       setCurrentPinInput("");
@@ -211,7 +214,8 @@ export default function Settings() {
 
       const roleData = {
         ...newRole,
-        permissions: tierMap[newRole.tier as string] || tierMap.tier1
+        permissions: tierMap[newRole.tier as string] || tierMap.tier1,
+        enterprise_id: enterpriseId
       };
       await addDoc(collection(db, "roles"), roleData);
       setIsRoleDialogOpen(false);
@@ -229,7 +233,7 @@ export default function Settings() {
     }
     try {
       const { id, ...data } = editingRole;
-      await setDoc(doc(db, "roles", id), data, { merge: true });
+      await setDoc(doc(db, "roles", id), { ...data, enterprise_id: enterpriseId }, { merge: true });
       setIsEditRoleDialogOpen(false);
       setEditingRole(null);
       toast.success("Role updated successfully!");
@@ -253,7 +257,7 @@ export default function Settings() {
       return;
     }
     try {
-      await addDoc(collection(db, "branches"), newBranch);
+      await addDoc(collection(db, "branches"), { ...newBranch, enterprise_id: enterpriseId });
       setIsBranchDialogOpen(false);
       setNewBranch({ name: "", address: "", parish: "", contactInfo: "", manager: "", status: "ACTIVE" });
       toast.success("Branch added successfully!");
@@ -269,7 +273,7 @@ export default function Settings() {
     }
     try {
       const { id, ...data } = editingBranch;
-      await setDoc(doc(db, "branches", id), data, { merge: true });
+      await setDoc(doc(db, "branches", id), { ...data, enterprise_id: enterpriseId }, { merge: true });
       setIsEditBranchDialogOpen(false);
       setEditingBranch(null);
       toast.success("Branch updated successfully!");
@@ -288,15 +292,15 @@ export default function Settings() {
   };
 
   useEffect(() => {
-    const unsubBranches = onSnapshot(collection(db, "branches"), (snapshot) => {
+    if (!enterpriseId) return;
+
+    const unsubBranches = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setBranches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => {
       console.error("Error fetching branches:", error);
     });
 
-    // Roles are usually fixed or managed in a separate collection
-    // For now, we'll just use the mock roles or fetch from a 'roles' collection if it exists
-    const unsubRoles = onSnapshot(collection(db, "roles"), (snapshot) => {
+    const unsubRoles = onSnapshot(query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       if (snapshot.empty) {
         setRoles([
           { id: "R1", name: "Administrator", users: 2, access: "Full System", color: "text-blue-600 bg-blue-50" },
@@ -310,7 +314,7 @@ export default function Settings() {
       console.error("Error fetching roles:", error);
     });
 
-    const unsubSettings = onSnapshot(doc(db, "settings", "global"), (docSnapshot) => {
+    const unsubSettings = onSnapshot(doc(db, "enterprise_settings", enterpriseId), (docSnapshot) => {
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
         if (data.enterpriseName) setEnterpriseName(data.enterpriseName);
@@ -325,6 +329,9 @@ export default function Settings() {
           setTopSpenderThreshold(Number(data.topSpenderThreshold));
           setTopSpenderInputValue(data.topSpenderThreshold.toString());
         }
+        if (data.taxRate !== undefined) {
+          setTaxRate(data.taxRate.toString());
+        }
       }
     }, (error) => {
       console.error("Error fetching settings:", error);
@@ -335,7 +342,7 @@ export default function Settings() {
       unsubRoles();
       unsubSettings();
     };
-  }, []);
+  }, [enterpriseId]);
 
   const [topSpenderInputValue, setTopSpenderInputValue] = useState(topSpenderThreshold.toString());
 
@@ -352,7 +359,7 @@ export default function Settings() {
 
     try {
       setTopSpenderThreshold(thresholdNumber);
-      await setDoc(doc(db, "settings", "global"), {
+      await setDoc(doc(db, "enterprise_settings", enterpriseId), {
         enterpriseName,
         currency,
         theme,
@@ -361,8 +368,11 @@ export default function Settings() {
         autoCloseEnabled,
         breakDuration,
         lunchDuration,
-        gracePeriod
+        gracePeriod,
+        taxRate: parseFloat(taxRate) || 15,
+        enterprise_id: enterpriseId
       }, { merge: true });
+
       toast.success("Global settings saved successfully!");
     } catch (error: any) {
       toast.error("Failed to save settings: " + error.message);
@@ -376,24 +386,24 @@ export default function Settings() {
       
       // Seed Branches
       const branchData = [
-        { id: "main", name: "Main Branch", location: "Downtown", status: "ACTIVE", manager: "Alice Johnson" },
-        { id: "north", name: "North Branch", location: "Uptown", status: "ACTIVE", manager: "Bob Smith" },
-        { id: "south", name: "South Branch", location: "Southside", status: "ACTIVE", manager: "Charlie Davis" },
+        { id: `${enterpriseId}-main`, name: "Main Branch", location: "Downtown", status: "ACTIVE", manager: "Alice Johnson", enterprise_id: enterpriseId },
+        { id: `${enterpriseId}-north`, name: "North Branch", location: "Uptown", status: "ACTIVE", manager: "Bob Smith", enterprise_id: enterpriseId },
+        { id: `${enterpriseId}-south`, name: "South Branch", location: "Southside", status: "ACTIVE", manager: "Charlie Davis", enterprise_id: enterpriseId },
       ];
       branchData.forEach(b => batch.set(doc(db, "branches", b.id), b));
 
       // Seed Products
       const productData = [
-        { id: "P-101", name: "iPhone 15 Pro", sku: "IPH-15P-256", barcode: "123456", retail_price: 999, wholesale_price: 850, category: "Phones", image_url: "https://picsum.photos/seed/iphone/200", min_stock_level: 10 },
-        { id: "P-102", name: "MacBook Air M3", sku: "MAC-M3-AIR", barcode: "234567", retail_price: 1099, wholesale_price: 900, category: "Laptops", image_url: "https://picsum.photos/seed/macbook/200", min_stock_level: 15 },
-        { id: "P-103", name: "AirPods Pro", sku: "AIR-PRO-2", barcode: "345678", retail_price: 249, wholesale_price: 180, category: "Accessories", image_url: "https://picsum.photos/seed/airpods/200", min_stock_level: 20 },
+        { id: `P-${enterpriseId}-101`, name: "iPhone 15 Pro", sku: "IPH-15P-256", barcode: "123456", retail_price: 999, wholesale_price: 850, category: "Phones", image_url: "https://picsum.photos/seed/iphone/200", min_stock_level: 10, enterprise_id: enterpriseId },
+        { id: `P-${enterpriseId}-102`, name: "MacBook Air M3", sku: "MAC-M3-AIR", barcode: "234567", retail_price: 1099, wholesale_price: 900, category: "Laptops", image_url: "https://picsum.photos/seed/macbook/200", min_stock_level: 15, enterprise_id: enterpriseId },
+        { id: `P-${enterpriseId}-103`, name: "AirPods Pro", sku: "AIR-PRO-2", barcode: "345678", retail_price: 249, wholesale_price: 180, category: "Accessories", image_url: "https://picsum.photos/seed/airpods/200", min_stock_level: 20, enterprise_id: enterpriseId },
       ];
       productData.forEach(p => batch.set(doc(db, "products", p.id), p));
 
       // Seed Customers
       const customerData = [
-        { id: "C-001", name: "Alice Johnson", email: "alice@example.com", phone: "+1 234 567 890", segment: "VIP", balance: 0, loyalty_points: 450, tags: ["Tech", "Early Adopter"] },
-        { id: "C-002", name: "Bob Smith", email: "bob@smith.com", phone: "+1 987 654 321", segment: "RETAIL", balance: 45.50, loyalty_points: 120, tags: ["New"] },
+        { id: `C-${enterpriseId}-001`, name: "Alice Johnson", email: "alice@example.com", phone: "+1 234 567 890", segment: "VIP", balance: 0, loyalty_points: 450, tags: ["Tech", "Early Adopter"], enterprise_id: enterpriseId },
+        { id: `C-${enterpriseId}-002`, name: "Bob Smith", email: "bob@smith.com", phone: "+1 987 654 321", segment: "RETAIL", balance: 45.50, loyalty_points: 120, tags: ["New"], enterprise_id: enterpriseId },
       ];
       customerData.forEach(c => batch.set(doc(db, "customers", c.id), c));
 
@@ -1221,6 +1231,20 @@ export default function Settings() {
                       <SelectItem value="BSD">BSD - Bahamian Dollar (B$)</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Standard Sales Tax (%)</Label>
+                  <div className="relative">
+                    <Percent className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                    <Input 
+                      type="number"
+                      step="0.01"
+                      value={taxRate} 
+                      onChange={(e) => setTaxRate(e.target.value)}
+                      className="pl-11 rounded-xl border-zinc-200 h-12 font-bold" 
+                      placeholder="e.g. 15"
+                    />
+                  </div>
                 </div>
               </div>
 

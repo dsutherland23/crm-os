@@ -155,6 +155,7 @@ function exportToCSV(logs: LogEntry[]) {
    Main Component
 ───────────────────────────────────────── */
 export default function AuditLogs({ variant = "full" }: { variant?: "full" | "minimal" }) {
+  const { enterpriseId } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [severityFilter, setSeverityFilter] = useState("all");
@@ -166,9 +167,15 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const subscribe = useCallback(() => {
+    if (!enterpriseId) return;
     setLoading(true);
     setFetchError(null);
-    const q = query(collection(db, "audit_logs"), orderBy("timestamp", "desc"), limit(100));
+    const q = query(
+      collection(db, "audit_logs"),
+      where("enterprise_id", "==", enterpriseId),
+      orderBy("timestamp", "desc"),
+      limit(100)
+    );
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {

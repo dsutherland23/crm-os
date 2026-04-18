@@ -16,7 +16,7 @@ import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
 
 export default function StaffManager() {
-  const { formatCurrency } = useModules();
+  const { formatCurrency, enterpriseId } = useModules();
   const [staff, setStaff] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
@@ -24,15 +24,17 @@ export default function StaffManager() {
   const [newUser, setNewUser] = useState({ name: "", role: "Cashier", pin: "" });
 
   useEffect(() => {
-    const unsubStaff = onSnapshot(collection(db, "staff"), (snapshot) => {
+    if (!enterpriseId) return;
+
+    const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    const unsubSessions = onSnapshot(query(collection(db, "pos_sessions"), orderBy("startTime", "desc")), (snapshot) => {
+    const unsubSessions = onSnapshot(query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), orderBy("startTime", "desc")), (snapshot) => {
       setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    const unsubRoles = onSnapshot(collection(db, "roles"), (snapshot) => {
+    const unsubRoles = onSnapshot(query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       const rolesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRoles(rolesList);
       if (rolesList.length > 0 && !newUser.role) {
@@ -45,7 +47,7 @@ export default function StaffManager() {
       unsubSessions();
       unsubRoles();
     };
-  }, []);
+  }, [enterpriseId]);
 
   const handleCreateStaff = async () => {
     if (!newUser.name || newUser.pin.length !== 4) {
@@ -57,15 +59,16 @@ export default function StaffManager() {
       await setDoc(doc(db, "staff", id), {
         ...newUser,
         status: "ACTIVE",
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        enterprise_id: enterpriseId
       });
       
       // Log to audit logs and notifications
-      const logData = {
         action: "Staff Access Created",
         details: `Created new ${newUser.role} access for ${newUser.name}`,
         timestamp: new Date().toISOString(),
         user: "Admin",
+        enterprise_id: enterpriseId
       };
       await addDoc(collection(db, "audit_logs"), logData);
       
@@ -74,7 +77,8 @@ export default function StaffManager() {
         message: `${newUser.name} has been provisioned as a ${newUser.role}.`,
         type: "success",
         isRead: false,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        enterprise_id: enterpriseId
       });
 
       setIsAddUserOpen(false);
@@ -107,6 +111,7 @@ export default function StaffManager() {
         details: `Updated access for ${staffName} to ${newStatus}`,
         timestamp: new Date().toISOString(),
         user: "Admin",
+        enterprise_id: enterpriseId
       });
 
       toast.success(`Staff profile ${newStatus.toLowerCase()}`);
