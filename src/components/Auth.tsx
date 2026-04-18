@@ -28,6 +28,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
+import { CpuArchitecture } from "@/components/ui/cpu-architecture";
 
 // ─── Password strength ──────────────────────────────────────────────
 function getPasswordStrength(pwd: string): { score: number; label: string; color: string } {
@@ -370,15 +371,20 @@ export default function Auth() {
           </div>
 
           {/* Header */}
-          <div className="space-y-1.5">
-            <h1 className="text-3xl font-black text-zinc-900 tracking-tight">
-              {isLogin ? "Welcome back" : STEP_META[step - 1].label}
-            </h1>
-            <p className="text-zinc-500 text-sm">
-              {isLogin
-                ? "Sign in to access your enterprise dashboard."
-                : STEP_META[step - 1].desc}
-            </p>
+          <div className="space-y-8 text-center pb-8">
+            <div className="w-full flex items-center justify-center -mt-8">
+               <CpuArchitecture width="420" height="210" className="text-zinc-400/50 dark:text-zinc-700/50 opacity-100" />
+            </div>
+            <div className="space-y-3 relative z-10">
+              <h1 className="text-4xl font-black text-zinc-900 tracking-tight leading-none">
+                {isLogin ? "Welcome back" : STEP_META[step - 1].label}
+              </h1>
+              <p className="text-zinc-500 text-sm font-medium">
+                {isLogin
+                  ? "Sign in to access your enterprise dashboard."
+                  : STEP_META[step - 1].desc}
+              </p>
+            </div>
           </div>
 
           {/* Signup step indicator */}
@@ -698,20 +704,33 @@ export default function Auth() {
           </div>
 
           {/* Trust footer */}
-          <div className="flex items-center justify-center gap-4 text-[10px] font-bold text-zinc-400 uppercase tracking-wider pt-2">
-            <span className="flex items-center gap-1"><Shield className="w-3 h-3" /> SOC 2</span>
-            <span>·</span>
-            <span>GDPR</span>
-            <span>·</span>
-            <span>256-bit AES</span>
-            <span>·</span>
-            <button
-              type="button"
-              onClick={() => import("@/lib/auth-mock").then(m => m.setMockUser())}
-              className="text-zinc-300 hover:text-zinc-500 transition-colors"
-            >
-              Dev Bypass
-            </button>
+          <div className="space-y-4 pt-4">
+            <div className="flex items-center justify-center gap-4 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+              <span className="flex items-center gap-1"><Shield className="w-3 h-3" /> SOC 2</span>
+              <span>·</span>
+              <span>GDPR</span>
+              <span>·</span>
+              <span>256-bit AES</span>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={() => import("@/lib/auth-mock").then(m => m.setMockUser())}
+                className="text-zinc-300 hover:text-zinc-500 transition-colors"
+              >
+                Dev Bypass
+              </button>
+            </div>
+            
+            <div className="text-center">
+              <a 
+                href="https://www.instagram.com/socialkon10_cre8tive/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-[10px] font-bold text-zinc-300 hover:text-zinc-500 transition-colors uppercase tracking-[0.15em]"
+              >
+                created by <span className="text-zinc-400">Socialkon10 Marketing</span>
+              </a>
+            </div>
           </div>
         </div>
       </div>
