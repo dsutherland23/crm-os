@@ -113,30 +113,30 @@ service cloud.firestore {
     }
 
     // ─── Admin Users Registry ─────────────────────────────────────────
-    // ONLY super_admin can read or write this collection.
-    // No tenant user should ever see this.
+    // Only super_admins can manage the admin list.
+    // Admins can read the list to verify peers.
     match /admin_users/{adminId} {
-      allow read, write: if hasAdminClaim() &&
-        request.auth.token.role == 'super_admin';
+      allow read: if isAdmin();
+      allow read: if isOwner(adminId);
+      allow write: if hasAdminClaim() && request.auth.token.role == 'super_admin';
+      // Fallback: if claims aren't yet set but the user is in the collection as super_admin
+      allow write: if get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin';
     }
 
     // ─── Admin Audit Logs ─────────────────────────────────────────────
-    // IMMUTABLE: Tenants cannot read. Admins can read. 
-    // Client-side creates are allowed (with own uid as admin_uid).
-    // Nobody can update or delete.
+    // Immutable trail. Only admins can read. Only admins can create.
     match /admin_audit_logs/{logId} {
       allow read: if isAdmin();
-      allow create: if isAdmin() &&
-        request.resource.data.admin_uid == request.auth.uid;
-      allow update, delete: if false; // IMMUTABLE
+      allow create: if isAdmin();
+      allow update, delete: if false; 
     }
 
     // ─── Admin Meta / Feature Flags ──────────────────────────────────
     // Only super_admin can modify. Admins can read.
     match /admin_meta/{docId} {
       allow read: if isAdmin();
-      allow write: if hasAdminClaim() &&
-        request.auth.token.role == 'super_admin';
+      allow write: if hasAdminClaim() && request.auth.token.role == 'super_admin';
+      allow write: if get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin';
     }
 
     // ─── Tenant-Scoped Collections ────────────────────────────────────
