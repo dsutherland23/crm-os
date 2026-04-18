@@ -92,6 +92,8 @@ export default function Analytics() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
+  const [staff, setStaff] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -108,10 +110,19 @@ export default function Analytics() {
       setLoading(false);
     });
 
+    const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    const unsubSessions = onSnapshot(query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubTx();
       unsubProducts();
       unsubBranches();
+      unsubStaff();
+      unsubSessions();
     };
   }, [enterpriseId]);
 
@@ -349,6 +360,63 @@ export default function Analytics() {
             </div>
           </Card>
         </div>
+
+        {/* ── STAFF PERFORMANCE LEADERBOARD (NEW 2026 SECTION) ── */}
+        <Card className="card-modern overflow-hidden">
+          <CardHeader className="border-b border-zinc-100 bg-zinc-50/30 py-5 px-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg font-bold text-zinc-900">Enterprise Talent Leaderboard</CardTitle>
+                <CardDescription>Top revenue contributors across all locations.</CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                 <Badge className="bg-blue-600 text-white border-0 font-bold uppercase tracking-widest text-[9px] px-3">PERFORMANCE PEAK</Badge>
+              </div>
+            </div>
+          </CardHeader>
+          <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-zinc-100">
+             {staff.length === 0 ? (
+               <div className="col-span-3 p-12 text-center text-zinc-400 font-medium italic">
+                  Compiling talent performance data...
+               </div>
+             ) : staff
+                 .map(member => ({
+                   ...member,
+                   revenue: sessions?.filter(s => s.staffId === member.id).reduce((acc, s) => acc + (s.totalSales || 0), 0) || 0
+                 }))
+                 .sort((a, b) => b.revenue - a.revenue)
+                 .slice(0, 3)
+                 .map((member, index) => {
+                
+                const rankColor = index === 0 ? "text-amber-500" : index === 1 ? "text-zinc-400" : "text-orange-400";
+                const maxRev = sessions?.reduce((max, s) => Math.max(max, s.totalSales || 0), 0) || 1000;
+                
+                return (
+                  <div key={member.id} className="p-8 flex flex-col items-center text-center hover:bg-zinc-50 transition-colors group">
+                     <div className="relative mb-4">
+                        <div className="w-16 h-16 rounded-3xl bg-zinc-900 text-white flex items-center justify-center text-xl font-bold font-display shadow-2xl group-hover:scale-110 transition-transform">
+                           {member.name.substring(0,2).toUpperCase()}
+                        </div>
+                        <div className={cn("absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white shadow-xl flex items-center justify-center text-sm font-black border border-zinc-50", rankColor)}>
+                          {index + 1}
+                        </div>
+                     </div>
+                     <h4 className="font-bold text-lg text-zinc-900 mb-1">{member.name}</h4>
+                     <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mb-4">{member.role}</p>
+                     
+                     <div className="flex flex-col gap-1">
+                        <span className="text-2xl font-black text-blue-600">{formatCurrency(member.revenue)}</span>
+                        <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Revenue Generated</span>
+                     </div>
+                     
+                     <div className="mt-6 w-full h-1 bg-zinc-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-600 rounded-full" style={{ width: index === 0 ? '100%' : index === 1 ? '75%' : '50%' }} />
+                     </div>
+                  </div>
+                );
+             })}
+          </div>
+        </Card>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pb-10">
           {/* Main Performance Chart */}

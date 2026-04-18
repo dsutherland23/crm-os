@@ -42,7 +42,11 @@ const listeners: Record<string, Set<(snapshot: any) => void>> = {};
 function notifyListeners(colName: string) {
   if (listeners[colName]) {
     const data = demoStore[colName] || [];
-    const snapshot = { docs: data.map(d => ({ id: d.id || "mock-id", data: () => d })) };
+    const snapshot = { docs: data.map(d => ({ 
+      id: d.id || "mock-id", 
+      ref: { id: d.id || "mock-id", path: `${colName}/${d.id || 'mock-id'}` },
+      data: () => d 
+    })) };
     listeners[colName].forEach(cb => cb(snapshot));
   }
 }
@@ -57,7 +61,11 @@ export function mockOnSnapshot(query: any, callback: (snapshot: any) => void): (
   // Initial call
   const data = demoStore[colName] || [];
   setTimeout(() => {
-    callback({ docs: data.map(d => ({ id: d.id || "mock-id", data: () => d })) });
+    callback({ docs: data.map(d => ({ 
+      id: d.id || "mock-id", 
+      ref: { id: d.id || "mock-id", path: `${colName}/${d.id || 'mock-id'}` },
+      data: () => d 
+    })) });
   }, 10);
 
   return () => {
@@ -70,7 +78,11 @@ export async function mockGetDocs(query: any) {
   const data = (colName && demoStore[colName]) ? demoStore[colName] : [];
   return {
     empty: data.length === 0,
-    docs: data.map(d => ({ id: d.id || "mock-id", data: () => d }))
+    docs: data.map(d => ({ 
+      id: d.id || "mock-id", 
+      ref: { id: d.id || "mock-id", path: `${colName}/${d.id || 'mock-id'}` },
+      data: () => d 
+    }))
   };
 }
 

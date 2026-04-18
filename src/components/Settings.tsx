@@ -139,6 +139,7 @@ export default function Settings() {
   const [isEditBranchDialogOpen, setIsEditBranchDialogOpen] = useState(false);
   const [newBranch, setNewBranch] = useState({ name: "", address: "", parish: "", contactInfo: "", manager: "", status: "ACTIVE" });
   const [editingBranch, setEditingBranch] = useState<any>(null);
+  const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
   const [isEditRoleDialogOpen, setIsEditRoleDialogOpen] = useState(false);
   const [newRole, setNewRole] = useState({ name: "", tier: "tier1", users: 0, permissions: {} });
@@ -218,7 +219,7 @@ export default function Settings() {
         
         if (!snapshot.empty) {
           const batch = writeBatch(db);
-          snapshot.docs.forEach((doc) => batch.delete(doc.ref));
+          snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
           await batch.commit();
         }
       }
@@ -296,8 +297,17 @@ export default function Settings() {
       toast.error("Please fill in branch name, address, and parish.");
       return;
     }
+
+    // Duplicate guard: check if a branch with the same name already exists
+    const normalizedName = newBranch.name.trim().toLowerCase();
+    const duplicate = branches.find(b => b.name?.trim().toLowerCase() === normalizedName);
+    if (duplicate) {
+      toast.error(`A branch named "${newBranch.name}" already exists. Please use a unique name.`);
+      return;
+    }
+
     try {
-      await addDoc(collection(db, "branches"), { ...newBranch, enterprise_id: enterpriseId });
+      await addDoc(collection(db, "branches"), { ...newBranch, name: newBranch.name.trim(), enterprise_id: enterpriseId });
       setIsBranchDialogOpen(false);
       setNewBranch({ name: "", address: "", parish: "", contactInfo: "", manager: "", status: "ACTIVE" });
       toast.success("Branch added successfully!");
@@ -326,8 +336,40 @@ export default function Settings() {
     try {
       await deleteDoc(doc(db, "branches", id));
       toast.success("Branch deleted successfully!");
-    } catch (error: any) {
-      toast.error("Failed to delete branch: " + error.message);
+    } catch (err: any) {
+      toast.error("Failed to delete branch: " + err.message);
+    }
+  };
+
+  const handleBatchDeleteBranches = async () => {
+    if (selectedBranches.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedBranches.length} branches?`)) return;
+    
+    try {
+      const batch = writeBatch(db);
+      selectedBranches.forEach(id => {
+        batch.delete(doc(db, "branches", id));
+      });
+      await batch.commit();
+      setSelectedBranches([]);
+      toast.success(`Successfully deleted ${selectedBranches.length} branches.`);
+    } catch (err: any) {
+      toast.error("Failed to delete branches: " + err.message);
+    }
+  };
+
+  const handleBatchToggleStatus = async (newStatus: "ACTIVE" | "INACTIVE") => {
+    if (selectedBranches.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      selectedBranches.forEach(id => {
+        batch.update(doc(db, "branches", id), { status: newStatus });
+      });
+      await batch.commit();
+      setSelectedBranches([]);
+      toast.success(`Successfully updated ${selectedBranches.length} branches to ${newStatus}.`);
+    } catch (err: any) {
+      toast.error("Failed to update branches: " + err.message);
     }
   };
 
@@ -965,11 +1007,42 @@ export default function Settings() {
               </DialogContent>
             </Dialog>
           </div>
+          
+          {selectedBranches.length > 0 && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-zinc-900 text-white p-4 rounded-2xl flex items-center justify-between shadow-xl"
+            >
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-bold">{selectedBranches.length} Branches Selected</span>
+                <div className="h-4 w-[1px] bg-zinc-700" />
+                <Button variant="ghost" size="sm" className="h-8 text-xs font-bold text-zinc-400 hover:text-white" onClick={() => setSelectedBranches([])}>Deselect All</Button>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button variant="outline" size="sm" className="h-9 px-4 rounded-xl border-zinc-700 bg-zinc-800 text-white hover:bg-zinc-700 text-[10px] font-bold uppercase tracking-wider" onClick={() => handleBatchToggleStatus("ACTIVE")}>Set Active</Button>
+                <Button variant="outline" size="sm" className="h-9 px-4 rounded-xl border-zinc-700 bg-zinc-800 text-white hover:bg-zinc-700 text-[10px] font-bold uppercase tracking-wider" onClick={() => handleBatchToggleStatus("INACTIVE")}>Set Inactive</Button>
+                <Button variant="destructive" size="sm" className="h-9 px-4 rounded-xl text-[10px] font-bold uppercase tracking-wider" onClick={handleBatchDeleteBranches}>Delete Selected</Button>
+              </div>
+            </motion.div>
+          )}
+
           <Card className="card-modern overflow-hidden">
             <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                  <TableHead className="w-12 px-6">
+                    <input 
+                      type="checkbox" 
+                      className="rounded border-zinc-300"
+                      checked={branches.length > 0 && selectedBranches.length === branches.length}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedBranches(branches.map(b => b.id));
+                        else setSelectedBranches([]);
+                      }}
+                    />
+                  </TableHead>
                   <TableHead className="font-bold text-zinc-900 py-4 whitespace-nowrap">Branch Name</TableHead>
                   <TableHead className="font-bold text-zinc-900 py-4 whitespace-nowrap">Location</TableHead>
                   <TableHead className="font-bold text-zinc-900 py-4 whitespace-nowrap">Manager</TableHead>
@@ -987,7 +1060,18 @@ export default function Settings() {
                     </TableCell>
                   </TableRow>
                 ) : branches.map((b) => (
-                  <TableRow key={b.id} className="hover:bg-zinc-50/30 transition-colors border-b border-zinc-50">
+                  <TableRow key={b.id} className={cn("hover:bg-zinc-50/30 transition-colors border-b border-zinc-50", selectedBranches.includes(b.id) && "bg-blue-50/30")}>
+                    <TableCell className="px-6">
+                      <input 
+                        type="checkbox" 
+                        className="rounded border-zinc-300"
+                        checked={selectedBranches.includes(b.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedBranches([...selectedBranches, b.id]);
+                          else setSelectedBranches(selectedBranches.filter(id => id !== b.id));
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="py-4 font-bold text-zinc-900">
                       <div className="flex items-center gap-2">
                         <Building2 className="w-4 h-4 text-zinc-400" />

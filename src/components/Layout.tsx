@@ -22,7 +22,8 @@ import {
   Globe,
   MapPin,
   Check,
-  ChevronsUpDown
+  ChevronsUpDown,
+  ShieldCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -86,6 +87,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
     { id: "analytics", label: "Intelligence", icon: BarChart3, enabled: isModuleEnabled("analytics") },
     { id: "ai", label: "Copilot", icon: Sparkles, enabled: isModuleEnabled("ai") },
     { id: "audit", label: "Audit Logs", icon: History, enabled: isModuleEnabled("audit_logs") },
+    { id: "staff", label: "Staff", icon: ShieldCheck, enabled: true },
     { id: "settings", label: "System", icon: Settings, enabled: true },
   ].filter(item => item.enabled);
 

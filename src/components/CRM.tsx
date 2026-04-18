@@ -165,9 +165,56 @@ export default function CRM() {
     credit_limit: 0,
     birthday: "",
     segment: "No Group",
-    address: ""
+    address: "",
+    photo_url: ""
   });
   const [isSubmittingCustomer, setIsSubmittingCustomer] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error("Photo exceeds 10MB limit");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const img = new Image();
+        img.src = reader.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 400;
+          const MAX_HEIGHT = 400;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          setCustomerFormData({ ...customerFormData, photo_url: compressedDataUrl });
+          toast.success("Photo optimized and attached");
+        };
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleCreateCustomer = async () => {
     const fullName = customerFormData.customer_type === "Individual"
@@ -204,7 +251,7 @@ export default function CRM() {
         name: "", first_name: "", last_name: "", 
         customer_number: "", customer_type: "Individual",
         email: "", phone: "", other_emails: [], credit_limit: 0, birthday: "", 
-        segment: "No Group", address: "" 
+        segment: "No Group", address: "", photo_url: ""
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, "customers");
@@ -247,6 +294,21 @@ export default function CRM() {
 
   const handleCustomerSelect = (customer: any) => {
     setSelectedCustomer(customer);
+    setCustomerFormData({
+      name: customer.name || "",
+      first_name: customer.first_name || "",
+      last_name: customer.last_name || "",
+      customer_number: customer.customer_number || "",
+      customer_type: customer.customer_type || "Individual",
+      email: customer.email || "",
+      phone: customer.phone || "",
+      other_emails: customer.other_emails || [],
+      credit_limit: customer.credit_limit || 0,
+      birthday: customer.birthday || "",
+      segment: customer.segment || "Customers",
+      address: customer.address || "",
+      photo_url: customer.photo_url || ""
+    });
     setShowDetailOnMobile(true);
     setAiSummary(null);
     setActiveTab("overview"); // Reset tab context when switching customers
@@ -954,10 +1016,27 @@ export default function CRM() {
               </div>
               <div className="space-y-3 flex flex-col items-center justify-start pt-2">
                 <Label className="text-sm font-medium text-zinc-900 mb-2 mt-4 md:mt-0">Customer Photo</Label>
-                <div className="w-24 h-24 rounded-full border-2 border-dashed border-zinc-300 flex items-center justify-center hover:border-blue-500 hover:bg-blue-50 transition-colors group cursor-pointer">
-                  <Camera className="w-8 h-8 text-zinc-400 group-hover:text-blue-500 transition-colors" />
+                <input 
+                  type="file" 
+                  ref={photoInputRef}
+                  className="hidden"
+                  accept="image/*"
+                  onChange={handlePhotoUpload}
+                />
+                <div 
+                  className="w-24 h-24 rounded-full border-2 border-dashed border-zinc-300 flex items-center justify-center hover:border-blue-500 hover:bg-blue-50 transition-colors group cursor-pointer overflow-hidden relative"
+                  onClick={() => photoInputRef.current?.click()}
+                >
+                  {customerFormData.photo_url ? (
+                    <img src={customerFormData.photo_url} alt="Preview" className="w-full h-full object-cover" />
+                  ) : (
+                    <Camera className="w-8 h-8 text-zinc-400 group-hover:text-blue-500 transition-colors" />
+                  )}
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <span className="text-[10px] text-white font-bold uppercase tracking-wider">{customerFormData.photo_url ? "Change" : "Upload"}</span>
+                  </div>
                 </div>
-                <span className="text-xs text-zinc-500 text-center">Click to upload</span>
+                <span className="text-xs text-zinc-500 text-center">Supported: JPG, PNG, WEBP</span>
               </div>
             </div>
 
@@ -1221,7 +1300,7 @@ export default function CRM() {
                 )}
                 <div className="flex items-center gap-4">
                   <Avatar className="w-12 h-12 border-2 border-white shadow-md group-hover:scale-105 transition-transform">
-                    <AvatarImage src={`https://picsum.photos/seed/${customer.id}/200`} />
+                    <AvatarImage src={customer.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${customer.name}`} />
                     <AvatarFallback className="bg-zinc-100 text-zinc-900 font-bold">{customer.name.substring(0, 2).toUpperCase()}</AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
@@ -1298,7 +1377,7 @@ export default function CRM() {
               <div className="flex items-center gap-6 lg:gap-8">
                 <div className="relative">
                   <Avatar className="w-20 h-20 lg:w-28 lg:h-28 border-4 border-white shadow-2xl">
-                    <AvatarImage src={`https://picsum.photos/seed/${selectedCustomer.id}/200`} />
+                    <AvatarImage src={selectedCustomer.photo_url || `https://api.dicebear.com/7.x/initials/svg?seed=${selectedCustomer.name}`} />
                     <AvatarFallback className="text-3xl font-bold">{selectedCustomer.name.substring(0, 2).toUpperCase()}</AvatarFallback>
                   </Avatar>
                   <div className="absolute -bottom-1 -right-1 lg:-bottom-2 lg:-right-2 w-8 h-8 lg:w-10 lg:h-10 bg-emerald-500 rounded-full border-4 border-white flex items-center justify-center text-white shadow-lg">
@@ -1987,6 +2066,23 @@ export default function CRM() {
                 <DialogDescription>Modify contact details for this customer.</DialogDescription>
               </DialogHeader>
               <div className="space-y-6 py-4">
+                <div className="flex flex-col items-center gap-4 mb-2">
+                  <div 
+                    className="w-24 h-24 rounded-full border-2 border-dashed border-zinc-200 flex items-center justify-center hover:border-blue-500 hover:bg-blue-50 transition-all group cursor-pointer overflow-hidden relative"
+                    onClick={() => photoInputRef.current?.click()}
+                  >
+                    {customerFormData.photo_url ? (
+                      <img src={customerFormData.photo_url} alt="Preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <Camera className="w-8 h-8 text-zinc-300 group-hover:text-blue-500 transition-colors" />
+                    )}
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="text-[10px] text-white font-bold uppercase tracking-wider">Change Photo</span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Profile Picture</p>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Full Name</Label>

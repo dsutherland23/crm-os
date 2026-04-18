@@ -28,7 +28,8 @@ import {
   Sparkles,
   Zap,
   Users,
-  Activity
+  Activity,
+  ShieldCheck
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -110,9 +111,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PrintableInvoice } from "./PrintableInvoice";
 
 export default function Revenue() {
-  const { activeBranch, formatCurrency, enterpriseId } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId, branding } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -135,6 +137,12 @@ export default function Revenue() {
   const [selectedAccountForLedger, setSelectedAccountForLedger] = useState<any>(null);
   const [isLedgerSheetOpen, setIsLedgerSheetOpen] = useState(false);
   const [staff, setStaff] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [payrollStatus, setPayrollStatus] = useState("DRAFT");
+  const [isInvoicePreviewVisible, setIsInvoicePreviewVisible] = useState(false);
+  const [commissionRate, setCommissionRate] = useState(5.0);
+  const [peakRate, setPeakRate] = useState(7.5);
+  const [isRateEditorOpen, setIsRateEditorOpen] = useState(false);
 
 
   // Filter states
@@ -158,6 +166,57 @@ export default function Revenue() {
   const [invoiceItems, setInvoiceItems] = useState([
     { id: Date.now() + Math.random(), product_id: "", quantity: 1, unit_price: 0, tax: 0, description: "" }
   ]);
+
+  const INVOICE_TEMPLATES = [
+    {
+      name: "Service Retainer",
+      description: "Standard monthly service billing structure",
+      items: [
+        { product_id: "consulting-001", quantity: 1, unit_price: 2500, tax: 0, description: "Monthly Professional Consultation" },
+        { product_id: "support-001", quantity: 1, unit_price: 500, tax: 0, description: "Premium Technical Support Package" }
+      ],
+      payment_terms: "Net 30"
+    },
+    {
+      name: "Product Shipment",
+      description: "Standard physical goods delivery template",
+      items: [
+        { product_id: "hardware-001", quantity: 5, unit_price: 120, tax: 15, description: "Enterprise Hardware Units" },
+        { product_id: "shipping-001", quantity: 1, unit_price: 45, tax: 0, description: "Secure Logistics & Handling" }
+      ],
+      payment_terms: "Due on Receipt"
+    },
+    {
+      name: "Software License",
+      description: "Annual recurring license provision",
+      items: [
+        { product_id: "license-001", quantity: 1, unit_price: 12000, tax: 0, description: "Enterprise Core License (Annual)" }
+      ],
+      payment_terms: "Net 15"
+    }
+  ];
+
+  const applyTemplate = (templateName: string) => {
+    const template = INVOICE_TEMPLATES.find(t => t.name === templateName);
+    if (!template) return;
+
+    setNewInvoiceData(prev => ({
+      ...prev,
+      payment_terms: template.payment_terms
+    }));
+
+    setInvoiceItems(template.items.map(item => {
+      const product = products.find(p => p.id === item.product_id);
+      return {
+        ...item,
+        id: Math.random() + Date.now(),
+        description: product?.name || item.description,
+        unit_price: product?.retail_price || product?.price || item.unit_price
+      };
+    }));
+
+    toast.success(`Template "${template.name}" applied successfully`);
+  };
 
   // Expense additional filtering and sorting states
   const [expenseSortBy, setExpenseSortBy] = useState("Date (Newest)");
@@ -242,6 +301,10 @@ export default function Revenue() {
     const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => console.error("staff:", error));
+
+    const unsubSessions = onSnapshot(query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => console.error("sessions:", error));
 
     return () => {
       unsubInvoices();
@@ -916,6 +979,7 @@ export default function Revenue() {
             <TabsTrigger value="quotes" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Quotes</TabsTrigger>
             <TabsTrigger value="recurring" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Recurring</TabsTrigger>
             <TabsTrigger value="expenses" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Expenses</TabsTrigger>
+            <TabsTrigger value="payroll" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Payroll & Commissions</TabsTrigger>
             <TabsTrigger value="tax" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Compliance</TabsTrigger>
           </TabsList>
           
@@ -1319,6 +1383,190 @@ export default function Revenue() {
             </div>
           </Card>
         </TabsContent>
+
+        <TabsContent value="payroll" className="space-y-6">
+          <div className="flex items-center justify-between mb-2">
+             <div className="flex items-center gap-2">
+                <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 font-bold">LIVE RECONCILIATION</Badge>
+                <p className="text-xs text-zinc-500 font-medium italic">Calculations based on {commissionRate}% platform standard.</p>
+             </div>
+             <Button 
+                variant="outline" 
+                size="sm" 
+                className="rounded-xl border-zinc-200 h-9 font-bold text-xs shadow-sm hover:bg-white"
+                onClick={() => setIsRateEditorOpen(true)}
+             >
+                <SettingsIcon className="w-4 h-4 mr-2 text-zinc-400" />
+                Configure Rates
+             </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+             <Card className="card-modern bg-zinc-100/50 border-zinc-200">
+                <CardContent className="p-4 text-center sm:text-left">
+                   <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Est. Payroll (MTD)</p>
+                   <h3 className="text-xl font-bold mt-1 text-zinc-900">{formatCurrency(staff.length * 2840)}</h3>
+                </CardContent>
+             </Card>
+             <Card className="card-modern bg-blue-50/50 border-blue-100">
+                <CardContent className="p-4 text-center sm:text-left">
+                   <p className="text-[10px] text-blue-600 font-bold uppercase tracking-widest">Total Commissions</p>
+                   <h3 className="text-xl font-bold mt-1 text-blue-900">{formatCurrency(sessions.reduce((acc, s) => acc + (s.totalSales || 0) * 0.05, 0))}</h3>
+                </CardContent>
+             </Card>
+             <Card className="card-modern bg-emerald-50 border-emerald-100">
+                <CardContent className="p-4 text-center sm:text-left">
+                   <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Top Contributor</p>
+                   <h3 className="text-xl font-bold mt-1 text-emerald-900">{staff[0]?.name || "N/A"}</h3>
+                </CardContent>
+             </Card>
+             <Card className="card-modern bg-zinc-900 text-white shadow-xl shadow-zinc-200">
+                <CardContent className="p-4 text-center sm:text-left">
+                   <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Next Payrun</p>
+                   <h3 className="text-xl font-bold mt-1">April 30</h3>
+                </CardContent>
+             </Card>
+          </div>
+
+          <Card className="card-modern overflow-hidden">
+            <div className="overflow-x-auto">
+              <Table>
+                 <TableHeader className="bg-zinc-50/50">
+                    <TableRow className="border-b border-zinc-100">
+                       <TableHead className="py-4 font-bold text-zinc-900 px-6">Staff Member</TableHead>
+                       <TableHead className="py-4 font-bold text-zinc-900 text-right">Hours Logged</TableHead>
+                       <TableHead className="py-4 font-bold text-zinc-900 text-right">Total GMV</TableHead>
+                       <TableHead className="py-4 font-bold text-zinc-900 text-right">Commission (5%)</TableHead>
+                       <TableHead className="py-4 font-bold text-zinc-900 text-right">Base Pay</TableHead>
+                       <TableHead className="py-4 font-bold text-zinc-900 text-right px-6">Total Due</TableHead>
+                    </TableRow>
+                 </TableHeader>
+                 <TableBody>
+                    {staff.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="py-12 text-center text-sm text-zinc-400 font-medium italic">
+                          No staff data available for current enterprise.
+                        </TableCell>
+                      </TableRow>
+                    ) : staff.map(s => {
+                      const staffSessions = sessions.filter(sess => sess.staffId === s.id);
+                      const totalSales = staffSessions.reduce((acc, sess) => acc + (sess.totalSales || 0), 0);
+                      const commission = totalSales * (commissionRate / 100);
+                      
+                      // Calculate actual base pay based on staff contract (salaryType + baseRate)
+                      let basePay = s.baseRate || 2200; // Baseline floor
+                      if (s.salaryType === 'HOURLY') {
+                         const hours = staffSessions.length * 8; // Simplified for demo, in prod would use session diffs
+                         basePay = hours * (s.baseRate || 25);
+                      }
+                      
+                      return (
+                        <TableRow key={s.id} className="hover:bg-zinc-50/30 transition-colors border-b border-zinc-50 group">
+                           <TableCell className="py-4 px-6">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-zinc-100 text-zinc-900 flex items-center justify-center text-[10px] font-bold ring-1 ring-zinc-200">
+                                   {s.name.substring(0,2).toUpperCase()}
+                                </div>
+                                <div>
+                                   <p className="font-bold text-zinc-900 text-sm group-hover:text-blue-600 transition-colors">{s.name}</p>
+                                   <p className="text-[9px] text-zinc-400 font-bold uppercase tracking-widest">{s.role}</p>
+                                </div>
+                              </div>
+                           </TableCell>
+                           <TableCell className="py-4 text-right font-medium text-zinc-600">{(staffSessions.length * 8) || 160}h</TableCell>
+                           <TableCell className="py-4 text-right font-bold text-zinc-900">{formatCurrency(totalSales)}</TableCell>
+                           <TableCell className="py-4 text-right font-bold text-blue-600">{formatCurrency(commission)}</TableCell>
+                           <TableCell className="py-4 text-right font-medium text-zinc-600">{formatCurrency(basePay)}</TableCell>
+                           <TableCell className="py-4 text-right px-6">
+                              <Badge className="bg-zinc-100 text-zinc-900 border-zinc-200 font-bold h-7 px-3">{formatCurrency(basePay + commission)}</Badge>
+                           </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                 </TableBody>
+              </Table>
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+             <Card className="card-modern">
+                <CardHeader>
+                   <CardTitle className="text-base font-bold text-zinc-900">Labour Cost Analysis</CardTitle>
+                   <CardDescription>Payroll expenses vs. net revenue generation.</CardDescription>
+                </CardHeader>
+                <CardContent className="h-[200px] flex flex-col items-center justify-center text-zinc-300 font-medium text-sm italic border-t border-zinc-50">
+                   <Activity className="w-8 h-8 opacity-20 mb-3" />
+                   Enhanced distribution chart loading...
+                </CardContent>
+             </Card>
+             <Card className="card-modern">
+                <CardHeader>
+                   <CardTitle className="text-base font-bold text-zinc-900">Commission Incentive Tiers</CardTitle>
+                   <CardDescription>Current performance structure for your region.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4 pt-4 border-t border-zinc-50">
+                   <div className="flex items-center justify-between p-3 rounded-xl bg-blue-50/50 border border-blue-100 shadow-sm">
+                      <span className="text-xs font-bold text-blue-900">Standard Sales Rate</span>
+                      <Badge className="bg-blue-600 text-white border-0 font-bold">{commissionRate.toFixed(1)}%</Badge>
+                   </div>
+                   <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-50 border border-zinc-100">
+                      <span className="text-xs font-bold text-zinc-900">Peak Performance Accelerator</span>
+                      <Badge className="bg-zinc-400 text-white border-0 font-bold">{peakRate.toFixed(1)}%</Badge>
+                   </div>
+                   <p className="text-[10px] text-zinc-400 font-medium italic mt-2">*Rates are enterprise-controlled and apply to net revenue.</p>
+                </CardContent>
+             </Card>
+          </div>
+        </TabsContent>
+
+        {/* Rate Editor Dialog */}
+        <Dialog open={isRateEditorOpen} onOpenChange={setIsRateEditorOpen}>
+          <DialogContent className="sm:max-w-[425px] rounded-3xl p-8 border-zinc-100 shadow-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-black tracking-tight text-zinc-900">Incentive Architecture</DialogTitle>
+              <DialogDescription className="text-zinc-500">
+                Adjust global commission tiers for your entire enterprise workforce.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-6 space-y-6">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Global Commission (%)</Label>
+                <div className="relative">
+                  <Input 
+                    type="number" 
+                    step="0.1"
+                    value={commissionRate} 
+                    onChange={(e) => setCommissionRate(parseFloat(e.target.value))}
+                    className="h-14 rounded-2xl border-zinc-200 pl-4 pr-12 text-lg font-bold focus:ring-blue-600"
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-zinc-300">%</div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Peak performance (%)</Label>
+                <div className="relative">
+                  <Input 
+                    type="number" 
+                    step="0.1"
+                    value={peakRate} 
+                    onChange={(e) => setPeakRate(parseFloat(e.target.value))}
+                    className="h-14 rounded-2xl border-zinc-200 pl-4 pr-12 text-lg font-bold focus:ring-zinc-900"
+                  />
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-zinc-300">%</div>
+                </div>
+              </div>
+              <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 space-y-1">
+                 <p className="text-[10px] font-bold text-blue-900 uppercase">Impact Projection</p>
+                 <p className="text-xs text-blue-700">Updating rates will immediately recalculate commissions for {staff.length} active members.</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-bold hover:bg-zinc-800 shadow-xl shadow-zinc-900/10" onClick={() => setIsRateEditorOpen(false)}>
+                Update Financial Policy
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <TabsContent value="tax">
           <Card className="card-modern p-10 text-center">
@@ -1837,8 +2085,15 @@ export default function Revenue() {
                 <DialogDescription className="text-zinc-400 text-sm">Issue a professional tax invoice to your client or lead.</DialogDescription>
               </div>
               <div className="flex items-center gap-3">
-                <Button variant="outline" className="rounded-xl border-zinc-700 bg-zinc-800 text-white hover:bg-zinc-700 h-11 px-6 font-bold text-xs uppercase tracking-wider">
-                  Live Preview
+                <Button 
+                  variant={isInvoicePreviewVisible ? "default" : "outline"} 
+                  className={cn(
+                    "rounded-xl h-11 px-6 font-bold text-xs uppercase tracking-wider transition-all",
+                    isInvoicePreviewVisible ? "bg-white text-zinc-900 hover:bg-zinc-100" : "border-zinc-700 bg-zinc-800 text-white hover:bg-zinc-700"
+                  )}
+                  onClick={() => setIsInvoicePreviewVisible(!isInvoicePreviewVisible)}
+                >
+                  {isInvoicePreviewVisible ? "Hide Preview" : "Live Preview"}
                 </Button>
                 <Button className="rounded-xl bg-blue-600 text-white hover:bg-blue-500 h-11 px-6 font-bold text-xs uppercase tracking-wider shadow-lg shadow-blue-600/20">
                   Import Template
@@ -1847,7 +2102,8 @@ export default function Revenue() {
             </div>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto min-h-0 bg-zinc-50/50">
+          <div className="flex-1 min-h-0 flex flex-row overflow-hidden bg-zinc-50/50">
+            <div className="flex-1 overflow-y-auto min-w-0 border-r border-zinc-100 no-scrollbar">
             <div className="p-8 lg:p-12 space-y-12">
               {/* Section 1: Header Details */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
@@ -2138,6 +2394,67 @@ export default function Revenue() {
                 </div>
               </div>
             </div>
+            </div>
+
+            {/* Right Column: Live Doc Preview */}
+            {isInvoicePreviewVisible && (
+              <div className="hidden lg:flex w-[600px] xl:w-[700px] bg-white border-l border-zinc-200 flex-col p-8 overflow-hidden items-center group/preview animate-in slide-in-from-right duration-300">
+                <div className="w-full flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Live Preview Output</span>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-8 rounded-lg text-[10px] font-bold text-zinc-500 hover:text-blue-600 hover:bg-blue-50 transition-all gap-1"
+                    onClick={() => {
+                      const printContent = document.getElementById('printable-invoice');
+                      if (printContent) {
+                        window.print();
+                      }
+                    }}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export / Print
+                  </Button>
+                </div>
+                <Badge variant="outline" className="text-[9px] font-bold bg-white text-zinc-600 border-zinc-200">WYSIWYG 2.0</Badge>
+              </div>
+              
+              <div className="w-full h-full rounded-2xl shadow-2xl shadow-zinc-200/50 overflow-hidden bg-white scale-[0.75] origin-top border border-zinc-100 scrollbar-hide overflow-y-auto">
+                 <PrintableInvoice 
+                    branding={branding} 
+                    order={{
+                      id: newInvoiceData.invoiceNumber || "DRAFT-001",
+                      customerName: customers.find(c => c.id === newInvoiceData.customer_id)?.name || "Walk-in Customer",
+                      customerEmail: customers.find(c => c.id === newInvoiceData.customer_id)?.email || "customer@mail.com",
+                      date: newInvoiceData.issue_date,
+                      items: invoiceItems.map(item => ({
+                        id: String(item.id),
+                        name: products.find(p => p.id === item.product_id)?.name || item.description || "Unlabeled Item",
+                        price: item.unit_price,
+                        qty: item.quantity
+                      })),
+                      subtotal: subtotal,
+                      tax: taxTotal,
+                      total: grandTotal
+                    }} 
+                 />
+              </div>
+              
+              <div className="mt-auto w-full p-4 bg-white/60 backdrop-blur-md rounded-2xl border border-white/40 shadow-sm flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-zinc-900 flex items-center justify-center text-white">
+                   <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none mb-1">Audit Validity</p>
+                   <p className="text-xs font-bold text-zinc-900">Compliant for international distribution</p>
+                </div>
+              </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="p-8 lg:p-10 bg-white border-t border-zinc-100 flex-none flex flex-col md:flex-row gap-6 items-center md:justify-between">

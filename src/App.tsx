@@ -18,6 +18,7 @@ import Analytics from "./components/Analytics";
 import AuditLogs from "./components/AuditLogs";
 import Workflow from "./components/Workflow";
 import Auth from "./components/Auth";
+import StaffManager from "./components/StaffManager";
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
@@ -95,6 +96,7 @@ function AppContent() {
       case "audit": return isModuleEnabled("audit_logs") ? <AuditLogs /> : <Dashboard setActiveTab={setActiveTab} />;
       case "ai": return isModuleEnabled("ai") ? <AIInsights /> : <Dashboard setActiveTab={setActiveTab} />;
       case "settings": return <Settings />;
+      case "staff": return <StaffManager />;
       default: return <Dashboard setActiveTab={setActiveTab} />;
     }
   };

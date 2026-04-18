@@ -55,11 +55,11 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, or
               <p className="text-[10px] text-blue-700/60 font-bold uppercase tracking-[0.2em] mt-1">Corporation</p>
             </div>
           </div>
-          <div className="text-right">
-            <h1 className="text-7xl font-black italic text-blue-900/10 tracking-tighter leading-none mb-2 select-none uppercase">INVOICE</h1>
-            <div className="text-right space-y-1">
+          <div className="text-right relative min-w-[200px]">
+            <h1 className="text-7xl font-black italic text-blue-900/10 tracking-tighter leading-none mb-2 select-none uppercase absolute -top-4 right-8 pointer-events-none">INVOICE</h1>
+            <div className="relative z-10 space-y-1 pt-12 pr-4">
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Invoice Number</p>
-              <p className="text-lg font-black text-zinc-900">#{order.id.substring(0,6).toUpperCase()}</p>
+              <p className="text-lg font-black text-zinc-900">#{order.id.split('-')[0].toUpperCase()}</p>
             </div>
           </div>
         </div>
@@ -114,7 +114,7 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, or
             </div>
             <div className="relative pt-6">
               <div className="absolute top-0 left-0 w-32 h-px bg-zinc-900/10" />
-              <img src="https://signaturely.com/wp-content/uploads/2020/04/example-handwritten-signature.png" alt="Signature" className="h-12 object-contain opacity-80 mix-blend-multiply" />
+              <div className="font-['Cedarville_Cursive',_cursive] text-3xl text-zinc-400/50 italic select-none">John Smith</div>
             </div>
           </div>
           
@@ -138,7 +138,7 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, or
         <div className="mb-20 space-y-4 max-w-2xl px-2">
           <h4 className="text-lg font-black text-blue-900 uppercase tracking-widest">Term and Condition</h4>
           <p className="text-[11px] text-zinc-500 leading-relaxed font-semibold italic">
-            {branding.disclaimer || "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Etiam molestie gravida quam. Praesent consectetur, dui quis porta mattis, tortor velit pretium massa, non porta augue eros sed lacus. Vestibulum pellentesque tempus sapien sed lacinia. Nunc at ipsum eu."}
+            {branding.disclaimer || `By transacting with ${branding.name || 'our organization'}, you agree to our terms of service. Warranty claims are subject to manufacturer verification. ${branding.name || 'BGPA'} is not liable for indirect or consequential damages resulting from product use or service interruption.`}
           </p>
         </div>
       </div>
