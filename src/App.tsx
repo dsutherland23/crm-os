@@ -52,11 +52,10 @@ function AppContent() {
           if (profile.enterprise_id) {
             setEnterpriseId(profile.enterprise_id);
             setBranding({ name: profile.enterpriseName || profile.enterprise_id });
+            const { seedClientData } = await import("./lib/seed");
+            seedClientData(profile.enterprise_id);
           }
         }
-
-        const { seedClientData } = await import("./lib/seed");
-        seedClientData(profile.enterprise_id);
       } else {
         setEnterpriseId(null);
       }

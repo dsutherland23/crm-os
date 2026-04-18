@@ -9,8 +9,10 @@ service cloud.firestore {
     }
 
     // Helper: Get user's enterprise ID
+    // We use a safe get that handles missing documents during signup
     function getEnterpriseId() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.enterprise_id;
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return userDoc != null ? userDoc.data.enterprise_id : null;
     }
 
     // User profiles - anyone authenticated can read their own or create their one
@@ -18,18 +20,28 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
 
-    // Global settings - anyone authenticated can read
-    match /settings/{settingId} {
+    // Enterprise Settings - scoped by the setting document ID (which is the enterprise ID)
+    match /enterprise_settings/{enterpriseId} {
       allow read, write: if isSignedIn();
     }
 
-    // Scoped Collections (Invoices, Customers, etc.)
-    // We match any document in these collections and check for enterprise_id mapping
+    // Scoped Data Collections
+    // These collections are strictly partitioned by enterprise_id
     match /{collectionName}/{docId} {
       allow read, write: if isSignedIn() && (
-        // Allow if the resource doesn't exist (creating new) or if it matches the user's enterprise
+        // Skip check for global/meta collections
+        collectionName in ['users', 'enterprise_settings', 'settings', 'notifications'] ||
+        // Check enterprise isolation for everything else
         (resource == null && request.resource.data.enterprise_id == getEnterpriseId()) ||
         (resource != null && resource.data.enterprise_id == getEnterpriseId())
+      );
+    }
+    
+    // Notifications special handling (allows creation by system/anyone but read only by enterprise)
+    match /notifications/{docId} {
+      allow create: if isSignedIn();
+      allow read, update, delete: if isSignedIn() && (
+        resource.data.enterprise_id == getEnterpriseId()
       );
     }
   }

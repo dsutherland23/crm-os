@@ -70,11 +70,12 @@ export default function Auth() {
           createdAt: new Date().toISOString()
         });
 
-        // Initialize Enterprise Settings
-        await setDoc(doc(db, "settings", enterprise), {
+        // Initialize Enterprise Settings in the new partitioned collection
+        await setDoc(doc(db, "enterprise_settings", enterprise), {
           enterpriseName: enterprise,
           setupCompleted: true,
-          enterprise_id: enterprise
+          enterprise_id: enterprise,
+          createdAt: new Date().toISOString()
         }, { merge: true });
 
         toast.success("Enterprise account provisioned successfully");
