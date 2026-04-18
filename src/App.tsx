@@ -22,6 +22,7 @@ import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 function AppContent() {
@@ -29,37 +30,52 @@ function AppContent() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const { isModuleEnabled, setEnterpriseId, setBranding } = useModules();
+  const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId } = useModules();
 
   useEffect(() => {
     const mockUser = getMockUser();
     
-    // Only use mock user if we're not in forced Live Mode
-    if (mockUser && auth.app.options.projectId === "mock-project") {
+    // Use mock user if developer bypass is active
+    if (mockUser) {
       setUser(mockUser);
+      setEnterpriseId("master-all");
       setLoading(false);
-      import("./lib/seed").then(({ seedClientData }) => seedClientData());
+      import("./lib/seed").then(({ seedClientData }) => seedClientData("master-all"));
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      console.log("Auth State Changed. User:", fbUser?.email);
       setUser(fbUser);
-      if (fbUser) {
-        // Fetch user profile to get enterprise_id
-        const userDoc = await getDoc(doc(db, "users", fbUser.uid));
-        if (userDoc.exists()) {
-          const profile = userDoc.data();
-          if (profile.enterprise_id) {
-            setEnterpriseId(profile.enterprise_id);
-            setBranding({ name: profile.enterpriseName || profile.enterprise_id });
-            const { seedClientData } = await import("./lib/seed");
-            seedClientData(profile.enterprise_id);
+      try {
+        if (fbUser) {
+          console.log("Fetching profile for UID:", fbUser.uid);
+          const userDoc = await getDoc(doc(db, "users", fbUser.uid));
+          if (userDoc.exists()) {
+            const profile = userDoc.data() as any;
+            console.log("Profile found:", profile);
+            if (profile.enterprise_id) {
+              setEnterpriseId(profile.enterprise_id);
+              setBranding({ name: profile.enterpriseName || profile.enterprise_id });
+              const { seedClientData } = await import("./lib/seed");
+              seedClientData(profile.enterprise_id);
+            } else {
+              console.warn("Profile exists but enterprise_id is missing!");
+              setEnterpriseId(null);
+            }
+          } else {
+            console.warn("No user profile found in Firestore for UID:", fbUser.uid);
+            setEnterpriseId(null);
           }
+        } else {
+          setEnterpriseId(null);
         }
-      } else {
+      } catch (error) {
+        console.error("Profile fetch failed:", error);
         setEnterpriseId(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -93,6 +109,35 @@ function AppContent() {
 
   if (!user) {
     return <Auth />;
+  }
+
+  if (!enterpriseId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
+        <Card className="max-w-md w-full card-modern p-8 text-center space-y-6">
+          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
+            <Sparkles className="w-8 h-8" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-zinc-900">Initialize Workspace</h2>
+            <p className="text-sm text-zinc-500 mt-2">We couldn't find an existing enterprise profile for your account. Let's get you set up.</p>
+          </div>
+          <Button 
+            className="w-full h-12 rounded-xl bg-zinc-900 text-white font-bold hover:bg-zinc-800 transition-all shadow-lg"
+            onClick={() => window.location.reload()}
+          >
+            Retry Synchronization
+          </Button>
+          <Button 
+            variant="ghost" 
+            className="w-full text-zinc-500 font-medium"
+            onClick={() => auth.signOut()}
+          >
+            Sign Out
+          </Button>
+        </Card>
+      </div>
+    );
   }
 
   return (

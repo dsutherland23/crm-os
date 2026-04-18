@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { User, Plus, X, Activity, UserMinus, ShieldAlert } from "lucide-react";
+import { User, Plus, X, Activity, UserMinus, ShieldAlert, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, orderBy, addDoc } from "@/lib/firebase";
+import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, where, orderBy, addDoc } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
 

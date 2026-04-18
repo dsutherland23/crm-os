@@ -34,7 +34,7 @@ import { useModules } from "@/context/ModuleContext";
 import { motion, AnimatePresence } from "motion/react";
 import { auth, db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
-import { collection, onSnapshot } from "@/lib/firebase";
+import { collection, onSnapshot, query, where } from "@/lib/firebase";
 import { toast } from "sonner";
 import { OrbitalClock } from "@/components/ui/orbital-clock";
 import NotificationsMenu from "./NotificationsMenu";

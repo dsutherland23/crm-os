@@ -96,8 +96,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import AuditLogs from "./AuditLogs";
 
 export default function Settings() {
-  const { config, toggleModule, topSpenderThreshold, setTopSpenderThreshold, currency, setCurrency, theme, setTheme, branding, setBranding } = useModules();
+  const { config, toggleModule, topSpenderThreshold, setTopSpenderThreshold, currency, setCurrency, theme, setTheme, branding, setBranding, enterpriseId } = useModules();
   const logoInputRef = useRef<HTMLInputElement>(null);
+  const [enterpriseName, setEnterpriseName] = useState(branding.name || "");
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

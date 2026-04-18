@@ -1,7 +1,11 @@
-import { db, collection, addDoc, serverTimestamp } from "./firebase";
+import { db, collection, addDoc, serverTimestamp, auth } from "./firebase";
 
 export async function seedClientData(enterpriseId: string) {
   if (!enterpriseId) return;
+  if (enterpriseId === "master-all" && auth.currentUser) {
+     // Don't try to seed master-all to live DB if we have a real user logged in
+     return;
+  }
   
   // Seed only if necessary (you could check for existing data here)
   console.log(`Seeding starting enterprise data for: ${enterpriseId}`);

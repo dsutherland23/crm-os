@@ -88,7 +88,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
 
-import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, addDoc, updateDoc, doc, serverTimestamp, deleteDoc } from "@/lib/firebase";
+import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, where, orderBy, addDoc, updateDoc, doc, serverTimestamp, deleteDoc } from "@/lib/firebase";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AreaChart, Area, LineChart, Line, BarChart, Bar, Legend, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";

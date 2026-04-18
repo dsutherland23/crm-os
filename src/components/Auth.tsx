@@ -6,7 +6,7 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword 
 } from "firebase/auth";
-import { auth, db, doc, setDoc } from "@/lib/firebase";
+import { auth, db, doc, setDoc, getDoc } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -30,8 +30,45 @@ export default function Auth() {
     try {
       console.log("Initiating Google Sign-In...");
       const result = await signInWithPopup(auth, provider);
-      console.log("Sign-in successful:", result.user.email);
+      const user = result.user;
+      console.log("Sign-in successful:", user.email);
+
+      // Check if user profile exists
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (!userDoc.exists()) {
+        console.log("No profile found for Google user. Creating default...");
+        // Use part of email as default enterprise ID
+        const emailSlug = user.email?.split('@')[0].replace(/[^a-zA-Z0-9]/g, '-') || user.uid.substring(0, 8);
+        const defaultEnterpriseId = `ent-${emailSlug}`;
+        
+        const profileData = {
+          fullName: user.displayName || emailSlug,
+          email: user.email,
+          enterprise_id: defaultEnterpriseId,
+          enterpriseName: `${user.displayName || emailSlug}'s Organization`,
+          role: "Owner",
+          status: "ACTIVE",
+          createdAt: new Date().toISOString()
+        };
+
+        await setDoc(userDocRef, profileData);
+
+        // Initialize Enterprise Settings
+        await setDoc(doc(db, "enterprise_settings", defaultEnterpriseId), {
+          enterpriseName: profileData.enterpriseName,
+          setupCompleted: true,
+          enterprise_id: defaultEnterpriseId,
+          createdAt: new Date().toISOString()
+        }, { merge: true });
+
+        console.log("Profile created with enterprise:", defaultEnterpriseId);
+      }
+
       toast.success("Welcome to Orivo CRM");
+      // Reload to ensure all context listeners (App.tsx) re-run with the new profile
+      setTimeout(() => window.location.reload(), 500);
     } catch (error: any) {
       console.error("Google Auth Error:", error.code, error.message);
       if (error.code === 'auth/popup-blocked') {
@@ -47,8 +84,29 @@ export default function Auth() {
     setLoading(true);
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
-        toast.success("Welcome back");
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        
+        // Ensure profile exists for existing users (fail-safe)
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (!userDoc.exists()) {
+          const defaultEnterpriseId = `ent-${user.email?.split('@')[0].replace(/[^a-zA-Z0-9]/g, '-') || user.uid.substring(0, 8)}`;
+          await setDoc(userDocRef, {
+            fullName: user.email?.split('@')[0] || "User",
+            email: user.email,
+            enterprise_id: defaultEnterpriseId,
+            enterpriseName: "My Organization",
+            role: "Owner",
+            status: "ACTIVE",
+            createdAt: new Date().toISOString()
+          });
+          await setDoc(doc(db, "enterprise_settings", defaultEnterpriseId), {
+            enterpriseName: "My Organization",
+            enterprise_id: defaultEnterpriseId,
+            setupCompleted: true
+          }, { merge: true });
+        }
       } else {
         if (signUpStep === 1) {
           setSignUpStep(2);
@@ -63,24 +121,27 @@ export default function Auth() {
         await setDoc(doc(db, "users", user.uid), {
           fullName,
           email,
-          enterprise_id: enterprise, // Using enterprise name as ID for now or generate UUID
+          enterprise_id: enterprise, 
           enterpriseName: enterprise,
           role: "Owner",
           status: "ACTIVE",
           createdAt: new Date().toISOString()
         });
 
-        // Initialize Enterprise Settings in the new partitioned collection
+        // Initialize Enterprise Settings
         await setDoc(doc(db, "enterprise_settings", enterprise), {
           enterpriseName: enterprise,
           setupCompleted: true,
           enterprise_id: enterprise,
           createdAt: new Date().toISOString()
         }, { merge: true });
-
-        toast.success("Enterprise account provisioned successfully");
       }
+
+      toast.success(isLogin ? "Welcome back" : "Enterprise account provisioned");
+      // Reload to ensure context syncs with Firestore
+      setTimeout(() => window.location.reload(), 500);
     } catch (error: any) {
+      setLoading(false);
       console.error("Auth Error Detail:", error);
       
       // Map common Firebase Auth errors to user-friendly messages
@@ -280,9 +341,20 @@ export default function Auth() {
           </CardContent>
         </Card>
 
-        <div className="mt-8 flex items-center justify-center gap-2 text-zinc-400">
-          <Sparkles className="w-4 h-4" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em]">AI-Powered Orivo CRM</span>
+        <div className="mt-8 flex flex-col items-center justify-center gap-4 text-zinc-400">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em]">AI-Powered Orivo CRM</span>
+          </div>
+          
+          <button 
+            onClick={() => {
+              import("@/lib/auth-mock").then(m => m.setMockUser());
+            }}
+            className="text-[10px] text-zinc-300 hover:text-zinc-500 underline uppercase tracking-widest font-medium transition-colors"
+          >
+            Developer Bypass (Mock Mode)
+          </button>
         </div>
       </div>
     </div>
