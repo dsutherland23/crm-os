@@ -20,6 +20,7 @@ import Workflow from "./components/Workflow";
 import Auth from "./components/Auth";
 import StaffManager from "./components/StaffManager";
 import VerificationGate from "./components/VerificationGate";
+import AdminPortal from "./components/AdminPortal";
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
@@ -28,6 +29,12 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 function AppContent() {
+  // ── Admin Portal shortcut ───────────────────────────────────────
+  // Navigate to /#/admin or append ?admin=1 to access the portal
+  const isAdminRoute =
+    window.location.hash === "#/admin" ||
+    new URLSearchParams(window.location.search).get("admin") === "1";
+  if (isAdminRoute) return <AdminPortal />;
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null | undefined>(undefined); // undefined = still loading
