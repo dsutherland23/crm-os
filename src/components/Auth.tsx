@@ -5,6 +5,7 @@ import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
 } from "firebase/auth";
 import { auth, db, doc, setDoc, getDoc } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
@@ -112,6 +113,7 @@ export default function Auth() {
   // State
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [verificationSent, setVerificationSent] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Slug auto-generation
@@ -213,14 +215,19 @@ export default function Auth() {
   // ─── Email Sign-up ───────────────────────────────────────────────
   const handleNextStep = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateStep(step)) return;
+    if (!validateStep(step)) {
+      toast.error("Please fill in all required fields to continue.");
+      return;
+    }
     if (step < 3) { setStep(step + 1); return; }
+    
     // Final step — create account
     setLoading(true);
     try {
       const cred = await createUserWithEmailAndPassword(auth, email, password);
       const user = cred.user;
       const finalId = enterpriseSlug || toSlug(enterpriseName) || `ent-${user.uid.substring(0, 8)}`;
+      
       await setDoc(doc(db, "users", user.uid), {
         fullName,
         email,
@@ -232,6 +239,7 @@ export default function Auth() {
         status: "ACTIVE",
         createdAt: new Date().toISOString(),
       });
+      
       await setDoc(doc(db, "enterprise_settings", finalId), {
         enterpriseName,
         industry,
@@ -240,8 +248,16 @@ export default function Auth() {
         setupCompleted: true,
         createdAt: new Date().toISOString(),
       }, { merge: true });
+
+      // send email verification
+      await sendEmailVerification(user);
+      
       setDone(true);
-      setTimeout(() => window.location.reload(), 2200);
+      setVerificationSent(true);
+      toast.success("Enterprise configured successfully!");
+      
+      // No reload needed. App.tsx will detect the new auth state 
+      // and show the VerificationGate automatically.
     } catch (error: any) {
       let msg = error.message;
       if (error.code === "auth/email-already-in-use") msg = "This email is already registered. Sign in instead.";
@@ -371,12 +387,19 @@ export default function Auth() {
           </div>
 
           {/* Header */}
-          <div className="space-y-8 text-center pb-8">
-            <div className="w-full flex items-center justify-center -mt-8">
-               <CpuArchitecture width="420" height="210" className="text-zinc-400/50 dark:text-zinc-700/50 opacity-100" />
+          <div className="space-y-6 text-center pb-8">
+            <div className="w-full flex items-center justify-center relative h-64 -mt-16 -mb-6">
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none transform scale-125 md:scale-150">
+                <CpuArchitecture 
+                  width="400" 
+                  height="200" 
+                  text="CRM"
+                  className="text-zinc-400/40 dark:text-zinc-700/40 opacity-80" 
+                />
+              </div>
             </div>
             <div className="space-y-3 relative z-10">
-              <h1 className="text-4xl font-black text-zinc-900 tracking-tight leading-none">
+              <h1 className="text-4xl sm:text-5xl font-black text-zinc-900 tracking-tight leading-none uppercase">
                 {isLogin ? "Welcome back" : STEP_META[step - 1].label}
               </h1>
               <p className="text-zinc-500 text-sm font-medium">

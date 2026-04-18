@@ -19,6 +19,7 @@ import AuditLogs from "./components/AuditLogs";
 import Workflow from "./components/Workflow";
 import Auth from "./components/Auth";
 import StaffManager from "./components/StaffManager";
+import VerificationGate from "./components/VerificationGate";
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
@@ -113,6 +114,12 @@ function AppContent() {
     return <Auth />;
   }
 
+  // ── Verification Gate (2026 Best Practice) ──
+  // Skip if it's a mock user (developer bypass) or already verified
+  if (!user.emailVerified && !getMockUser()) {
+    return <VerificationGate user={user} />;
+  }
+
   const handleCreateProfile = async () => {
     if (!user) return;
     setLoading(true);
@@ -158,7 +165,7 @@ function AppContent() {
   if (!enterpriseId) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
-        <Card className="max-w-md w-full card-modern p-8 text-center space-y-6">
+        <Card className="max-w-md w-full card-modern p-6 sm:p-10 text-center space-y-6">
           <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto text-blue-600">
             <Sparkles className="w-8 h-8" />
           </div>
