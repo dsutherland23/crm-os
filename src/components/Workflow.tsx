@@ -205,6 +205,7 @@ function WorkflowBuilderDialog({ open, onClose, onSaved, editing }: BuilderProps
         await updateDoc(doc(db, "workflows", editing.id), payload);
         toast.success("Workflow updated successfully!");
       } else {
+        await addDoc(collection(db, "workflows"), {
           ...payload,
           created_at: serverTimestamp(),
         });
