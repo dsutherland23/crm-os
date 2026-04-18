@@ -252,6 +252,7 @@ export default function CRM() {
     setActiveTab("overview"); // Reset tab context when switching customers
   };
 
+  useEffect(() => {
     if (!enterpriseId) return;
     const q = query(
       collection(db, "customers"), 
