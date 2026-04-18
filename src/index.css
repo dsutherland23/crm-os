@@ -4,7 +4,7 @@
 @theme {
   --font-sans: "Inter", "system-ui", "sans-serif";
   --font-display: "Space Grotesk", "Inter", "system-ui", "sans-serif";
-  --font-mono: "JetBrains+Mono", "monospace";
+  --font-mono: "JetBrains Mono", "monospace";
   
   --radius-3xl: 2rem;
   --radius-4xl: 2.5rem;
@@ -61,13 +61,11 @@
     --radius: 0.5rem;
   }
 
-  * {
-  }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-  }
-  h1, h2, h3, h4, h5, h6 {
-    @apply font-display tracking-tight text-zinc-900;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
   }
 }
 
@@ -80,11 +78,15 @@
 
 @layer utilities {
   .card-modern {
-    @apply rounded-[2rem] border border-zinc-100 bg-white shadow-sm transition-all hover:shadow-md hover:border-zinc-200;
+    border-radius: 2rem;
+    border: 1px solid #f4f4f5;
+    background-color: white;
   }
   
   .glass-panel {
-    @apply bg-white/70 backdrop-blur-xl border border-white/40;
+    background-color: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.4);
   }
 
   /* Animations */
@@ -137,11 +139,11 @@
     visibility: visible !important;
   }
 
-  .scale-[0.75], .scale-[0.8] {
+  .scale-reset {
     transform: none !important;
   }
 
-  .text-zinc-400, .text-zinc-500 {
+  .text-muted-print {
     color: #71717a !important;
   }
   
