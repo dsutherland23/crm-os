@@ -21,6 +21,7 @@ import Auth from "./components/Auth";
 import StaffManager from "./components/StaffManager";
 import VerificationGate from "./components/VerificationGate";
 import AdminPortal from "./components/AdminPortal";
+import Support from "./components/Support";
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
@@ -101,6 +102,11 @@ function AppContent() {
   }, [user?.uid]); // Only re-run when the user ID changes
 
   const renderContent = () => {
+    // Support sub-routes (e.g. "support:help", "support:status")
+    if (activeTab.startsWith("support:")) {
+      const section = activeTab.split(":")[1] as any;
+      return <Support section={section} />;
+    }
     switch (activeTab) {
       case "dashboard": return <Dashboard setActiveTab={setActiveTab} />;
       case "crm": return isModuleEnabled("crm") ? <CRM /> : <Dashboard setActiveTab={setActiveTab} />;
@@ -116,6 +122,7 @@ function AppContent() {
       case "ai": return isModuleEnabled("ai") ? <AIInsights /> : <Dashboard setActiveTab={setActiveTab} />;
       case "settings": return <Settings />;
       case "staff": return <StaffManager />;
+      case "support": return <Support />;
       default: return <Dashboard setActiveTab={setActiveTab} />;
     }
   };

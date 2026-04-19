@@ -23,7 +23,16 @@ import {
   MapPin,
   Check,
   ChevronsUpDown,
-  ShieldCheck
+  ShieldCheck,
+  Share2,
+  MessageSquarePlus,
+  FileText,
+  ScrollText,
+  LifeBuoy,
+  Activity,
+  Headphones,
+  Trash2,
+  ChevronUp
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -60,6 +69,30 @@ interface SidebarProps {
 
 export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen }: SidebarProps) {
   const { isModuleEnabled, branding } = useModules();
+  const [supportOpen, setSupportOpen] = useState(() => activeTab.startsWith("support:"));
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Keep the section open when an active support sub-route is present
+  useEffect(() => {
+    if (activeTab.startsWith("support:")) setSupportOpen(true);
+  }, [activeTab]);
+
+  const supportItems = [
+    { id: "share",       label: "Share with friends",    icon: Share2,            accent: true },
+    { id: "feedback",    label: "Suggestions & Feedback", icon: MessageSquarePlus, accent: true },
+    { id: "privacy",     label: "Privacy Policy",         icon: FileText,          accent: false },
+    { id: "terms",       label: "Terms & Conditions",     icon: ScrollText,        accent: false },
+    { id: "help",        label: "Help Center",            icon: LifeBuoy,          accent: false },
+    { id: "status",      label: "System Status",          icon: Activity,          accent: false },
+    { id: "contact",     label: "Contact Support",        icon: Headphones,        accent: false },
+    { id: "delete",      label: "Delete Account",         icon: Trash2,            accent: false, danger: true },
+  ];
+
+  const handleSupportItem = (id: string) => {
+    if (id === "delete") { setShowDeleteConfirm(true); return; }
+    setActiveTab(`support:${id}`);
+    setIsMobileOpen(false);
+  };
 
   const handleLogout = async () => {
     try {
@@ -174,8 +207,93 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                   <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0">Online</Badge>
                 </div>
               </div>
+
+              {/* ── SUPPORT SECTION ── */}
+              <div>
+                <button
+                  onClick={() => setSupportOpen(prev => !prev)}
+                  className="w-full flex items-center justify-between px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2 hover:text-zinc-400 transition-colors group"
+                >
+                  <span>Support</span>
+                  <ChevronUp className={cn(
+                    "w-3 h-3 transition-transform duration-300",
+                    supportOpen ? "rotate-0" : "rotate-180"
+                  )} />
+                </button>
+
+                <motion.div
+                  initial={false}
+                  animate={{ height: supportOpen ? "auto" : 0, opacity: supportOpen ? 1 : 0 }}
+                  transition={{ duration: 0.25, ease: "easeInOut" }}
+                  style={{ overflow: "hidden" }}
+                >
+                  <nav className="space-y-0.5">
+                    {supportItems.map((item) => {
+                      const isActive = activeTab === `support:${item.id}`;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => handleSupportItem(item.id)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                            item.danger
+                              ? "text-zinc-600 hover:text-rose-400 hover:bg-rose-500/10"
+                              : isActive
+                              ? "bg-zinc-800 text-white"
+                              : item.accent
+                              ? "text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
+                              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+                          )}
+                        >
+                          <item.icon className={cn(
+                            "w-4 h-4 shrink-0 transition-colors",
+                            item.danger
+                              ? "text-zinc-600 group-hover:text-rose-400"
+                              : item.accent
+                              ? "text-cyan-400"
+                              : isActive
+                              ? "text-white"
+                              : "text-zinc-500 group-hover:text-zinc-300"
+                          )} />
+                          <span className="truncate">{item.label}</span>
+                          {isActive && (
+                            <motion.div layoutId="support-pill" className="ml-auto w-1.5 h-1.5 rounded-full bg-zinc-400" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </nav>
+                </motion.div>
+              </div>
+
             </div>
           </ScrollArea>
+
+          {/* Delete Account Confirm Dialog */}
+          <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+            <DialogContent className="sm:max-w-[400px] rounded-3xl border-rose-100 p-6">
+              <DialogHeader>
+                <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-500 mb-4 border border-rose-100">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <DialogTitle className="text-xl font-bold text-zinc-900">Delete Account?</DialogTitle>
+                <DialogDescription className="text-sm text-zinc-500 mt-1">
+                  This action is <strong>permanent and irreversible</strong>. All your enterprise data, branches, customers, and transactions will be permanently erased.
+                  <br /><br />
+                  Please contact <strong>support@orivo.app</strong> or use the Contact Support page to initiate an account deletion request reviewed by our team.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="mt-6 flex gap-3 sm:justify-end">
+                <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} className="rounded-xl border-zinc-200 font-bold">Cancel</Button>
+                <Button
+                  onClick={() => { setShowDeleteConfirm(false); setActiveTab("support:contact"); setIsMobileOpen(false); }}
+                  className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/20 font-bold"
+                >
+                  Contact Support
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {/* Clock */}
           <div className="hidden lg:flex justify-center py-2">
