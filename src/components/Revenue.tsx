@@ -745,28 +745,28 @@ export default function Revenue() {
       <div className="responsive-container">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="space-y-1">
+        <div className="space-y-1 max-w-full">
           <div className="flex items-center gap-2 text-blue-600 mb-2">
-            <Building2 className="w-5 h-5" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Treasury & Ledger</span>
+            <Building2 className="w-5 h-5 shrink-0" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] truncate">Treasury & Ledger</span>
           </div>
-          <h1 className="text-4xl font-bold tracking-tight text-zinc-900 font-display">Financial Control</h1>
-          <p className="text-zinc-500">Unified cash flow management, automated invoicing, and tax compliance.</p>
+          <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-zinc-900 font-display break-words">Financial Control</h1>
+          <p className="text-zinc-500 text-sm md:text-base leading-snug">Unified cash flow management, automated invoicing, and tax compliance.</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="outline" className="rounded-xl border-zinc-200 h-11 px-6 font-bold text-xs" onClick={() => setIsStatementDialogOpen(true)}>
-            <FileText className="w-4 h-4 mr-2 text-zinc-400" />
+        <div className="responsive-action-bar">
+          <Button variant="outline" className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs" onClick={() => setIsStatementDialogOpen(true)}>
+            <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
             Statements
           </Button>
-          <Button variant="outline" className="rounded-xl border-zinc-200 h-11 px-6 font-bold text-xs" onClick={() => setIsTaxDialogOpen(true)}>
-            <SettingsIcon className="w-4 h-4 mr-2 text-zinc-400" />
+          <Button variant="outline" className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs" onClick={() => setIsTaxDialogOpen(true)}>
+            <SettingsIcon className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
             Tax Engine
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs">
-                  <Plus className="w-4 h-4 mr-2" />
+                <Button className="flex-1 md:flex-none rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs">
+                  <Plus className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2" />
                   New Document
                 </Button>
               }

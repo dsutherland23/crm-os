@@ -70,7 +70,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen }: SidebarProps) {
-  const { isModuleEnabled, branding, posSession, enterpriseId, grantedOverrides, addOverride, logout } = useModules();
+  const { isModuleEnabled, branding, posSession, enterpriseId, grantedOverrides, addOverride, logout, userRole } = useModules();
   const [supportOpen, setSupportOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [lastInteraction, setLastInteraction] = useState(Date.now());
@@ -240,7 +240,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                     const isSupervisor = posSession?.payGrade === "SUPERVISOR";
                     
                     const isLocked = (() => {
-                      if (isExecutive) return false;
+                      if (isExecutive || userRole === "Owner") return false;
                       if (grantedOverrides.includes(item.id)) return false;
                       
                       // System is Executive ONLY

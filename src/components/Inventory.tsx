@@ -739,35 +739,35 @@ export default function Inventory() {
       <div className="responsive-container">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="space-y-1">
+        <div className="space-y-1 max-w-full">
           <div className="flex items-center gap-2 text-blue-600 mb-2">
-            <Warehouse className="w-5 h-5" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Inventory Intelligence</span>
+            <Warehouse className="w-5 h-5 shrink-0" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] truncate">Inventory Intelligence</span>
           </div>
-          <h1 className="text-4xl font-bold tracking-tight text-zinc-900 font-display">Stock Management</h1>
-          <p className="text-zinc-500">Global inventory control, automated replenishment, and logistics tracking.</p>
+          <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-zinc-900 font-display break-words">Stock Management</h1>
+          <p className="text-zinc-500 text-sm md:text-base leading-snug">Global inventory control, automated replenishment, and logistics tracking.</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="responsive-action-bar">
           <Button 
-            className="rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20 h-11 px-6 font-bold text-xs"
+            className="flex-1 md:flex-none rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs"
             onClick={() => openProductSheet()}
           >
-            <Plus className="w-4 h-4 mr-2" />
+            <Plus className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2" />
             Add Product
           </Button>
           <Button 
             variant="outline" 
-            className="rounded-xl border-zinc-200 h-11 px-4 font-bold text-xs"
+            className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-3 md:px-4 font-bold text-[10px] md:text-xs"
             onClick={() => setIsScannerOpen(true)}
           >
-            <ScanLine className="w-4 h-4 mr-2 text-blue-500" />
+            <ScanLine className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-blue-500" />
             Scan Barcode
           </Button>
           <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
             <DialogTrigger
               render={
-                <Button variant="outline" className="rounded-xl border-zinc-200 h-11 px-6 font-bold text-xs">
-                  <ArrowRightLeft className="w-4 h-4 mr-2 text-zinc-400" />
+                <Button variant="outline" className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs">
+                  <ArrowRightLeft className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
                   Transfer Stock
                 </Button>
               }
@@ -859,8 +859,8 @@ export default function Inventory() {
           <Dialog open={isPurchaseOrderOpen} onOpenChange={setIsPurchaseOrderOpen}>
             <DialogTrigger
               render={
-                <Button variant="outline" className="rounded-xl border-zinc-200 h-11 px-6 font-bold text-xs">
-                  <FileText className="w-4 h-4 mr-2 text-zinc-400" />
+                <Button variant="outline" className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs">
+                  <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
                   Purchase Order
                 </Button>
               }
@@ -875,8 +875,8 @@ export default function Inventory() {
                       </div>
                       <span className="text-[11px] font-black uppercase tracking-[0.3em]">Supply Chain Operations</span>
                     </div>
-                    <DialogTitle className="font-display tracking-tight text-4xl lg:text-5xl font-black leading-tight">Issue Purchase Order</DialogTitle>
-                    <DialogDescription className="text-zinc-400 font-medium text-base lg:text-lg">Provision inventory acquisition with professional SKU configuration.</DialogDescription>
+                    <DialogTitle className="font-display tracking-tight text-2xl md:text-4xl lg:text-5xl font-black leading-tight break-words">Issue Purchase Order</DialogTitle>
+                    <DialogDescription className="text-zinc-400 font-medium text-sm md:text-base lg:text-lg">Provision inventory acquisition with professional SKU configuration.</DialogDescription>
                   </div>
                   <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-6 border border-white/10 min-w-[220px] shadow-inner">
                     <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2">Reference ID</p>

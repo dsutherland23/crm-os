@@ -41,6 +41,8 @@ interface ModuleContextType {
   clearSession: () => void;
   grantedOverrides: string[];
   addOverride: (tabId: string) => void;
+  userRole: string | null;
+  setUserRole: (role: string | null) => void;
   logout: () => Promise<void>;
 }
 
@@ -119,6 +121,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     statusSince: string;
   } | null>(null);
   const [grantedOverrides, setGrantedOverrides] = useState<string[]>([]);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [shiftTimePolicies, setShiftTimePolicies] = useState({ breakDuration: 15, lunchDuration: 30, meetingDuration: 60, gracePeriod: 5 });
 
   const updateShiftStatus = (status: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING") => {
@@ -262,6 +265,8 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       grantedOverrides,
       addOverride,
       clearSession,
+      userRole,
+      setUserRole,
       logout
     }}>
       {children}

@@ -1251,9 +1251,9 @@ export default function CRM() {
           showDetailOnMobile ? "hidden lg:flex" : "flex"
         )}>
         <div className="p-6 lg:p-8 space-y-6 border-b border-zinc-100">
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold tracking-tight font-display">Customers</h2>
-            <Button onClick={() => setIsAddCustomerOpen(true)} className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h2 className="text-xl md:text-2xl font-bold tracking-tight font-display">Customers</h2>
+            <Button onClick={() => setIsAddCustomerOpen(true)} className="flex-1 sm:flex-none rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs">
               <Plus className="w-4 h-4 mr-2" />
               Add Customer
             </Button>
@@ -1385,21 +1385,23 @@ export default function CRM() {
                   </div>
                 </div>
                 <div>
-                  <div className="flex items-center gap-3 mb-2 flex-wrap">
-                    <h1 className="text-2xl lg:text-4xl font-bold tracking-tight text-zinc-900 font-display">{selectedCustomer.name}</h1>
-                    <Badge className="bg-blue-600 text-white border-none px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest">{selectedCustomer.segment}</Badge>
-                    {(selectedCustomer.spend >= topSpenderThreshold || selectedCustomer.total_spent >= topSpenderThreshold) && (
-                      <Badge className="bg-amber-500 text-white border-none px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
-                        <Crown className="w-3 h-3" />
-                        Top Spender
-                      </Badge>
-                    )}
+                  <div className="flex items-center gap-2 mb-2 flex-wrap max-w-full">
+                    <h1 className="text-xl lg:text-4xl font-bold tracking-tight text-zinc-900 font-display break-words">{selectedCustomer.name}</h1>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge className="bg-blue-600 text-white border-none px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest">{selectedCustomer.segment}</Badge>
+                      {(selectedCustomer.spend >= topSpenderThreshold || selectedCustomer.total_spent >= topSpenderThreshold) && (
+                        <Badge className="bg-amber-500 text-white border-none px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
+                          <Crown className="w-3 h-3" />
+                          VIP
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-4 lg:gap-6 text-xs lg:text-sm text-zinc-500 font-medium">
-                    <a href={`mailto:${selectedCustomer.email}`} className="flex items-center gap-2 hover:text-blue-600 cursor-pointer transition-colors"><Mail className="w-4 h-4" /> {selectedCustomer.email}</a>
-                    <a href={`tel:${selectedCustomer.phone}`} className="flex items-center gap-2 hover:text-blue-600 cursor-pointer transition-colors"><Phone className="w-4 h-4" /> {selectedCustomer.phone || "—"}</a>
+                  <div className="flex flex-wrap gap-x-4 gap-y-2 lg:gap-6 text-xs lg:text-sm text-zinc-500 font-medium">
+                    <a href={`mailto:${selectedCustomer.email}`} className="flex items-center gap-2 hover:text-blue-600 cursor-pointer transition-colors shrink-0"><Mail className="w-4 h-4" /> {selectedCustomer.email}</a>
+                    <a href={`tel:${selectedCustomer.phone}`} className="flex items-center gap-2 hover:text-blue-600 cursor-pointer transition-colors shrink-0"><Phone className="w-4 h-4" /> {selectedCustomer.phone || "—"}</a>
                     {selectedCustomer.address && (
-                      <div className="flex items-center gap-2"><MapPin className="w-4 h-4" /> {selectedCustomer.address}</div>
+                      <div className="flex items-center gap-2 min-w-0"><MapPin className="w-4 h-4 shrink-0" /> <span className="truncate">{selectedCustomer.address}</span></div>
                     )}
                   </div>
                 </div>

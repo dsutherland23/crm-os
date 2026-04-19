@@ -485,21 +485,21 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
   // ────────────────────────────────────────────────────────────────────
   return (
     <ScrollArea className="h-full">
-      <div className="p-4 sm:p-6 lg:p-10 space-y-8 max-w-7xl mx-auto">
+      <div className="responsive-container">
 
         {/* ── Header ──────────────────────────────────────────── */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6">
-          <div className="space-y-1">
+          <div className="space-y-1 max-w-full">
             <div className="flex items-center gap-2 text-blue-600 mb-1">
-              <BrainCircuit className="w-4 h-4" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em]">
+              <BrainCircuit className="w-4 h-4 shrink-0" />
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] truncate">
                 Neural Command Center
               </span>
             </div>
-            <h1 className="text-3xl lg:text-4xl font-bold tracking-tight text-zinc-900">
+            <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold tracking-tight text-zinc-900 font-display break-words">
               Command Center
             </h1>
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-zinc-500 leading-tight">
               Real-time operational overview across all branches.
             </p>
           </div>

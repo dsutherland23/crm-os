@@ -399,7 +399,7 @@ export default function Auth() {
                 <Input
                   type="email"
                   placeholder="you@company.com"
-                  className={cn("pl-10 h-12 rounded-xl bg-zinc-50 border-zinc-200 font-medium", errors.email && "border-rose-400")}
+                  className={cn("pl-10 h-12 rounded-xl bg-zinc-50 border-zinc-200 font-medium text-zinc-900 caret-blue-600", errors.email && "border-rose-400")}
                   value={email}
                   onChange={e => { setEmail(e.target.value); setErrors({}); }}
                   autoComplete="email"
@@ -490,10 +490,10 @@ export default function Auth() {
       </div>
 
       {/* ── RIGHT: Auth Panel ── */}
-      <div className="flex-1 flex items-center justify-center p-6 lg:p-16 bg-zinc-50 relative overflow-y-auto">
+      <div className="flex-1 flex flex-col items-center justify-start lg:justify-center p-6 sm:p-10 lg:p-16 bg-zinc-50 relative overflow-y-auto">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#f0f0f0_1px,transparent_1px),linear-gradient(to_bottom,#f0f0f0_1px,transparent_1px)] bg-[size:40px_40px] opacity-50 pointer-events-none" />
 
-        <div className="w-full max-w-[420px] relative z-10 space-y-6 py-8">
+        <div className="w-full max-w-[420px] relative z-10 space-y-6 pt-4 pb-12 lg:py-8">
 
           {/* Mobile logo */}
           <div className="flex items-center gap-3 lg:hidden">
@@ -504,7 +504,7 @@ export default function Auth() {
           </div>
 
           {/* CRM Visualization hero */}
-          <div className="w-full flex items-center justify-center relative h-52 -mt-4">
+          <div className="w-full flex items-center justify-center relative h-32 lg:h-52 -mt-4">
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <CpuArchitecture
                 width="460"
@@ -562,7 +562,7 @@ export default function Auth() {
                   <Input
                     type="email"
                     placeholder="you@company.com"
-                    className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium", errors.email && "border-rose-400")}
+                    className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium text-zinc-900 caret-blue-600", errors.email && "border-rose-400")}
                     value={email}
                     onChange={e => { setEmail(e.target.value); setErrors(p => ({ ...p, email: "" })); }}
                     autoComplete="email"
@@ -587,7 +587,7 @@ export default function Auth() {
                   <Input
                     type={showPassword ? "text" : "password"}
                     placeholder="••••••••"
-                    className={cn("pl-10 pr-10 h-12 rounded-xl bg-white border-zinc-200 font-medium", errors.password && "border-rose-400")}
+                    className={cn("pl-10 pr-10 h-12 rounded-xl bg-white border-zinc-200 font-medium text-zinc-900 caret-blue-600", errors.password && "border-rose-400")}
                     value={password}
                     onChange={e => { setPassword(e.target.value); setErrors(p => ({ ...p, password: "" })); }}
                     autoComplete="current-password"
@@ -638,7 +638,7 @@ export default function Auth() {
                       <Input
                         type="email"
                         placeholder="you@company.com"
-                        className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium", errors.email && "border-rose-400")}
+                        className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium text-zinc-900 caret-blue-600", errors.email && "border-rose-400")}
                         value={email}
                         onChange={e => { setEmail(e.target.value); setErrors(p => ({ ...p, email: "" })); }}
                         autoComplete="email"
@@ -658,7 +658,7 @@ export default function Auth() {
                       <Input
                         type={showPassword ? "text" : "password"}
                         placeholder="Create a strong password"
-                        className={cn("pl-10 pr-10 h-12 rounded-xl bg-white border-zinc-200 font-medium", errors.password && "border-rose-400")}
+                        className={cn("pl-10 pr-10 h-12 rounded-xl bg-white border-zinc-200 font-medium text-zinc-900 caret-blue-600", errors.password && "border-rose-400")}
                         value={password}
                         onChange={e => { setPassword(e.target.value); setErrors(p => ({ ...p, password: "" })); }}
                         autoComplete="new-password"
@@ -699,7 +699,7 @@ export default function Auth() {
                       <Input
                         type="text"
                         placeholder="Jane Doe"
-                        className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium", errors.fullName && "border-rose-400")}
+                        className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium text-zinc-900 caret-blue-600", errors.fullName && "border-rose-400")}
                         value={fullName}
                         onChange={e => { setFullName(e.target.value); setErrors(p => ({ ...p, fullName: "" })); }}
                         autoFocus
@@ -736,7 +736,7 @@ export default function Auth() {
                       <Input
                         type="text"
                         placeholder="Acme Corporation"
-                        className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium", errors.enterpriseName && "border-rose-400")}
+                        className={cn("pl-10 h-12 rounded-xl bg-white border-zinc-200 font-medium text-zinc-900 caret-blue-600", errors.enterpriseName && "border-rose-400")}
                         value={enterpriseName}
                         onChange={e => { setEnterpriseName(e.target.value); setErrors(p => ({ ...p, enterpriseName: "" })); }}
                         autoFocus

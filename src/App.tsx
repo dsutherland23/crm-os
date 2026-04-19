@@ -40,7 +40,7 @@ function AppContent() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null | undefined>(undefined); // undefined = still loading
   const [enterpriseLoading, setEnterpriseLoading] = useState(true);
-  const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId } = useModules();
+  const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId, setUserRole } = useModules();
 
   // ── Step 1: Auth State Listener ─────────────────────────────────
   useEffect(() => {
@@ -82,8 +82,10 @@ function AppContent() {
           if (profile.enterprise_id) {
             setEnterpriseId(profile.enterprise_id);
             setBranding({ name: profile.enterpriseName || profile.enterprise_id });
+            setUserRole(profile.role || null);
           } else {
             setEnterpriseId(null);
+            setUserRole(null);
           }
         } else {
           // Profile doesn't exist yet (mid-signup provisioning, wait for write)
