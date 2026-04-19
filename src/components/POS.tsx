@@ -333,8 +333,10 @@ export default function POS() {
     if (product) {
       addToCart(product);
       toast.success(`Added ${product.name} to cart`);
+      setIsScannerOpen(false); // Auto-close scanner on success
     } else {
       toast.error(`No product found for ${type}: ${data}`);
+      // Not closing scanner here to allow user to try again or try different item
     }
   };
 

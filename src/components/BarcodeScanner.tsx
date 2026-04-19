@@ -3,7 +3,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScanLine, Keyboard, Scan, AlertCircle } from 'lucide-react';
+import { ScanLine, Keyboard, Scan, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface BarcodeScannerProps {

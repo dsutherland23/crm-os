@@ -24,6 +24,9 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
+  Zap,
+  ZapOff,
+  Maximize2,
   ScanLine,
   Info,
   Percent,
@@ -32,7 +35,8 @@ import {
   Trash2,
   Check,
   X as XIcon,
-  RefreshCw
+  RefreshCw,
+  Loader2
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -92,6 +96,7 @@ import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, 
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AreaChart, Area, LineChart, Line, BarChart, Bar, Legend, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
+import { motion, AnimatePresence } from "motion/react";
 
 export default function Inventory() {
   const { activeBranch, formatCurrency, enterpriseId } = useModules();
@@ -132,6 +137,7 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true);
   const [isSavingProduct, setIsSavingProduct] = useState(false);
   const [isSavingSupplier, setIsSavingSupplier] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState<any>(null);
 
   // Actions State
@@ -148,14 +154,76 @@ export default function Inventory() {
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [hasCameraAccess, setHasCameraAccess] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [cameraMode, setCameraMode] = useState<'environment' | 'user'>('environment');
+  const [flashlight, setFlashlight] = useState(false);
 
-  // Sync camera stream to video element whenever it's ready
+  // ── NEURAL LENS BINDING ──────────────────────────────────────
   useEffect(() => {
-    if (cameraStream && videoRef.current) {
-      videoRef.current.srcObject = cameraStream;
-      videoRef.current.play().catch(console.error);
+    if (cameraStream && videoRef.current && hasCameraAccess) {
+      const video = videoRef.current;
+      video.srcObject = cameraStream;
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(err => console.warn("Lens auto-play deferred:", err));
+      }
     }
-  }, [cameraStream, hasCameraAccess]);
+  }, [cameraStream, hasCameraAccess, isCameraOpen]);
+
+  // ── NEURAL LENS ENGINE (2026) ──────────────────────────────────
+  useEffect(() => {
+    let activeStream: MediaStream | null = null;
+
+    const startCamera = async () => {
+      if (!isCameraOpen) return;
+      
+      // Hardware Handoff Delay
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      // Cleanup
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+      }
+
+      setIsInitializing(true);
+      setHasCameraAccess(false);
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: cameraMode, width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        
+        if (isCameraOpen) {
+          setCameraStream(stream);
+          setHasCameraAccess(true);
+        } else {
+          stream.getTracks().forEach(t => t.stop());
+        }
+      } catch (err) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          if (isCameraOpen) {
+            setCameraStream(stream);
+            setHasCameraAccess(true);
+          } else {
+            stream.getTracks().forEach(t => t.stop());
+          }
+        } catch (fErr) {
+          toast.error("Lens hardware unavailable.");
+          setIsCameraOpen(false);
+        }
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    startCamera();
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+      }
+    };
+  }, [isCameraOpen, cameraMode]);
 
   useEffect(() => {
     if (!enterpriseId) return;
@@ -450,9 +518,11 @@ export default function Inventory() {
       // Response Engine: product_found
       toast.success(`Found product: ${product.name}`);
       setSearchTerm(data);
+      setIsScannerOpen(false); // Close scanner on successful find
     } else {
       // Response Engine: product_not_found
       toast.info(`New ${type} detected: ${data}. Opening create product modal.`);
+      setIsScannerOpen(false); // Close scanner before opening registration sheet
       openProductSheet(null, { barcode: data });
     }
   };
@@ -2205,135 +2275,177 @@ export default function Inventory() {
       </DialogContent>
     </Dialog>
 
-    {/* Integrated Camera Interface */}
-    <Dialog open={isCameraOpen} onOpenChange={(open) => {
-      if (!open) {
-        if (cameraStream) {
-          cameraStream.getTracks().forEach(track => track.stop());
-          setCameraStream(null);
-        }
-        setHasCameraAccess(false);
-        setIsCameraOpen(false);
-      } else {
-        setIsCameraOpen(true);
-        // Delay slightly to ensure Dialog animation is finished and DOM is ready
-        setTimeout(() => {
-          const constraints = { 
-            video: { 
-              facingMode: 'environment', 
-              width: { ideal: 2048 }, 
-              height: { ideal: 2048 },
-              aspectRatio: 1
-            } 
-          };
+    {/* ── 2026 NEURAL CAMERA INTERFACE ────────────────────────────── */}
+    <Dialog open={isCameraOpen} onOpenChange={setIsCameraOpen}>
+      <DialogContent showCloseButton={false} className="max-w-4xl w-[95vw] h-[85vh] md:h-auto p-0 overflow-hidden rounded-[2.5rem] border-none bg-black shadow-[0_0_100px_rgba(0,0,0,1)] outline-none border-white/5 top-1/2 -translate-y-1/2">
+        <div className="relative h-full w-full flex flex-col overflow-hidden bg-zinc-950">
           
-          navigator.mediaDevices.getUserMedia(constraints)
-          .then(stream => {
-            setCameraStream(stream);
-            setHasCameraAccess(true);
-          })
-          .catch(err => {
-            console.warn("Environment camera failed, trying fallback:", err);
-            // Fallback for devices without environment camera or permission issues
-            navigator.mediaDevices.getUserMedia({ video: true })
-            .then(stream => {
-              setCameraStream(stream);
-              setHasCameraAccess(true);
-            })
-            .catch(fallbackErr => {
-              console.error("Critical camera failure:", fallbackErr);
-              toast.error("Lens initialization failed. Please check camera permissions.");
-              setIsCameraOpen(false);
-            });
-          });
-        }, 300);
-      }
-    }}>
-      <DialogContent showCloseButton={false} className="max-w-2xl w-full p-0 overflow-hidden rounded-[3rem] border-none bg-black top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
-        <div className="relative aspect-square w-full bg-zinc-950 flex items-center justify-center overflow-hidden">
-          {hasCameraAccess ? (
+          {/* ── IMMERSIVE VIEWPORT (Top Section) ────────────────────── */}
+          <div className="relative flex-1 w-full bg-black overflow-hidden">
+            {/* Stable Video Feed */}
             <video 
               ref={videoRef} 
               autoPlay 
               playsInline 
-              className="w-full h-full object-cover"
+              muted 
+              className={cn(
+                "absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 contrast-[1.1]",
+                (hasCameraAccess && !isInitializing) ? "opacity-100" : "opacity-0"
+              )} 
             />
-          ) : (
-            <div className="flex flex-col items-center gap-4 text-zinc-500">
-              <RefreshCw className="w-10 h-10 animate-spin" />
-              <p className="text-xs font-bold uppercase tracking-widest">Initializing Lens...</p>
+
+            {/* Shutter Flash Effect */}
+            <AnimatePresence>
+              {isCapturing && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.1 }}
+                  className="absolute inset-0 bg-white z-[100]"
+                />
+              )}
+            </AnimatePresence>
+
+            {/* Neural Viewfinder Overlays */}
+            <div className="absolute inset-0 pointer-events-none p-6 sm:p-12 z-40">
+              <div className="relative w-full h-full">
+                 {/* Scanning Beam */}
+                 {hasCameraAccess && (
+                    <motion.div 
+                      animate={{ top: ['5%', '95%', '5%'] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+                      className="absolute left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-400/40 to-transparent shadow-[0_0_15px_rgba(96,165,250,0.4)] z-10"
+                    />
+                 )}
+
+                 {/* Corner Brackets */}
+                 <div className="absolute inset-4 border border-white/5 rounded-[1.5rem]">
+                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-2 border-l-2 border-blue-500/40 rounded-tl-xl" />
+                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-2 border-r-2 border-blue-500/40 rounded-tr-xl" />
+                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-2 border-l-2 border-blue-500/40 rounded-bl-xl" />
+                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-2 border-r-2 border-blue-500/40 rounded-br-xl" />
+                 </div>
+              </div>
             </div>
-          )}
-          
-          {/* Overlay Guide */}
-          <div className="absolute inset-0 border-[40px] border-black/20 pointer-events-none">
-            <div className="w-full h-full border border-white/30 rounded-[1.5rem]" />
+
+            {/* HUD: HUD Buttons (Close / Flash / Flip) */}
+            <div className="absolute top-6 left-6 right-6 flex items-center justify-between z-50">
+               <Button 
+                  variant="outline" 
+                  className="rounded-full w-10 h-10 border-white/5 bg-black/40 backdrop-blur-3xl text-white hover:bg-white/10 p-0 shadow-2xl"
+                  onClick={() => setIsCameraOpen(false)}
+                >
+                <XIcon className="w-4 h-4" />
+              </Button>
+              
+              <div className="flex gap-2">
+                <Button 
+                    variant="outline" 
+                    className={cn(
+                      "rounded-full w-10 h-10 border-white/5 bg-black/40 backdrop-blur-3xl transition-all p-0 shadow-2xl",
+                      flashlight ? "text-yellow-400 border-yellow-500/30" : "text-white"
+                    )}
+                    onClick={() => setFlashlight(!flashlight)}
+                  >
+                  {flashlight ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4 opacity-40" />}
+                </Button>
+                <Button 
+                    variant="outline" 
+                    className="rounded-full w-10 h-10 border-white/5 bg-black/40 backdrop-blur-3xl text-white p-0 shadow-2xl"
+                    onClick={() => setCameraMode(prev => prev === 'environment' ? 'user' : 'environment')}
+                  >
+                  <RefreshCw className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Initialization Loader */}
+            {(!hasCameraAccess || isInitializing) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 text-zinc-500 bg-black z-50">
+                <div className="relative">
+                  <div className="absolute inset-0 blur-3xl bg-blue-600/20 rounded-full animate-pulse" />
+                  <RefreshCw className="w-12 h-12 animate-spin relative z-10 text-blue-500/60" />
+                </div>
+                <p className="text-[9px] font-black uppercase tracking-[0.6em] text-zinc-500 animate-pulse">Initializing Neural Link</p>
+              </div>
+            )}
           </div>
 
-          <div className="absolute bottom-8 left-0 right-0 flex items-center justify-center gap-8 px-8">
-            <Button 
-              variant="outline" 
-              className="rounded-full w-14 h-14 border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
-              onClick={() => setIsCameraOpen(false)}
-            >
-              <XIcon className="w-6 h-6" />
-            </Button>
+          {/* ── NEURAL CONTROL DECK (Bottom Section) ────────────────── */}
+          <div className="h-[180px] sm:h-[220px] w-full bg-zinc-950 border-t border-white/5 relative flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-zinc-950 to-black px-8">
             
-            <Button 
-              className="rounded-full w-20 h-20 bg-white text-black hover:scale-105 active:scale-95 transition-all shadow-2xl p-0 flex items-center justify-center"
-              onClick={async () => {
-                if (!videoRef.current || !canvasRef.current) return;
-                const canvas = canvasRef.current;
-                const video = videoRef.current;
-                
-                // Set canvas size to match video
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return;
-                
-                // Draw current frame
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                
-                // Convert to blob
-                canvas.toBlob(async (blob) => {
-                  if (!blob) return;
-                  const tid = toast.loading("Processing high-res capture...");
-                  
-                  try {
-                    const { getStorage, ref, uploadBytes, getDownloadURL } = await import("@/lib/firebase");
-                    const storage = getStorage();
-                    const storageRef = ref(storage, `products/photo_${Date.now()}.jpg`);
-                    await uploadBytes(storageRef, blob);
-                    const url = await getDownloadURL(storageRef);
-                    
-                    setProductForm(prev => ({ ...prev, image_url: url }));
-                    toast.success("Product photo secured", { id: tid });
-                    
-                    // Cleanup
-                    if (cameraStream) {
-                      cameraStream.getTracks().forEach(track => track.stop());
-                      setCameraStream(null);
-                    }
-                    setIsCameraOpen(false);
-                  } catch (err) {
-                    toast.error("Processing failed", { id: tid });
-                  }
-                }, 'image/jpeg', 0.9);
-              }}
-            >
-              <div className="w-16 h-16 rounded-full border-2 border-black/10 flex items-center justify-center">
-                <div className="w-14 h-14 rounded-full bg-zinc-900/5 border border-zinc-900/10" />
-              </div>
-            </Button>
+            {/* Technical Telemetry */}
+            <div className="flex items-center gap-5 px-5 py-1.5 bg-white/5 backdrop-blur-md rounded-full border border-white/5 shadow-inner">
+               <div className="flex items-center gap-2">
+                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Stable</span>
+               </div>
+               <div className="w-px h-2.5 bg-white/10" />
+               <span className="text-[8px] font-mono text-zinc-500">HDR ACTIVE</span>
+               <span className="text-[8px] font-mono text-zinc-500">AI SHARP</span>
+            </div>
 
-            <Button 
-              variant="outline" 
-              className="rounded-full w-14 h-14 border-white/20 bg-white/10 backdrop-blur-md text-white hover:bg-white/20"
-            >
-              <ImageIcon className="w-6 h-6" />
-            </Button>
+            {/* Primary Actions */}
+            <div className="w-full flex items-center justify-between max-w-sm">
+               {/* Gallery Preview */}
+               <div className="flex flex-col items-center gap-2">
+                  <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 overflow-hidden shadow-2xl ring-1 ring-white/5">
+                    {productForm.image_url ? (
+                      <img src={productForm.image_url} className="w-full h-full object-cover" />
+                    ) : <ImageIcon className="w-4 h-4 text-white/10" />}
+                  </div>
+                  <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">Assets</span>
+               </div>
+
+               {/* Shutter Button */}
+               <Button 
+                className="group relative rounded-full w-24 h-24 sm:w-28 sm:h-28 bg-white/5 hover:bg-white/10 p-0 shadow-2xl active:scale-95 transition-all border-none ring-1 ring-white/10 backdrop-blur-md"
+                onClick={async () => {
+                  if (!videoRef.current || !canvasRef.current || isCapturing) return;
+                  setIsCapturing(true);
+                  
+                  // Tacit Feedback
+                  new Audio("https://assets.mixkit.co/active_storage/sfx/702/702-preview.mp3").play().catch(() => {});
+
+                  const canvas = canvasRef.current;
+                  const video = videoRef.current;
+                  canvas.width = video.videoWidth;
+                  canvas.height = video.videoHeight;
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  
+                  canvas.toBlob(async (blob) => {
+                    if (!blob) return;
+                    const tid = toast.loading("Optimizing Neural Asset...");
+                    try {
+                      const { getStorage, ref, uploadBytes, getDownloadURL } = await import("@/lib/firebase");
+                      const storageRef = ref(getStorage(), `products/neural_asset_${Date.now()}.jpg`);
+                      await uploadBytes(storageRef, blob);
+                      const url = await getDownloadURL(storageRef);
+                      setProductForm(prev => ({ ...prev, image_url: url }));
+                      toast.success("Asset Secured", { id: tid });
+                      setIsCameraOpen(false);
+                    } catch (err) {
+                      toast.error("Upload Failure", { id: tid });
+                    } finally {
+                      setIsCapturing(false);
+                    }
+                  }, 'image/jpeg', 0.95);
+                }}
+               >
+                 <div className="absolute inset-2 sm:inset-3 rounded-full border-2 border-white opacity-20 group-hover:opacity-100 transition-opacity" />
+                 <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-white shadow-[0_0_30px_rgba(255,255,255,0.3)] ring-4 ring-black/20" />
+               </Button>
+
+               {/* Mode Switcher */}
+               <div className="flex flex-col items-center gap-2">
+                  <div className="w-12 h-12 rounded-full border border-white/10 bg-white/5 flex items-center justify-center shadow-2xl">
+                     <Maximize2 className="w-4 h-4 text-white/30" />
+                  </div>
+                  <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">Focus</span>
+               </div>
+            </div>
           </div>
         </div>
         <canvas ref={canvasRef} className="hidden" />
