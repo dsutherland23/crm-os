@@ -97,6 +97,7 @@ async function provisionEnterprise(uid: string, data: {
     status: "ACTIVE",
     createdAt: new Date().toISOString(),
   });
+  
   await setDoc(doc(db, "enterprise_settings", data.enterpriseId), {
     enterpriseName: data.enterpriseName,
     industry: data.industry,
@@ -105,6 +106,18 @@ async function provisionEnterprise(uid: string, data: {
     setupCompleted: true,
     createdAt: new Date().toISOString(),
   }, { merge: true });
+
+  // Provision an initial branch so the system is functional immediately
+  // This is the clean, production way to initialize a tenant
+  const branchCollection = collection(db, "branches");
+  await addDoc(branchCollection, {
+    name: "Main Headquarters",
+    status: "ACTIVE",
+    enterprise_id: data.enterpriseId,
+    parish: "Head Office",
+    address: "Primary Business Location",
+    createdAt: new Date().toISOString(),
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════

@@ -41,13 +41,13 @@ export interface BrandingConfig {
 }
 
 const DEFAULT_BRANDING: BrandingConfig = {
-  name: "CRM OS Enterprise",
+  name: "Your Organization",
   logo: "",
-  email: "connect@enterprise.com",
-  phone: "+1 876 555 0100",
-  address: "Innovation District, Kingston, Jamaica",
+  email: "admin@example.com",
+  phone: "+1 000 000 0000",
+  address: "Your Business Address",
   socials: { facebook: "", instagram: "", twitter: "", website: "" },
-  disclaimer: "Terms and conditions apply. All rights reserved."
+  disclaimer: "Terms and conditions apply."
 };
 
 const ModuleContext = createContext<ModuleContextType | undefined>(undefined);

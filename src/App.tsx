@@ -49,7 +49,6 @@ function AppContent() {
       setEnterpriseId("master-all");
       setBranding({ name: "Developer Mode" });
       setEnterpriseLoading(false);
-      import("./lib/seed").then(({ seedClientData }) => seedClientData("master-all"));
       return;
     }
 
@@ -82,9 +81,6 @@ function AppContent() {
           if (profile.enterprise_id) {
             setEnterpriseId(profile.enterprise_id);
             setBranding({ name: profile.enterpriseName || profile.enterprise_id });
-            import("./lib/seed").then(({ seedClientData }) =>
-              seedClientData(profile.enterprise_id)
-            );
           } else {
             setEnterpriseId(null);
           }

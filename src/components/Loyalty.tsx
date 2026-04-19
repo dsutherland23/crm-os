@@ -202,8 +202,8 @@ export default function Loyalty() {
             </div>
             <div>
               <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Total Points Issued</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">1.2M</h3>
-              <p className="text-[10px] text-emerald-600 font-bold mt-1">+12% this month</p>
+              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">0</h3>
+              <p className="text-[10px] text-zinc-400 font-bold mt-1">Awaiting data...</p>
             </div>
           </Card>
           <Card className="card-modern p-6 space-y-4">
@@ -212,8 +212,8 @@ export default function Loyalty() {
             </div>
             <div>
               <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Redemption Rate</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">24.5%</h3>
-              <Progress value={24.5} className="h-1.5 mt-2 bg-purple-100" />
+              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">0%</h3>
+              <Progress value={0} className="h-1.5 mt-2 bg-purple-100" />
             </div>
           </Card>
           <Card className="card-modern p-6 space-y-4">
@@ -222,7 +222,7 @@ export default function Loyalty() {
             </div>
             <div>
               <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">VIP Members</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">452</h3>
+              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">0</h3>
               <p className="text-[10px] text-zinc-400 font-bold mt-1">Tier: Gold & Platinum</p>
             </div>
           </Card>
@@ -232,8 +232,8 @@ export default function Loyalty() {
             </div>
             <div>
               <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Retention Boost</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">+18%</h3>
-              <p className="text-[10px] text-emerald-600 font-bold mt-1">Above baseline</p>
+              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">+0%</h3>
+              <p className="text-[10px] text-zinc-400 font-bold mt-1">Baseline established</p>
             </div>
           </Card>
         </div>
@@ -273,7 +273,7 @@ export default function Loyalty() {
                 <TableCell className="py-4 text-center">
                   <Badge variant="outline" className="text-[10px] font-bold">BASIC</Badge>
                 </TableCell>
-                <TableCell className="py-4 text-xs font-bold text-zinc-600">852 Customers</TableCell>
+                <TableCell className="py-4 text-xs font-bold text-zinc-600">0 Customers</TableCell>
                 <TableCell className="py-4 text-right">
                   <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
                 </TableCell>
@@ -289,7 +289,7 @@ export default function Loyalty() {
                 <TableCell className="py-4 text-center">
                   <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[10px] font-bold">5% CASHBACK</Badge>
                 </TableCell>
-                <TableCell className="py-4 text-xs font-bold text-zinc-600">312 Customers</TableCell>
+                <TableCell className="py-4 text-xs font-bold text-zinc-600">0 Customers</TableCell>
                 <TableCell className="py-4 text-right">
                   <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
                 </TableCell>
@@ -305,7 +305,7 @@ export default function Loyalty() {
                 <TableCell className="py-4 text-center">
                   <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] font-bold">10% CASHBACK + VIP EVENTS</Badge>
                 </TableCell>
-                <TableCell className="py-4 text-xs font-bold text-zinc-600">140 Customers</TableCell>
+                <TableCell className="py-4 text-xs font-bold text-zinc-600">0 Customers</TableCell>
                 <TableCell className="py-4 text-right">
                   <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
                 </TableCell>

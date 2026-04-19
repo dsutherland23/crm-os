@@ -559,34 +559,30 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
             Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
           ) : (
             <>
-              <StatCard
                 title="Gross Revenue"
                 value={formatCurrency(metrics.revenue)}
-                change="+14.2%"
+                change="0%"
                 icon={TrendingUp}
                 trend="up"
                 onClick={() => setActiveTab?.("revenue")}
               />
-              <StatCard
                 title="Customers"
                 value={metrics.customers.toLocaleString()}
-                change="+8.1%"
+                change="0%"
                 icon={Users}
                 trend="up"
                 onClick={() => setActiveTab?.("crm")}
               />
-              <StatCard
                 title="Total Orders"
                 value={metrics.orders.toLocaleString()}
-                change="-2.4%"
+                change="0%"
                 icon={ShoppingCart}
-                trend="down"
+                trend="up"
                 onClick={() => setActiveTab?.("pos")}
               />
-              <StatCard
                 title="Inventory Value"
                 value={formatCurrency(metrics.inventory)}
-                change="+5.2%"
+                change="0%"
                 icon={Package}
                 trend="up"
                 onClick={() => setActiveTab?.("inventory")}

@@ -29,12 +29,20 @@ export default function CommissionPartners() {
     notes: ""
   });
 
-  const admins = [
-    { id: "admin1", name: "Daan Sutherland", role: "Business Admin" }
-  ];
+  const [authorizedUsers, setAuthorizedUsers] = useState<any[]>([]);
 
   useEffect(() => {
     if (!enterpriseId) return;
+
+    // Fetch users of this enterprise to show in PIN lock screen
+    const qAdmin = query(collection(db, "users"), where("enterprise_id", "==", enterpriseId));
+    const unsubAdmins = onSnapshot(qAdmin, (snapshot) => {
+      setAuthorizedUsers(snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        name: doc.data().fullName || "Staff Member", 
+        role: doc.data().role || "User" 
+      })));
+    });
 
     const unsubSettings = onSnapshot(doc(db, "enterprise_settings", enterpriseId), (docSnapshot) => {
       if (docSnapshot.exists() && docSnapshot.data().commissionPin) {
@@ -47,6 +55,7 @@ export default function CommissionPartners() {
     });
 
     return () => {
+      unsubAdmins();
       unsubSettings();
       unsubPartners();
     };
@@ -111,7 +120,7 @@ export default function CommissionPartners() {
             {!selectedAdmin ? (
               <div className="space-y-4 pt-4">
                 <p className="text-sm font-medium text-zinc-500">Select an authorized user:</p>
-                {admins.map(admin => (
+                {authorizedUsers.map(admin => (
                   <div 
                     key={admin.id}
                     className="flex items-center gap-4 p-4 rounded-xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 cursor-pointer transition-all"
