@@ -1371,7 +1371,7 @@ export default function CRM() {
         </div>
 
         <ScrollArea className="flex-1 min-h-0 bg-zinc-50/30">
-          <div className="p-6 lg:p-10 space-y-10 max-w-6xl mx-auto">
+          <div className="responsive-container lg:p-10">
             {/* Profile Header */}
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
               <div className="flex items-center gap-6 lg:gap-8">
@@ -1406,8 +1406,8 @@ export default function CRM() {
                   </div>
                 </div>
               </div>
-            <div className="flex items-center gap-3">
-              <DropdownMenu>
+              <div className="flex flex-wrap items-center gap-3 mt-4 lg:mt-0">
+                <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
                     <Button variant="outline" className="rounded-xl border-zinc-200 h-12 px-6 font-bold text-xs bg-white shadow-sm hover:bg-zinc-50 transition-all">
@@ -1474,12 +1474,12 @@ export default function CRM() {
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <Button onClick={() => setIsOutreachDialogOpen(true)} className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-xl shadow-zinc-900/20 h-12 px-8 font-bold text-xs">
-                <Send className="w-4 h-4 mr-2" />
-                AI Outreach
-              </Button>
+                <Button onClick={() => setIsOutreachDialogOpen(true)} className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-xl shadow-zinc-900/20 h-10 px-6 sm:h-12 sm:px-8 font-bold text-xs shrink-0">
+                  <Send className="w-4 h-4 mr-2" />
+                  AI Outreach
+                </Button>
+              </div>
             </div>
-          </div>
 
           {/* Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -1525,13 +1525,15 @@ export default function CRM() {
           </div>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-            <TabsList className="bg-zinc-100 p-1 rounded-xl w-fit">
-              <TabsTrigger value="overview" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Overview</TabsTrigger>
-              <TabsTrigger value="invoices" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Invoices</TabsTrigger>
-              <TabsTrigger value="communication" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Communication</TabsTrigger>
-              <TabsTrigger value="notes" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Internal Notes</TabsTrigger>
-              <TabsTrigger value="files" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Files</TabsTrigger>
-            </TabsList>
+            <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+              <TabsList className="bg-zinc-100 p-1 rounded-xl w-max flex gap-1">
+                <TabsTrigger value="overview" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Overview</TabsTrigger>
+                <TabsTrigger value="invoices" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Invoices</TabsTrigger>
+                <TabsTrigger value="communication" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Communication</TabsTrigger>
+                <TabsTrigger value="notes" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Internal Notes</TabsTrigger>
+                <TabsTrigger value="files" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Files</TabsTrigger>
+              </TabsList>
+            </div>
 
             <TabsContent value="overview" className="space-y-8">
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -1925,7 +1927,7 @@ export default function CRM() {
                             <span className="text-xs font-bold text-zinc-900">{note.author}</span>
                             <span className="text-[10px] text-zinc-400 font-medium">{new Date(note.timestamp).toLocaleString()}</span>
                           </div>
-                          <p className="text-sm text-zinc-700 whitespace-pre-wrap">{note.content}</p>
+                          <p className="text-sm text-zinc-700 whitespace-pre-wrap break-words">{note.content}</p>
                         </div>
                       ))
                     ) : (
@@ -1973,9 +1975,9 @@ export default function CRM() {
                         <div key={doc.id} className="p-5 rounded-2xl border border-zinc-100 flex items-center justify-between group bg-white hover:border-zinc-200 hover:shadow-sm transition-all">
                           <div className="flex items-center gap-5">
                             {getFileIcon(doc.type || '')}
-                            <div>
-                              <p className="font-black text-sm text-zinc-900">{doc.name}</p>
-                              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tight">
+                            <div className="min-w-0">
+                              <p className="font-black text-sm text-zinc-900 truncate">{doc.name}</p>
+                              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tight truncate">
                                 Uploaded {new Date(doc.uploadedAt).toLocaleDateString()} • {formatFileSize(doc.size)} • {doc.author}
                               </p>
                             </div>

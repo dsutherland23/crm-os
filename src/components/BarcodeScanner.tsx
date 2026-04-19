@@ -44,21 +44,9 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
           }
         }
 
-        // Explicitly check for camera permissions first
-        try {
-          await navigator.mediaDevices.getUserMedia({ video: true });
-        } catch (err: any) {
-          console.error("Camera permission error:", err);
-          if (isComponentMounted) {
-            setIsInitializing(false);
-            const msg = err.name === 'NotAllowedError' || err.name === 'NotFoundError' 
-              ? "Camera access denied. Please allow camera permissions."
-              : "Could not access camera.";
-            setCameraError(msg);
-            toast.error(msg);
-          }
-          return;
-        }
+        // The html5-qrcode library handles its own permission requests.
+        // Calling getUserMedia here can sometimes 'lock' the camera resource on mobile,
+        // preventing the scanner engine from starting.
 
         if (!isComponentMounted) return;
 
@@ -66,12 +54,18 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
           const html5QrCode = new Html5Qrcode(scannerDivId);
           scannerRef.current = html5QrCode;
 
+          // Attempt to get devices first to verify hardware availability
+          const devices = await Html5Qrcode.getCameras();
+          if (!devices || devices.length === 0) {
+            throw new Error("No camera hardware detected on this device.");
+          }
+
           const cameraConfig = { facingMode: "environment" };
 
           await html5QrCode.start(
             cameraConfig,
             {
-              fps: 10,
+              fps: 15, // Slightly higher FPS for better mobile response
               qrbox: (viewfinderWidth, viewfinderHeight) => {
                 const minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
                 const qrboxSize = Math.min(Math.floor(minEdgeSize * 0.7), 250);
@@ -93,14 +87,21 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
           if (isComponentMounted) {
             setIsInitializing(false);
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Scanner init error:", err);
           if (isComponentMounted) {
             setIsInitializing(false);
-            setCameraError("Failed to start scanner engine.");
+            const errorMessage = err.message || "Failed to start scanner engine.";
+            setCameraError(errorMessage);
+            
+            if (err.name === 'NotAllowedError' || err.message?.includes('Permission')) {
+              toast.error("Camera access denied. Check site permissions.");
+            } else {
+              toast.error("Hardware Error: Could not bind camera stream.");
+            }
           }
         }
-      }, 500); // Increased delay for stability
+      }, 700); // Slightly longer delay for mobile viewport settlement
     }
 
     return () => {
@@ -241,17 +242,31 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
                     <AlertCircle className="w-6 h-6" />
                   </div>
                   <p className="text-sm font-bold text-zinc-900 mb-2">{cameraError}</p>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="rounded-xl"
-                    onClick={() => {
-                      setCameraError(null);
-                      setMode('manual');
-                    }}
-                  >
-                    Use Manual Input
-                  </Button>
+                  <div className="flex flex-col gap-2 w-full px-4">
+                    <Button 
+                      className="rounded-xl bg-zinc-900 text-white font-bold"
+                      onClick={() => {
+                        setCameraError(null);
+                        setIsInitializing(true);
+                        // Trigger a re-render to restart the useEffect
+                        setMode('manual');
+                        setTimeout(() => setMode('scanner'), 100);
+                      }}
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Retry Initialization
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      className="rounded-xl border-zinc-200"
+                      onClick={() => {
+                        setCameraError(null);
+                        setMode('manual');
+                      }}
+                    >
+                      Use Manual Input
+                    </Button>
+                  </div>
                 </div>
               )}
               <div id={scannerDivId} className="w-full" />

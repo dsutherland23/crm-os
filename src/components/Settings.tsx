@@ -628,16 +628,18 @@ export default function Settings() {
       </div>
 
       <Tabs defaultValue="modules" className="space-y-8">
-        <TabsList className="bg-zinc-100 p-1 rounded-2xl border border-zinc-200 flex flex-wrap gap-1 w-full sm:w-fit">
-          <TabsTrigger value="modules" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-bold text-xs">Modules</TabsTrigger>
-          <TabsTrigger value="general" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"> General </TabsTrigger>
-          <TabsTrigger value="branding" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"> Branding </TabsTrigger>
-           <TabsTrigger value="branches" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"> Branches </TabsTrigger>
-          <TabsTrigger value="staff" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"> Staff </TabsTrigger>
-          <TabsTrigger value="partners" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"> Partners </TabsTrigger>
-          <TabsTrigger value="roles" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"> Roles </TabsTrigger>
-          <TabsTrigger value="security" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm"> Security </TabsTrigger>
-        </TabsList>
+        <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+          <TabsList className="bg-zinc-100 p-1 rounded-2xl border border-zinc-200 flex w-max gap-1">
+            <TabsTrigger value="modules" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-bold text-xs shrink-0">Modules</TabsTrigger>
+            <TabsTrigger value="general" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0"> General </TabsTrigger>
+            <TabsTrigger value="branding" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0"> Branding </TabsTrigger>
+             <TabsTrigger value="branches" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0"> Branches </TabsTrigger>
+            <TabsTrigger value="staff" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0"> Staff </TabsTrigger>
+            <TabsTrigger value="partners" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0"> Partners </TabsTrigger>
+            <TabsTrigger value="roles" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0"> Roles </TabsTrigger>
+            <TabsTrigger value="security" className="rounded-xl px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0"> Security </TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="branding" className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

@@ -749,7 +749,7 @@ export default function Inventory() {
         </div>
         <div className="responsive-action-bar">
           <Button 
-            className="flex-1 md:flex-none rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs"
+            className="w-full sm:w-auto rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20 h-10 md:h-11 px-6 font-bold text-xs"
             onClick={() => openProductSheet()}
           >
             <Plus className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2" />
@@ -757,7 +757,7 @@ export default function Inventory() {
           </Button>
           <Button 
             variant="outline" 
-            className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-3 md:px-4 font-bold text-[10px] md:text-xs"
+            className="w-full sm:w-auto rounded-xl border-zinc-200 h-10 md:h-11 px-4 font-bold text-xs"
             onClick={() => setIsScannerOpen(true)}
           >
             <ScanLine className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-blue-500" />
@@ -766,7 +766,7 @@ export default function Inventory() {
           <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
             <DialogTrigger
               render={
-                <Button variant="outline" className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs">
+                <Button variant="outline" className="w-full sm:w-auto rounded-xl border-zinc-200 h-10 md:h-11 px-6 font-bold text-xs">
                   <ArrowRightLeft className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
                   Transfer Stock
                 </Button>
@@ -859,7 +859,7 @@ export default function Inventory() {
           <Dialog open={isPurchaseOrderOpen} onOpenChange={setIsPurchaseOrderOpen}>
             <DialogTrigger
               render={
-                <Button variant="outline" className="flex-1 md:flex-none rounded-xl border-zinc-200 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs">
+                <Button variant="outline" className="w-full sm:w-auto rounded-xl border-zinc-200 h-10 md:h-11 px-6 font-bold text-xs">
                   <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
                   Purchase Order
                 </Button>
@@ -1093,11 +1093,13 @@ export default function Inventory() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="bg-zinc-100 p-1 rounded-xl">
-          <TabsTrigger value="stock" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Stock Levels</TabsTrigger>
-          <TabsTrigger value="movements" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Movements</TabsTrigger>
-          <TabsTrigger value="suppliers" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Suppliers</TabsTrigger>
-        </TabsList>
+        <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+          <TabsList className="bg-zinc-100 p-1 rounded-xl w-max flex gap-1">
+            <TabsTrigger value="stock" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Stock Levels</TabsTrigger>
+            <TabsTrigger value="movements" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Movements</TabsTrigger>
+            <TabsTrigger value="suppliers" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Suppliers</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="stock" className="space-y-6">
           <Card className="card-modern overflow-hidden">
