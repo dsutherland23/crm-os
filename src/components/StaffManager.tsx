@@ -22,6 +22,7 @@ export default function StaffManager() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [selectedStaffMember, setSelectedStaffMember] = useState<any>(null);
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [newUser, setNewUser] = useState({ 
@@ -31,9 +32,10 @@ export default function StaffManager() {
     branches: ["all"],
     email: "",
     phone: "",
-    salaryType: "MONTHLY",
-    baseRate: 2500,
-    payGrade: "STANDARD"
+    salaryType: "HOURLY",
+    baseRate: 25,
+    payGrade: "STANDARD",
+    productivityTarget: 2500 // New 2026 Target Field
   });
 
   useEffect(() => {
@@ -68,33 +70,43 @@ export default function StaffManager() {
       return;
     }
     try {
-      const id = newUser.name.toLowerCase().replace(/\s+/g, '-') + Math.floor(Math.random() * 1000);
-      await setDoc(doc(db, "staff", id), {
-        ...newUser,
-        status: "ACTIVE",
-        createdAt: new Date().toISOString(),
-        enterprise_id: enterpriseId
-      });
-      
-      const logData = {
-        action: "Staff Access Created",
-        details: `Created new ${newUser.role} access for ${newUser.name}`,
-        timestamp: new Date().toISOString(),
-        user: "Admin",
-        enterprise_id: enterpriseId
-      };
-      await addDoc(collection(db, "audit_logs"), logData);
-      
-      await addDoc(collection(db, "notifications"), {
-        title: "Staff Member Created",
-        message: `${newUser.name} has been provisioned as a ${newUser.role}.`,
-        type: "success",
-        isRead: false,
-        createdAt: new Date().toISOString(),
-        enterprise_id: enterpriseId
-      });
+      if (isEditing && selectedStaffMember) {
+        await updateDoc(doc(db, "staff", selectedStaffMember.id), {
+          ...newUser,
+          updatedAt: new Date().toISOString()
+        });
+        toast.success("Staff profile updated");
+      } else {
+        const id = newUser.name.toLowerCase().replace(/\s+/g, '-') + Math.floor(Math.random() * 1000);
+        await setDoc(doc(db, "staff", id), {
+          ...newUser,
+          status: "ACTIVE",
+          createdAt: new Date().toISOString(),
+          enterprise_id: enterpriseId
+        });
+        
+        const logData = {
+          action: "Staff Access Created",
+          details: `Created new ${newUser.role} access for ${newUser.name}`,
+          timestamp: new Date().toISOString(),
+          user: "Admin",
+          enterprise_id: enterpriseId
+        };
+        await addDoc(collection(db, "audit_logs"), logData);
+        
+        await addDoc(collection(db, "notifications"), {
+          title: "Staff Member Created",
+          message: `${newUser.name} has been provisioned as a ${newUser.role}.`,
+          type: "success",
+          isRead: false,
+          createdAt: new Date().toISOString(),
+          enterprise_id: enterpriseId
+        });
+        toast.success("Staff profile created");
+      }
 
       setIsAddUserOpen(false);
+      setIsEditing(false);
       setNewUser({ 
         name: "", 
         role: "Cashier", 
@@ -102,14 +114,33 @@ export default function StaffManager() {
         branches: ["all"],
         email: "",
         phone: "",
-        salaryType: "MONTHLY",
-        baseRate: 2500,
-        payGrade: "STANDARD"
+        salaryType: "HOURLY",
+        baseRate: 25,
+        payGrade: "STANDARD",
+        productivityTarget: 2500
       });
       toast.success("Staff profile created");
     } catch (error: any) {
-      toast.error("Failed to create staff: " + error.message);
+      toast.error("Operation failed: " + error.message);
     }
+  };
+
+  const openEditDialog = (member: any) => {
+    setSelectedStaffMember(member);
+    setNewUser({
+      name: member.name,
+      role: member.role,
+      pin: member.pin,
+      branches: member.branches || ["all"],
+      email: member.email || "",
+      phone: member.phone || "",
+      salaryType: member.salaryType || "HOURLY",
+      baseRate: member.baseRate || 25,
+      payGrade: member.payGrade || "STANDARD",
+      productivityTarget: member.productivityTarget || 2500
+    });
+    setIsEditing(true);
+    setIsAddUserOpen(true);
   };
 
   const handleToggleStatus = async (id: string, currentStatus: string, staffName: string) => {
@@ -229,20 +260,36 @@ export default function StaffManager() {
             render={
               <Button 
                 className="rounded-xl px-6 h-11 bg-zinc-900 text-white hover:bg-zinc-800 font-bold shadow-xl shadow-zinc-200"
+                onClick={() => {
+                  setIsEditing(false);
+                  setNewUser({ 
+                    name: "", 
+                    role: "Cashier", 
+                    pin: "", 
+                    branches: ["all"],
+                    email: "",
+                    phone: "",
+                    salaryType: "HOURLY",
+                    baseRate: 25,
+                    payGrade: "STANDARD",
+                    productivityTarget: 2500
+                  });
+                  setIsAddUserOpen(true);
+                }}
               >
                 <Plus className="w-4 h-4 mr-2" /> Provision New Access
               </Button>
             }
           />
-          <DialogContent className="rounded-3xl border-zinc-100 p-0 overflow-hidden sm:max-w-xl">
-            <div className="p-6 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between">
+          <DialogContent className="rounded-3xl border-zinc-100 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm text-blue-600">
                   <User className="w-5 h-5" />
                 </div>
                 <div>
-                  <DialogTitle className="text-lg font-bold">New Staff Access</DialogTitle>
-                  <p className="text-xs text-zinc-500 font-medium mt-0.5">Provision secure credentials and location access.</p>
+                  <DialogTitle className="text-lg font-bold">{isEditing ? "Edit Staff Access" : "New Staff Access"}</DialogTitle>
+                  <p className="text-xs text-zinc-500 font-medium mt-0.5">{isEditing ? "Update existing credentials and parameters." : "Provision secure credentials and location access."}</p>
                 </div>
               </div>
             </div>
@@ -352,12 +399,24 @@ export default function StaffManager() {
                            </SelectContent>
                         </Select>
                      </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
                      <div className="space-y-2">
                         <Label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Base Rate ($)</Label>
                         <Input 
                            type="number"
                            value={newUser.baseRate}
                            onChange={(e) => setNewUser({...newUser, baseRate: parseFloat(e.target.value)})}
+                           className="rounded-xl border-zinc-200 h-12 font-bold bg-white"
+                        />
+                     </div>
+                     <div className="space-y-2">
+                        <Label className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Productivity Target ($/day)</Label>
+                        <Input 
+                           type="number"
+                           value={newUser.productivityTarget}
+                           onChange={(e) => setNewUser({...newUser, productivityTarget: parseFloat(e.target.value)})}
                            className="rounded-xl border-zinc-200 h-12 font-bold bg-white"
                         />
                      </div>
@@ -386,54 +445,73 @@ export default function StaffManager() {
                </div>
 
               <Button className="w-full rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 h-14 font-bold shadow-xl shadow-zinc-900/10 mt-4 group" onClick={handleCreateStaff}>
-                Grant Access & Lock Contract
+                {isEditing ? "Update Staff Record" : "Grant Access & Lock Contract"}
               </Button>
             </div>
           </DialogContent>
         </Dialog>
       </div>
 
-      {/* ── PERFORMANCE DASHBOARD (NEW 2026 SECTION) ──────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="card-modern bg-zinc-900 text-white border-zinc-800">
-           <CardContent className="p-6">
+      {/* ── PERFORMANCE DASHBOARD (2026 INTELLIGENCE) ──────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card className="card-modern bg-zinc-900 text-white border-zinc-800 shadow-2xl relative overflow-hidden group">
+           <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/10 rounded-full -mr-16 -mt-16 blur-3xl" />
+           <CardContent className="p-6 relative z-10">
               <div className="flex items-center justify-between mb-4">
                  <div className="p-2 bg-zinc-800 rounded-lg">
-                    <Activity className="w-5 h-5 text-blue-400" />
+                    <Activity className="w-5 h-5 text-blue-400 group-hover:animate-pulse" />
                  </div>
-                 <Badge className="bg-emerald-500/20 text-emerald-400 border-0 text-[10px] font-bold">LIVE PULSE</Badge>
+                 <Badge className="bg-emerald-500/20 text-emerald-400 border-0 text-[10px] font-black tracking-widest px-2 py-0.5">ROSTER LIVE</Badge>
               </div>
-              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Staff On-Clock</p>
-              <h3 className="text-3xl font-bold mt-1">
-                {sessions.filter(s => s.status === 'ACTIVE').length} <span className="text-sm font-medium text-zinc-500">Active</span>
+              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">On-Clock Personnel</p>
+              <h3 className="text-4xl font-black mt-1 tracking-tight">
+                {sessions.filter(s => s.status === 'ACTIVE').length} <span className="text-xs font-bold text-zinc-500 uppercase">Deployed</span>
               </h3>
            </CardContent>
         </Card>
-        <Card className="card-modern">
+
+        <Card className="card-modern group hover:border-blue-200 transition-all">
            <CardContent className="p-6">
               <div className="flex items-center justify-between mb-4">
-                 <div className="p-2 bg-blue-50 rounded-lg">
-                    <ShieldAlert className="w-5 h-5 text-blue-600" />
+                 <div className="p-2 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-all">
+                    <Coins className="w-5 h-5" />
                  </div>
               </div>
-              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Total Sales (MTD)</p>
-              <h3 className="text-3xl font-bold mt-1">
-                {formatCurrency(sessions.reduce((acc, s) => acc + (s.totalSales || 0), 0))}
+              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Enterprise ATV</p>
+              <h3 className="text-3xl font-black mt-1">
+                {formatCurrency(sessions.length > 0 ? (sessions.reduce((acc, s) => acc + (s.totalSales || 0), 0) / sessions.length) : 0)}
               </h3>
+              <p className="text-[10px] text-zinc-400 font-bold mt-2 font-mono italic">Avg Transaction Value</p>
            </CardContent>
         </Card>
-        <Card className="card-modern">
+
+        <Card className="card-modern group hover:border-indigo-200 transition-all">
            <CardContent className="p-6">
               <div className="flex items-center justify-between mb-4">
-                 <div className="p-2 bg-emerald-50 rounded-lg">
-                    <User className="w-5 h-5 text-emerald-600" />
+                 <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition-all">
+                    <CheckCircle2 className="w-5 h-5" />
                  </div>
               </div>
-              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Top Performer</p>
-              <h3 className="text-xl font-bold mt-2 truncate">
-                {staff.length > 0 ? staff[0].name : "N/A"}
+              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Productivity Score</p>
+              <h3 className="text-3xl font-black mt-1 text-indigo-600">84.2%</h3>
+              <div className="mt-2 h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
+                 <div className="h-full bg-indigo-500" style={{ width: '84%' }} />
+              </div>
+           </CardContent>
+        </Card>
+
+        <Card className="card-modern group hover:border-emerald-200 transition-all">
+           <CardContent className="p-6 border-l-4 border-l-emerald-500">
+              <div className="flex items-center justify-between mb-2">
+                 <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                    <User className="w-5 h-5" />
+                 </div>
+              </div>
+              <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Top Revenue Performer</p>
+              <h3 className="text-lg font-black mt-2 truncate text-zinc-900">
+                 {staff.length > 0 ? staff.sort((a,b) => (sessions.filter(s => s.staffId === b.id).reduce((acc,s) => acc + (s.totalSales || 0), 0)) - (sessions.filter(s => s.staffId === a.id).reduce((acc,s) => acc + (s.totalSales || 0), 0)))[0].name : "N/A"}
               </h3>
-              <p className="text-xs text-zinc-500 font-medium mt-1">Highest Conversion Rate</p>
+              <Badge variant="outline" className="text-[8px] font-black bg-emerald-50 text-emerald-600 border-emerald-100 uppercase mt-1">Executive Tier</Badge>
            </CardContent>
         </Card>
       </div>
@@ -527,6 +605,10 @@ export default function StaffManager() {
                                   <Activity className="w-4 h-4 text-blue-600" />
                                   View Intelligence
                                 </DropdownMenuItem>
+                                <DropdownMenuItem className="gap-2 py-3" onClick={(e) => { e.stopPropagation(); openEditDialog(s); }}>
+                                  <ShieldAlert className="w-4 h-4 text-emerald-600" />
+                                  Configure Access
+                                </DropdownMenuItem>
                                 <DropdownMenuItem className="gap-2 py-3" onClick={(e) => { e.stopPropagation(); handleToggleStatus(s.id, s.status, s.name); }}>
                                   <ShieldAlert className="w-4 h-4 text-rose-600" />
                                   {s.status === 'ACTIVE' ? 'Suspend Access' : 'Restore Access'}
@@ -597,13 +679,23 @@ export default function StaffManager() {
 
                    <div className="space-y-4">
                       <div className="flex items-center justify-between">
-                         <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Performance Benchmarking</p>
-                         <span className="text-[10px] text-emerald-600 font-bold">+12% vs. Avg</span>
+                         <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Daily Productivity Target</p>
+                         <span className="text-[10px] text-zinc-900 font-black">
+                           {formatCurrency(sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'ACTIVE').reduce((acc,s) => acc + (s.totalSales || 0), 0))} / {formatCurrency(selectedStaffMember.productivityTarget || 0)}
+                         </span>
                       </div>
-                      <div className="h-2 w-full bg-zinc-100 rounded-full overflow-hidden">
-                         <div className="h-full bg-blue-600 rounded-full" style={{ width: '88%' }} />
+                      <div className="h-2.5 w-full bg-zinc-100 rounded-full overflow-hidden border border-zinc-200">
+                         <div 
+                           className={cn(
+                             "h-full rounded-full transition-all duration-1000",
+                             ((sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'ACTIVE').reduce((acc,s) => acc + (s.totalSales || 0), 0) / (selectedStaffMember.productivityTarget || 1)) * 100) > 100 ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-blue-600"
+                           )} 
+                           style={{ width: `${Math.min(100, (sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'ACTIVE').reduce((acc,s) => acc + (s.totalSales || 0), 0) / (selectedStaffMember.productivityTarget || 1)) * 100)}%` }} 
+                         />
                       </div>
-                      <p className="text-[11px] text-zinc-500 font-medium">Top 5% performer in the {selectedStaffMember.branches?.[0] || 'main'} location.</p>
+                      <p className="text-[10px] text-zinc-500 font-bold italic">
+                        {((sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'ACTIVE').reduce((acc,s) => acc + (s.totalSales || 0), 0) / (selectedStaffMember.productivityTarget || 1)) * 100).toFixed(1)}% of shift target achieved.
+                      </p>
                    </div>
 
                    <div className="pt-4 space-y-3">

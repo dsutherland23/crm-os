@@ -113,6 +113,7 @@ interface SupportTicket {
   user_email: string;
   enterprise_id: string;
   createdAt: any;
+  metadata?: any;
 }
 
 interface TicketReply {
@@ -1773,6 +1774,27 @@ function SupportPane() {
                       <p className="text-[9px] text-zinc-600 font-bold ml-1">USER · {selectedTicket.createdAt?.toDate ? selectedTicket.createdAt.toDate().toLocaleTimeString() : 'Just now'}</p>
                     </div>
                   </div>
+
+                  {/* System Context (Diagnostic Bundle) */}
+                  {selectedTicket.metadata && (
+                    <div className="mx-12 px-5 py-4 bg-[#0d0d0f] border border-white/[0.03] rounded-3xl flex items-center justify-between group/meta hover:border-blue-500/20 transition-all">
+                      <div className="flex items-center gap-4">
+                        <div className="w-9 h-9 rounded-2xl bg-zinc-900 border border-white/[0.05] flex items-center justify-center text-zinc-600 group-hover/meta:text-blue-500 transition-colors">
+                          <Activity className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-white/50 uppercase tracking-widest">Diagnostic Bundle Captured</p>
+                          <p className="text-[9px] text-zinc-700 font-bold mt-0.5">
+                            {selectedTicket.metadata.os} · {selectedTicket.metadata.screenSize} · {selectedTicket.metadata.connection}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="hidden group-hover/meta:flex items-center gap-2 animate-in fade-in slide-in-from-right-2">
+                        <span className="text-[8px] font-mono text-zinc-600 bg-white/5 px-2 py-1 rounded-md">{selectedTicket.metadata.appVersion}</span>
+                        <span className="text-[8px] font-mono text-zinc-600 bg-white/5 px-2 py-1 rounded-md">{selectedTicket.metadata.language}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Replies Thread */}
                   {replies.map((r) => (

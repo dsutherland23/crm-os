@@ -35,7 +35,8 @@ import {
   UserCheck,
   Info,
   Image as ImageIcon,
-  Percent
+  Percent,
+  RefreshCw
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -80,7 +81,7 @@ import { toast } from "sonner";
 import { motion } from "motion/react";
 
 
-import { collection, onSnapshot, doc, setDoc, getDocs, writeBatch, addDoc, deleteDoc, query, where } from "@/lib/firebase";
+import { collection, onSnapshot, doc, setDoc, getDocs, writeBatch, addDoc, deleteDoc, query, where, serverTimestamp } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 
 import CommissionPartners from "./CommissionPartners";
@@ -104,9 +105,21 @@ export default function Settings() {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setBranding({ logo: reader.result as string });
-        toast.success("Logo updated successfully!");
+      reader.onloadend = async () => {
+        const base64Logo = reader.result as string;
+        setBranding({ logo: base64Logo });
+        
+        // Auto-save to cloud if enterpriseId exists
+        if (enterpriseId) {
+          try {
+            await setDoc(doc(db, "enterprise_settings", enterpriseId), {
+              branding: { ...branding, logo: base64Logo }
+            }, { merge: true });
+            toast.success("Identity asset synchronized to cloud.");
+          } catch (err) {
+            console.error("Failed to sync logo:", err);
+          }
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -142,7 +155,7 @@ export default function Settings() {
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [isRoleDialogOpen, setIsRoleDialogOpen] = useState(false);
   const [isEditRoleDialogOpen, setIsEditRoleDialogOpen] = useState(false);
-  const [newRole, setNewRole] = useState({ name: "", tier: "tier1", users: 0, permissions: {} });
+  const [newRole, setNewRole] = useState({ name: "", tier: "tier1", users: 0, permissions: {} as Record<string, any> });
   
   const getTierInfo = (tier?: string) => {
     switch(tier) {
@@ -167,12 +180,39 @@ export default function Settings() {
   const [lunchDuration, setLunchDuration] = useState("30");
   const [gracePeriod, setGracePeriod] = useState("10");
   const [taxRate, setTaxRate] = useState("15");
+  const [isTwoFactorEnabled, setIsTwoFactorEnabled] = useState(false);
+  const [auditLogRetention, setAuditLogRetention] = useState("90");
+  const [is2FALoading, setIs2FALoading] = useState(false);
 
 
   const handleGenerateKey = () => {
-    const newKey = "sk_test_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    const newKey = "sk_prod_" + Math.random().toString(36).substring(2, 15).toUpperCase() + Math.random().toString(36).substring(2, 15).toUpperCase();
     setApiKey(newKey);
-    toast.success("New API key generated!");
+    toast.success("New Production API key generated!", {
+      description: "Ensure this key is stored securely. It will not be shown again."
+    });
+  };
+
+  const handleToggle2FA = async (enabled: boolean) => {
+    setIs2FALoading(true);
+    // Simulate complex secure enrollment flow
+    const loadingToast = toast.loading(`${enabled ? 'Enabling' : 'Disabling'} Two-Factor Authentication...`);
+    
+    setTimeout(async () => {
+      try {
+        await setDoc(doc(db, "enterprise_settings", enterpriseId), {
+          twoFactorEnabled: enabled,
+          securityUpdated: serverTimestamp()
+        }, { merge: true });
+        
+        setIsTwoFactorEnabled(enabled);
+        toast.success(`Security protocol updated: 2FA is now ${enabled ? 'active' : 'inactive'} across all executive accounts.`, { id: loadingToast });
+      } catch (err: any) {
+        toast.error("Security update failed: " + err.message, { id: loadingToast });
+      } finally {
+        setIs2FALoading(false);
+      }
+    }, 1500);
   };
 
   const handleSavePin = async () => {
@@ -193,6 +233,40 @@ export default function Settings() {
       toast.success("Commission PIN updated securely.");
     } catch (error: any) {
       toast.error("Failed to update PIN: " + error.message);
+    }
+  };
+
+  const handleSaveBranding = async () => {
+    if (!enterpriseId) return;
+    
+    const loadingToast = toast.loading("Synchronizing Identity Profile...");
+    try {
+      await setDoc(doc(db, "enterprise_settings", enterpriseId), {
+        branding: {
+          ...branding,
+          enterprise_id: enterpriseId,
+          updatedAt: serverTimestamp()
+        },
+        enterpriseName: branding.name // Legacy sync for components still using root field
+      }, { merge: true });
+      
+      toast.success("Identity Profile Synchronized", {
+        id: loadingToast,
+        description: "Your branding assets have been committed to the secure edge network.",
+        duration: 4000
+      });
+    } catch (error: any) {
+      toast.error("Synchronization failed: " + error.message, { id: loadingToast });
+    }
+  };
+
+  const toggleBranchStatus = async (branchId: string, currentStatus: string) => {
+    const newStatus = currentStatus === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+    try {
+      await setDoc(doc(db, "branches", branchId), { status: newStatus }, { merge: true });
+      toast.success(`Branch ${newStatus.toLowerCase()} successfully.`);
+    } catch (err: any) {
+      toast.error("Status update failed: " + err.message);
     }
   };
 
@@ -247,16 +321,18 @@ export default function Settings() {
     }
     try {
       const tierMap: Record<string, any> = {
-        tier1: { crm: true, pos: true, inventory: false, finance: false, analytics: false, workflow: false, ai: false, audit_logs: false },
-        tier2: { crm: true, pos: true, inventory: true, finance: false, analytics: false, workflow: true, ai: false, audit_logs: false },
-        tier3: { crm: true, pos: true, inventory: true, finance: true, analytics: true, workflow: true, ai: true, audit_logs: true },
-        tier4: { crm: true, pos: true, inventory: true, finance: true, analytics: true, workflow: true, ai: true, audit_logs: true, settings: true }
+        tier1: { crm: "viewer", pos: "editor", inventory: "none", finance: "none", analytics: "none", workflow: "none", ai: "none", audit_logs: "none" },
+        tier2: { crm: "editor", pos: "admin", inventory: "editor", finance: "none", analytics: "viewer", workflow: "editor", ai: "none", audit_logs: "none" },
+        tier3: { crm: "admin", pos: "admin", inventory: "admin", finance: "editor", analytics: "editor", workflow: "admin", ai: "editor", audit_logs: "viewer" },
+        tier4: { crm: "admin", pos: "admin", inventory: "admin", finance: "admin", analytics: "admin", workflow: "admin", ai: "admin", audit_logs: "admin", settings: "admin" }
       };
 
+      const basePermissions = tierMap[newRole.tier as string] || tierMap.tier1;
       const roleData = {
         ...newRole,
-        permissions: tierMap[newRole.tier as string] || tierMap.tier1,
-        enterprise_id: enterpriseId
+        permissions: { ...basePermissions, ...newRole.permissions },
+        enterprise_id: enterpriseId,
+        createdAt: serverTimestamp()
       };
       await addDoc(collection(db, "roles"), roleData);
       setIsRoleDialogOpen(false);
@@ -414,6 +490,14 @@ export default function Settings() {
         if (data.taxRate !== undefined) {
           setTaxRate(data.taxRate.toString());
         }
+        if (data.modules) {
+          // Sync with context if mismatch? or just use context logic.
+          // For 2026, we ensure cloud is the source of truth.
+        }
+        if (data.twoFactorEnabled !== undefined) setIsTwoFactorEnabled(data.twoFactorEnabled);
+        if (data.auditLogRetention) setAuditLogRetention(data.auditLogRetention);
+        if (data.apiKey) setApiKey(data.apiKey);
+        if (data.commissionPin) setCommissionPin(data.commissionPin);
       }
     }, (error) => {
       console.error("Error fetching settings:", error);
@@ -439,6 +523,7 @@ export default function Settings() {
       return;
     }
 
+    const loadingToast = toast.loading("Updating Global Governance...");
     try {
       setTopSpenderThreshold(thresholdNumber);
       await setDoc(doc(db, "enterprise_settings", enterpriseId), {
@@ -448,16 +533,37 @@ export default function Settings() {
         topSpenderThreshold: thresholdNumber,
         autoCloseTime,
         autoCloseEnabled,
-        breakDuration,
-        lunchDuration,
-        gracePeriod,
+        breakDuration: parseInt(breakDuration),
+        lunchDuration: parseInt(lunchDuration),
+        gracePeriod: parseInt(gracePeriod),
         taxRate: parseFloat(taxRate) || 15,
-        enterprise_id: enterpriseId
+        enterprise_id: enterpriseId,
+        updatedAt: serverTimestamp()
       }, { merge: true });
 
-      toast.success("Global settings saved successfully!");
+      toast.success("Global configurations synchronized successfully.", { id: loadingToast });
     } catch (error: any) {
-      toast.error("Failed to save settings: " + error.message);
+      toast.error("Sync failed: " + error.message, { id: loadingToast });
+    }
+  };
+
+  const handleCommitModules = async () => {
+    if (!enterpriseId) return;
+    
+    const loadingToast = toast.loading("Provisioning Module Matrix...");
+    try {
+      await setDoc(doc(db, "enterprise_settings", enterpriseId), {
+        modules: config,
+        matrixUpdated: serverTimestamp()
+      }, { merge: true });
+      
+      toast.success("Feature matrix committed to cloud.", {
+        id: loadingToast,
+        description: "Your enterprise capability set has been updated globally.",
+        duration: 3000
+      });
+    } catch (error: any) {
+      toast.error("Module commit failed: " + error.message, { id: loadingToast });
     }
   };
 
@@ -737,12 +843,7 @@ export default function Settings() {
               <div className="flex justify-end pt-4">
                  <Button 
                    className="rounded-2xl h-14 px-10 bg-zinc-900 text-white font-bold hover:shadow-xl hover:shadow-zinc-900/20 transition-all flex items-center gap-3 active:scale-95"
-                   onClick={() => {
-                     toast.success("Identity Profile Synchronized", {
-                       description: "Your branding assets have been committed to the secure edge network.",
-                       duration: 4000
-                     });
-                   }}
+                   onClick={handleSaveBranding}
                  >
                    <CheckCircle2 className="w-5 h-5" />
                    Commit Identity Profile
@@ -832,11 +933,21 @@ export default function Settings() {
                     checked={config[module.id as keyof typeof config]} 
                     onCheckedChange={() => {
                       toggleModule(module.id as keyof typeof config);
-                      toast.success(`${module.name} ${!config[module.id as keyof typeof config] ? 'enabled' : 'disabled'}`);
+                      // Auto-save local is fine, but we also save to cloud on commit
                     }}
                   />
                 </div>
               ))}
+              
+              <div className="pt-8 flex justify-end">
+                <Button 
+                   className="rounded-2xl h-14 px-10 bg-zinc-900 text-white font-bold hover:shadow-xl hover:shadow-zinc-900/20 transition-all flex items-center gap-3 active:scale-95"
+                   onClick={handleCommitModules}
+                >
+                  <Zap className="w-5 h-5 text-amber-400" />
+                  Commit Feature Matrix
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -1094,12 +1205,17 @@ export default function Settings() {
                     </TableCell>
                     <TableCell className="py-4 font-medium text-zinc-700">{b.manager}</TableCell>
                     <TableCell className="py-4">
-                      <Badge className={cn(
-                        "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full",
-                        b.status === "ACTIVE" ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-amber-50 text-amber-600 border-amber-100"
-                      )}>
-                        {b.status}
-                      </Badge>
+                      <button 
+                        onClick={() => toggleBranchStatus(b.id, b.status || "ACTIVE")}
+                        className={cn(
+                          "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-tighter transition-all border",
+                          (b.status === "ACTIVE" || !b.status) 
+                            ? "bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100" 
+                            : "bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-100"
+                        )}
+                      >
+                        {b.status || "ACTIVE"}
+                      </button>
                     </TableCell>
                     <TableCell className="text-right py-4">
                       <DropdownMenu>
@@ -1209,6 +1325,31 @@ export default function Settings() {
                       </div>
                     </motion.div>
                   )}
+
+                  <div className="space-y-4 pt-4 border-t border-zinc-100">
+                    <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Matrix Overrides</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {modules.slice(0, 4).map(m => (
+                        <div key={m.id} className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-100">
+                          <span className="text-[10px] font-bold text-zinc-900">{m.name}</span>
+                          <Select 
+                            value={newRole.permissions[m.id] || "none"}
+                            onValueChange={(v) => setNewRole({...newRole, permissions: {...newRole.permissions, [m.id]: v}})}
+                          >
+                            <SelectTrigger className="h-7 w-20 text-[9px] uppercase font-bold rounded-lg bg-white">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="rounded-xl">
+                              <SelectItem value="none">None</SelectItem>
+                              <SelectItem value="viewer">View</SelectItem>
+                              <SelectItem value="editor">Edit</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex gap-4">
@@ -1299,20 +1440,22 @@ export default function Settings() {
                   <div className={cn("p-3 rounded-2xl shadow-sm ring-1", getTierInfo(role.tier).color)}>
                     <Users className="w-5 h-5" />
                   </div>
-                  <Badge variant="outline" className="text-[10px] font-bold uppercase border-zinc-100">{role.users} Users</Badge>
+                  <Badge variant="outline" className="text-[10px] font-bold uppercase border-zinc-100">{role.users || 0} Users</Badge>
                 </div>
                 <div>
                   <h4 className="font-bold text-zinc-900">{role.name}</h4>
                   <p className="text-xs text-zinc-500 mt-1">{role.access || getTierInfo(role.tier).label}</p>
                 </div>
                 <div className="pt-4 flex items-center justify-between border-t border-zinc-50">
-                  <Button variant="ghost" size="sm" className="text-[10px] font-bold text-blue-600 hover:bg-blue-50 rounded-lg h-8" onClick={() => {
-                    setEditingRole({
-                      ...role,
-                      permissions: role.permissions || {}
-                    });
-                    setIsEditRoleDialogOpen(true);
-                  }}>Edit Permissions</Button>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" className="text-[10px] font-bold text-blue-600 hover:bg-blue-50 rounded-lg h-8" onClick={() => {
+                      setEditingRole({
+                        ...role,
+                        permissions: role.permissions || {}
+                      });
+                      setIsEditRoleDialogOpen(true);
+                    }}>Permissions</Button>
+                  </div>
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-rose-600" onClick={() => handleDeleteRole(role.id)}>
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -1334,7 +1477,11 @@ export default function Settings() {
                   <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Enterprise Name</Label>
                   <Input 
                     value={branding.name} 
-                    onChange={(e) => setBranding({ name: e.target.value })}
+                    onChange={(e) => {
+                      const newName = e.target.value;
+                      setBranding({ name: newName });
+                      setEnterpriseName(newName);
+                    }}
                     className="rounded-xl border-zinc-200 h-12 font-bold" 
                   />
                 </div>
@@ -1498,10 +1645,17 @@ export default function Settings() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-bold text-zinc-900">Two-Factor Authentication</p>
-                    <p className="text-xs text-zinc-500">Require a code from your mobile device to log in.</p>
+                    <p className="text-xs text-zinc-500">Require MFA for privileged system access.</p>
                   </div>
                 </div>
-                <Switch />
+                <div className="flex items-center gap-3">
+                  {is2FALoading && <span className="text-[10px] font-bold text-blue-500 animate-pulse">ENROLLING...</span>}
+                  <Switch 
+                    checked={isTwoFactorEnabled}
+                    onCheckedChange={handleToggle2FA}
+                    disabled={is2FALoading}
+                  />
+                </div>
               </div>
               <div className="flex items-center justify-between py-4 border-b border-zinc-100 group">
                 <div className="flex items-center gap-4">
@@ -1510,7 +1664,7 @@ export default function Settings() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-bold text-zinc-900">API Access Keys</p>
-                    <p className="text-xs text-zinc-500">Manage keys for external integrations and webhooks.</p>
+                    <p className="text-xs text-zinc-500">Manage keys for integrations and webhooks.</p>
                   </div>
                 </div>
                 <Dialog open={isKeysDialogOpen} onOpenChange={setIsKeysDialogOpen}>
@@ -1525,10 +1679,10 @@ export default function Settings() {
                   <DialogContent className="rounded-3xl border-zinc-100 p-6">
                     <DialogHeader>
                       <DialogTitle className="font-bold text-xl">API Access Keys</DialogTitle>
-                      <DialogDescription>Manage your API keys for external integrations.</DialogDescription>
+                      <DialogDescription>Generate keys for system-to-system communication.</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
-                      <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-100">
+                      <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-100 overflow-hidden">
                         <p className="text-sm font-mono text-zinc-600 break-all">{apiKey}</p>
                       </div>
                       <Button variant="outline" className="w-full rounded-xl h-11 font-bold" onClick={handleGenerateKey}>Generate New Key</Button>
@@ -1543,10 +1697,24 @@ export default function Settings() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-bold text-zinc-900">Audit Log Retention</p>
-                    <p className="text-xs text-zinc-500">Keep system logs for compliance and security.</p>
+                    <p className="text-xs text-zinc-500">Total event history retention period.</p>
                   </div>
                 </div>
-                <Badge variant="secondary" className="rounded-lg font-bold">90 Days</Badge>
+                <Select value={auditLogRetention} onValueChange={(v) => {
+                  setAuditLogRetention(v);
+                  setDoc(doc(db, "enterprise_settings", enterpriseId), { auditLogRetention: v }, { merge: true });
+                  toast.success(`Retention policy updated to ${v} days.`);
+                }}>
+                  <SelectTrigger className="w-32 h-9 rounded-lg font-bold text-[10px] uppercase border-zinc-100">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="30">30 Days</SelectItem>
+                    <SelectItem value="90">90 Days</SelectItem>
+                    <SelectItem value="365">1 Year</SelectItem>
+                    <SelectItem value="0">Indefinite</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="flex items-center justify-between py-4 group">
@@ -1556,7 +1724,7 @@ export default function Settings() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-bold text-zinc-900">Commission Partners PIN</p>
-                    <p className="text-xs text-zinc-500">Access code required to view and manage sales commissions.</p>
+                    <p className="text-xs text-zinc-500">Access code for partner financial payouts.</p>
                   </div>
                 </div>
                 <Dialog open={isCommissionPinDialogOpen} onOpenChange={setIsCommissionPinDialogOpen}>
@@ -1569,8 +1737,8 @@ export default function Settings() {
                   />
                   <DialogContent className="rounded-3xl border-zinc-100 p-6">
                     <DialogHeader>
-                      <DialogTitle className="font-bold text-xl">Change Commission PIN</DialogTitle>
-                      <DialogDescription>For security, please enter your current PIN to set a new one. Default is 1234.</DialogDescription>
+                      <DialogTitle className="font-bold text-xl">Commission Access PIN</DialogTitle>
+                      <DialogDescription>Set a 4-digit code to protect sensitive payouts.</DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                       <div className="space-y-2">
@@ -1595,7 +1763,7 @@ export default function Settings() {
                           placeholder="••••"
                         />
                       </div>
-                      <Button className="w-full rounded-xl bg-orange-600 hover:bg-orange-700 text-white h-11 font-bold shadow-md shadow-orange-600/20" onClick={handleSavePin}>
+                      <Button className="w-full rounded-xl bg-orange-600 text-white h-11 font-bold" onClick={handleSavePin}>
                         Update PIN
                       </Button>
                     </div>

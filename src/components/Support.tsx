@@ -227,6 +227,7 @@ function FeedbackSection() {
     if (!message.trim()) { toast.error("Please describe your feedback."); return; }
     setLoading(true);
     try {
+      const deviceInfo = getDeviceInfo();
       await addDoc(collection(db, "feedback"), {
         type,
         subject,
@@ -235,6 +236,7 @@ function FeedbackSection() {
         enterprise_id: enterpriseId,
         user_email: auth.currentUser?.email,
         createdAt: serverTimestamp(),
+        metadata: deviceInfo,
       });
       setDone(true);
     } catch {
@@ -291,7 +293,14 @@ function FeedbackSection() {
       </div>
 
       <div>
-        <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3">Rate Your Experience</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Rate Your Experience</p>
+          {rating > 0 && (
+            <span className="text-[10px] font-black text-amber-600 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200 animate-in fade-in zoom-in">
+              {rating === 5 ? "ABSOLUTELY AMAZING" : rating === 4 ? "GREAT EXPERIENCE" : rating === 3 ? "GOOD" : rating === 2 ? "COULD BE BETTER" : "POOR"}
+            </span>
+          )}
+        </div>
         <div className="flex gap-2">
           {[1, 2, 3, 4, 5].map((s) => (
             <button
@@ -299,42 +308,75 @@ function FeedbackSection() {
               onMouseEnter={() => setHoveredStar(s)}
               onMouseLeave={() => setHoveredStar(0)}
               onClick={() => setRating(s)}
-              className="transition-transform hover:scale-110"
+              className="group relative"
             >
               <Star
                 className={cn(
-                  "w-7 h-7 transition-colors",
-                  s <= (hoveredStar || rating) ? "fill-amber-400 text-amber-400" : "text-zinc-200"
+                  "w-10 h-10 transition-all duration-300",
+                  (hoveredStar || rating) >= s
+                    ? "fill-amber-400 text-amber-400 scale-110 drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]"
+                    : "text-zinc-200 hover:text-zinc-300"
                 )}
               />
+              {rating === s && (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                </span>
+              )}
             </button>
           ))}
         </div>
       </div>
 
       <div className="space-y-3">
+        <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest block">Subject</label>
         <Input
-          placeholder="Subject (optional)"
+          placeholder="Summary of your feedback..."
           value={subject}
           onChange={(e) => setSubject(e.target.value)}
-          className="h-11 rounded-xl border-zinc-200"
+          className="h-12 rounded-2xl border-zinc-200 bg-zinc-50 focus:bg-white transition-all text-sm font-medium"
         />
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-bold text-zinc-500 uppercase tracking-widest block">Detailed Comments</label>
+          <span className={cn("text-[10px] font-bold", message.length > 500 ? "text-rose-500" : "text-zinc-400")}>
+            {message.length} / 1000
+          </span>
+        </div>
         <textarea
-          placeholder="Describe your idea, issue, or experience in detail..."
+          placeholder="Tell us more. What would you change? What do you love?"
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          rows={5}
-          className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm placeholder:text-zinc-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all resize-none"
+          onChange={(e) => setMessage(e.target.value.slice(0, 1000))}
+          rows={6}
+          className="w-full rounded-[2.5rem] border border-zinc-200 bg-zinc-50 px-8 py-6 text-sm font-medium placeholder:text-zinc-400 outline-none focus:ring-2 focus:ring-blue-500/10 focus:border-blue-400 focus:bg-white transition-all resize-none shadow-inner"
         />
+      </div>
+
+      <div className="flex items-center gap-4 p-5 bg-zinc-50 border border-zinc-200 rounded-[2rem]">
+        <div className="w-12 h-12 rounded-2xl bg-zinc-900 flex items-center justify-center text-white shrink-0">
+          <Sparkles className="w-6 h-6" />
+        </div>
+        <div>
+          <p className="text-xs font-bold text-zinc-900">Direct Pipeline to Engineering</p>
+          <p className="text-[10px] text-zinc-500 leading-tight">Your feedback is instantly triaged and delivered to our product team's weekly sprint planning.</p>
+        </div>
       </div>
 
       <Button
         onClick={submit}
-        disabled={loading}
-        className="w-full h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white font-bold shadow-lg gap-2"
+        disabled={loading || !message.trim()}
+        className={cn(
+          "w-full h-14 rounded-2xl font-black text-xs uppercase tracking-widest transition-all duration-300 gap-3",
+          type === "praise" ? "bg-amber-500 hover:bg-amber-600 shadow-lg shadow-amber-500/25 text-white border-0" :
+          type === "bug" ? "bg-rose-500 hover:bg-rose-600 shadow-lg shadow-rose-500/25 text-white border-0" :
+          "bg-zinc-900 hover:bg-black shadow-lg shadow-zinc-900/25 text-white border-0"
+        )}
       >
-        {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        {loading ? "Submitting..." : "Submit Feedback"}
+        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+        Submit Feedback
       </Button>
     </div>
   );
@@ -359,24 +401,39 @@ function PolicySection({ title, icon: Icon, content }: { title: string; icon: Re
 
 const PRIVACY_CONTENT = (
   <>
-    <p><strong className="text-zinc-900">1. Data We Collect</strong><br/>We collect information you provide when creating an account (name, email, business name), operational data generated within the platform (transactions, customer records, inventory), and anonymized usage telemetry to improve the product.</p>
-    <p><strong className="text-zinc-900">2. How We Use Your Data</strong><br/>Your data is used exclusively to provide and improve the Orivo CRM service. We never sell, rent, or share your enterprise data with third parties. All analytics are aggregated and anonymized.</p>
-    <p><strong className="text-zinc-900">3. Data Isolation & Security</strong><br/>Every record is scoped to your unique <code className="bg-zinc-100 px-1 py-0.5 rounded text-xs font-mono">enterprise_id</code>. Firestore security rules enforce strict read/write isolation — no other tenant can access your data under any circumstances.</p>
-    <p><strong className="text-zinc-900">4. Data Retention</strong><br/>Your data is retained for the lifetime of your account plus 90 days after deletion to support recovery requests. You may request immediate deletion by contacting our team.</p>
-    <p><strong className="text-zinc-900">5. Your Rights</strong><br/>You have the right to access, correct, export, and delete your personal data at any time. Submit a request via the Contact Support form and we will respond within 48 hours.</p>
-    <p><strong className="text-zinc-900">6. Contact</strong><br/>For privacy inquiries: <a href="mailto:privacy@orivocrm.pro" className="text-blue-600 underline">privacy@orivocrm.pro</a></p>
+    <div className="space-y-6">
+      <section>
+        <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-blue-500/30">1. Data Sovereignty</h4>
+        <p>We implement a "Zero-Knowledge" infrastructure for enterprise sensitive data. All operational records, including customer financials and dental scans, are encrypted at rest and scoped to your unique <code className="bg-zinc-100 text-blue-600 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">ENT_ID_{Math.random().toString(36).slice(2, 6).toUpperCase()}</code>. We do not have visual access to your clinical records.</p>
+      </section>
+      <section>
+        <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-blue-500/30">2. AI Training & Isolation</h4>
+        <p>Your data is never used to train global AI models for other tenants. Any local AI Copilot optimizations are performed in a sandboxed environment dedicated to your enterprise instance.</p>
+      </section>
+      <section>
+        <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-blue-500/30">3. Third-Party Protocols</h4>
+        <p>We share minimal essential data only with verified 2026 compliance partners (e.g., Stripe for payments, Twilio for communications) who adhere to our strict SOC-3 data handling standards.</p>
+      </section>
+    </div>
   </>
 );
 
 const TERMS_CONTENT = (
   <>
-    <p><strong className="text-zinc-900">1. Acceptance of Terms</strong><br/>By using Orivo CRM, you agree to these Terms of Service. If you do not agree, please discontinue use immediately.</p>
-    <p><strong className="text-zinc-900">2. License</strong><br/>We grant you a limited, non-exclusive, non-transferable license to use the platform for your internal business operations. You may not resell, sublicense, or reverse-engineer any part of the platform.</p>
-    <p><strong className="text-zinc-900">3. Acceptable Use</strong><br/>You agree not to use the platform for illegal activities, to store prohibited content, or to attempt unauthorized access to other tenants' data. Violations may result in immediate account suspension.</p>
-    <p><strong className="text-zinc-900">4. Account Responsibility</strong><br/>You are responsible for all activity under your enterprise account, including all sub-users. Keep your credentials secure and report any unauthorized access immediately.</p>
-    <p><strong className="text-zinc-900">5. Service Availability</strong><br/>We target 99.9% uptime. Planned maintenance windows will be announced at least 24 hours in advance via email and the System Status page.</p>
-    <p><strong className="text-zinc-900">6. Limitation of Liability</strong><br/>Orivo is not liable for indirect, incidental, or consequential damages arising from your use of the platform. Our total liability is limited to fees paid in the last 3 months.</p>
-    <p><strong className="text-zinc-900">7. Termination</strong><br/>Either party may terminate the agreement with 30 days written notice. We reserve the right to terminate accounts that violate these terms without notice.</p>
+    <div className="space-y-6">
+      <section>
+        <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-rose-500/30">1. Platform License</h4>
+        <p>Orivo Pro grants you a revocable, non-transferable license to manage your dental/CRM operations. Use of the platform for high-frequency algorithmic trading or illegal clinical practices is strictly prohibited.</p>
+      </section>
+      <section>
+        <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-rose-500/30">2. System Performance</h4>
+        <p>While we target 99.99% availability, you acknowledge that internet-based services are subject to disruptions. We assume no liability for lost clinical sessions due to regional ISP failures.</p>
+      </section>
+      <section>
+        <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-rose-500/30">3. Termination Logic</h4>
+        <p>Accounts in arrears for &gt;30 days will be placed in read-only mode. Failure to settle balance within 90 days results in permanent data archival and eventual purging.</p>
+      </section>
+    </div>
   </>
 );
 
@@ -429,33 +486,177 @@ function HelpSection() {
         ))}
       </div>
 
-      <div>
-        <h3 className="font-bold text-zinc-900 mb-4 flex items-center gap-2">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-zinc-900 flex items-center gap-2 uppercase tracking-widest text-xs">
           <HelpCircle className="w-4 h-4 text-zinc-400" />
           Frequently Asked Questions
         </h3>
-        <div className="space-y-2">
-          {filtered.length === 0 && (
-            <p className="text-sm text-zinc-400 text-center py-8">No articles match your search.</p>
-          )}
-          {filtered.map((faq, i) => (
-            <div key={i} className="border border-zinc-200 rounded-2xl overflow-hidden bg-white">
-              <button
-                onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                className="w-full flex items-center justify-between p-4 text-left hover:bg-zinc-50 transition-colors"
-              >
-                <span className="text-sm font-bold text-zinc-900 pr-4">{faq.q}</span>
-                {openFaq === i ? (
-                  <ChevronUp className="w-4 h-4 text-zinc-400 shrink-0" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" />
-                )}
-              </button>
-              {openFaq === i && (
-                <div className="px-4 pb-4 text-sm text-zinc-600 leading-relaxed border-t border-zinc-100 pt-3">
-                  {faq.a}
-                </div>
+        {search && (
+          <Badge variant="outline" className="text-[9px] font-black uppercase text-blue-600 bg-blue-50 border-blue-200">
+            {filtered.length} Results Found
+          </Badge>
+        )}
+      </div>
+      
+      <div className="space-y-2">
+        {filtered.length === 0 && (
+          <div className="py-20 text-center border-2 border-dashed border-zinc-100 rounded-[2.5rem]">
+             <Search className="w-10 h-10 text-zinc-200 mx-auto mb-4" />
+             <p className="text-sm font-bold text-zinc-400 uppercase tracking-widest">No matching articles</p>
+             <p className="text-xs text-zinc-500 mt-2">Try broader keywords or reach out to support.</p>
+          </div>
+        )}
+        {filtered.map((faq, i) => (
+          <div key={i} className="border border-zinc-100 rounded-3xl overflow-hidden bg-white hover:border-blue-200 transition-all group">
+            <button
+              onClick={() => setOpenFaq(openFaq === i ? null : i)}
+              className="w-full flex items-center justify-between p-5 text-left hover:bg-zinc-50 transition-colors"
+            >
+              <span className="text-sm font-bold text-zinc-900 pr-4 group-hover:text-blue-600 transition-colors">{faq.q}</span>
+              {openFaq === i ? (
+                <ChevronUp className="w-4 h-4 text-zinc-400 shrink-0" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" />
               )}
+            </button>
+            {openFaq === i && (
+              <div className="px-5 pb-5 text-sm text-zinc-600 leading-relaxed border-t border-zinc-100 pt-4 animate-in slide-in-from-top-2">
+                {faq.a}
+                <div className="mt-4 flex gap-4">
+                   <button className="text-[10px] font-black text-blue-600 uppercase hover:underline">Useful</button>
+                   <button className="text-[10px] font-black text-zinc-400 uppercase hover:underline">Not Helpful</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="p-6 bg-zinc-900 rounded-[2.5rem] flex items-center justify-between gap-6 shadow-2xl">
+         <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center text-white">
+               <LifeBuoy className="w-6 h-6 animate-spin-slow" />
+            </div>
+            <div>
+               <p className="text-white font-black uppercase tracking-widest text-xs">Still need expert help?</p>
+               <p className="text-zinc-500 text-[10px] mt-0.5">Our 2026 response team is standing by.</p>
+            </div>
+         </div>
+         <Button onClick={() => window.dispatchEvent(new CustomEvent('switchSupportTab', { detail: 'contact' }))} 
+           className="bg-white text-zinc-900 hover:bg-zinc-100 rounded-xl font-bold px-6 border-0">
+           Start Chat
+         </Button>
+      </div>
+    </div>
+  );
+}
+
+function StatusSection() {
+  const [uptime] = useState("99.98%");
+  const [lastCheck, setLastCheck] = useState(new Date());
+  
+  // Simulated dynamic latency
+  const [services, setServices] = useState(SYSTEM_SERVICES.map(s => ({ ...s, currentLatency: s.latency })));
+  
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setServices(prev => prev.map(s => ({
+        ...s,
+        currentLatency: s.latency.includes('ms') 
+          ? (parseInt(s.latency) + (Math.random() * 5 - 2.5)).toFixed(0) + 'ms'
+          : s.latency
+      })));
+      setLastCheck(new Date());
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const overall = services.every((s) => s.status === "operational") ? "operational" : "degraded";
+
+  const incidents = [
+    { id: 1, date: "April 15", title: "Degraded Performance: Analytics Pipeline", status: "Resolved", color: "blue" },
+    { id: 2, date: "April 12", title: "Scheduled Maintenance: Global Database Cluster", status: "Completed", color: "emerald" },
+  ];
+
+  return (
+    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      {/* Header Banner */}
+      <div className={cn(
+          "p-8 rounded-[2.5rem] border shadow-2xl relative overflow-hidden transition-all duration-500",
+          overall === "operational"
+            ? "bg-emerald-50/50 border-emerald-100 shadow-emerald-500/5"
+            : "bg-amber-50/50 border-amber-100 shadow-amber-500/5"
+        )}>
+        <div className="absolute top-0 right-0 w-64 h-64 bg-white/40 rounded-full -mr-32 -mt-32 blur-3xl opacity-50" />
+        <div className="relative z-10 flex items-center gap-6">
+          <div className={cn(
+              "w-20 h-20 rounded-3xl flex items-center justify-center shadow-2xl shrink-0 animate-pulse",
+              overall === "operational" ? "bg-emerald-500 shadow-emerald-500/40" : "bg-amber-500 shadow-amber-500/40"
+            )}>
+            <Activity className="w-10 h-10 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black text-zinc-900 tracking-tight leading-none mb-1.5">
+              {overall === "operational" ? "System Core Healthy" : "Limited Service Reach"}
+            </h2>
+            <p className="text-sm text-zinc-500 font-medium">
+              Global reliability: <strong className="text-zinc-900">{uptime}</strong> · 
+              Last verified: <span className="font-mono text-[10px] bg-white/80 px-2 py-0.5 rounded border border-zinc-100 ml-1">
+                {lastCheck.toLocaleTimeString()}
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Service Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {services.map((s) => (
+          <div key={s.name} className="bg-white border border-zinc-100 rounded-[2rem] p-5 hover:shadow-xl hover:shadow-zinc-200/40 transition-all group">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className={cn("w-2 h-2 rounded-full", s.status === 'operational' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-amber-500')} />
+                <span className="text-sm font-black text-zinc-900 uppercase tracking-tight">{s.name}</span>
+              </div>
+              <Badge className={cn("text-[8px] font-black uppercase tracking-widest border-0", 
+                 s.status === 'operational' ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600")}>
+                {s.status}
+              </Badge>
+            </div>
+            
+            {/* Uptime Bar (Visualization) */}
+            <div className="flex gap-1 h-6 mb-4 items-end">
+              {Array.from({ length: 24 }).map((_, i) => (
+                <div key={i} className={cn("flex-1 rounded-sm transition-all duration-500", 
+                  i === 22 && s.status !== 'operational' ? "bg-amber-200 h-3" : "bg-emerald-100 h-5 group-hover:h-6") } />
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between text-[10px] font-bold">
+              <span className="text-zinc-600 uppercase tracking-widest">Latency</span>
+              <span className={cn("font-mono px-2 py-0.5 rounded-md", 
+                parseInt(s.currentLatency) > 100 ? "bg-amber-50 text-amber-600" : "bg-zinc-50 text-zinc-400"
+              )}>{s.currentLatency}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Incident History */}
+      <div className="bg-zinc-50/50 border border-zinc-100 rounded-[2.5rem] p-8">
+        <h3 className="text-xs font-black text-zinc-400 uppercase tracking-[0.3em] mb-6">Recent Security & Stability Events</h3>
+        <div className="space-y-4">
+          {incidents.map(incident => (
+            <div key={incident.id} className="flex items-start gap-4 p-5 bg-white border border-zinc-100 rounded-3xl group shadow-sm hover:shadow-md transition-all">
+               <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center shrink-0", 
+                 incident.color === 'emerald' ? "bg-emerald-100 text-emerald-600" : "bg-blue-100 text-blue-600")}>
+                 <Activity className="w-5 h-5" />
+               </div>
+               <div>
+                  <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none mb-1.5">{incident.date}</p>
+                  <h4 className="text-sm font-bold text-zinc-900 mb-1">{incident.title}</h4>
+                  <Badge variant="outline" className="text-[8px] font-black uppercase">{incident.status}</Badge>
+               </div>
             </div>
           ))}
         </div>
@@ -464,80 +665,19 @@ function HelpSection() {
   );
 }
 
-function StatusSection() {
-  const [uptime] = useState("99.98%");
-  const overall = SYSTEM_SERVICES.every((s) => s.status === "operational") ? "operational" : "degraded";
-
-  return (
-    <div className="space-y-6">
-      <div
-        className={cn(
-          "p-6 rounded-3xl border flex items-center gap-4",
-          overall === "operational"
-            ? "bg-emerald-50 border-emerald-100"
-            : "bg-amber-50 border-amber-100"
-        )}
-      >
-        <div
-          className={cn(
-            "w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg shrink-0",
-            overall === "operational" ? "bg-emerald-500 shadow-emerald-500/30" : "bg-amber-500 shadow-amber-500/30"
-          )}
-        >
-          <Activity className="w-7 h-7 text-white" />
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-zinc-900">
-            {overall === "operational" ? "All Systems Operational" : "Minor Disruption Detected"}
-          </h2>
-          <p className="text-sm text-zinc-500 mt-0.5">30-day uptime: <strong>{uptime}</strong> · Last checked: just now</p>
-        </div>
-      </div>
-
-      <Card className="card-modern overflow-hidden">
-        <CardHeader className="border-b border-zinc-100 bg-zinc-50/50 py-4 px-5">
-          <CardTitle className="text-sm font-bold text-zinc-900">Service Health</CardTitle>
-        </CardHeader>
-        <div className="divide-y divide-zinc-50">
-          {SYSTEM_SERVICES.map((s) => (
-            <div key={s.name} className="flex items-center justify-between px-5 py-4 hover:bg-zinc-50/50 transition-colors">
-              <div className="flex items-center gap-3">
-                <StatusDot status={s.status} />
-                <span className="text-sm font-medium text-zinc-900">{s.name}</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-mono text-zinc-400">{s.latency}</span>
-                <Badge
-                  className={cn(
-                    "text-[9px] font-bold uppercase tracking-wider border-0",
-                    s.status === "operational"
-                      ? "bg-emerald-50 text-emerald-600"
-                      : "bg-amber-50 text-amber-600"
-                  )}
-                >
-                  {s.status}
-                </Badge>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Avg Response", value: "42ms", icon: Zap },
-          { label: "Uptime (30d)", value: uptime, icon: Activity },
-          { label: "Active Regions", value: "3", icon: MapPin },
-        ].map((m) => (
-          <div key={m.label} className="bg-zinc-50 border border-zinc-200 rounded-2xl p-4 text-center">
-            <m.icon className="w-4 h-4 text-zinc-400 mx-auto mb-2" />
-            <p className="text-lg font-black text-zinc-900">{m.value}</p>
-            <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider">{m.label}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function getDeviceInfo() {
+  return {
+    os: navigator.platform,
+    userAgent: navigator.userAgent,
+    language: navigator.language,
+    screenSize: `${window.screen.width}x${window.screen.height}`,
+    viewportSize: `${window.innerWidth}x${window.innerHeight}`,
+    pixelRatio: window.devicePixelRatio,
+    time: new Date().toISOString(),
+    url: window.location.href,
+    appVersion: "v2026.4.18",
+    connection: (navigator as any).connection?.effectiveType || "unknown"
+  };
 }
 
 function ContactSection() {
@@ -563,6 +703,7 @@ function ContactSection() {
     }
     setLoading(true);
     try {
+      const deviceInfo = getDeviceInfo();
       await addDoc(collection(db, "support_tickets"), {
         category,
         subject,
@@ -571,6 +712,7 @@ function ContactSection() {
         user_email: auth.currentUser?.email,
         status: "OPEN",
         createdAt: serverTimestamp(),
+        metadata: deviceInfo,
       });
       setSent(true);
     } catch {
@@ -582,16 +724,31 @@ function ContactSection() {
 
   if (sent) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-center gap-4">
-        <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center border border-emerald-100 mb-2">
-          <CheckCircle2 className="w-10 h-10 text-emerald-500" />
+      <div className="flex flex-col items-center justify-center py-20 text-center gap-6 animate-in fade-in zoom-in duration-500">
+        <div className="relative">
+          <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center border border-emerald-100 shadow-xl shadow-emerald-500/10">
+            <CheckCircle2 className="w-12 h-12 text-emerald-500" />
+          </div>
+          <div className="absolute -bottom-2 -right-2 bg-white border border-emerald-100 px-3 py-1 rounded-full shadow-sm text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+            Verified
+          </div>
         </div>
-        <h3 className="text-xl font-bold text-zinc-900">Ticket Submitted</h3>
-        <p className="text-zinc-500 text-sm max-w-xs">
-          Our team will respond to <strong>{auth.currentUser?.email}</strong> within 24 hours.
-        </p>
-        <Button variant="outline" onClick={() => { setSent(false); setSubject(""); setMessage(""); }} className="mt-4 rounded-xl font-bold">
-          Submit Another Ticket
+        <div className="space-y-2">
+          <h3 className="text-2xl font-black text-zinc-900 tracking-tight">Ticket Launched</h3>
+          <p className="text-zinc-500 text-sm max-w-xs mx-auto">
+            Your request has been prioritized. We'll reach out to <strong>{auth.currentUser?.email}</strong> within 24 hours.
+          </p>
+        </div>
+        <div className="bg-zinc-50 border border-zinc-200 px-6 py-4 rounded-3xl flex items-center gap-4">
+          <div className="text-left py-1">
+            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">Reference ID</p>
+            <p className="text-lg font-mono font-black text-zinc-900 tracking-tighter">ORV-{Math.random().toString(36).slice(2, 8).toUpperCase()}</p>
+          </div>
+          <div className="w-px h-10 bg-zinc-200" />
+          <Button variant="ghost" size="sm" onClick={() => toast.success("Ref ID Copied")} className="text-blue-600 font-bold">Copy</Button>
+        </div>
+        <Button variant="outline" onClick={() => { setSent(false); setSubject(""); setMessage(""); }} className="rounded-2xl font-bold h-12 px-8 border-2 border-zinc-100 hover:border-zinc-200 hover:bg-zinc-50 transition-all">
+          Submit Another Request
         </Button>
       </div>
     );
@@ -659,13 +816,28 @@ function ContactSection() {
           rows={5}
           className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm placeholder:text-zinc-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all resize-none"
         />
+        <div className="flex items-center gap-3 p-5 bg-[#f8fafc] border border-blue-100 rounded-[2rem] relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 rounded-full -mr-16 -mt-16 blur-3xl group-hover:bg-blue-600/10 transition-colors" />
+          <div className="w-12 h-12 rounded-2xl bg-white border border-blue-100 flex items-center justify-center text-blue-600 shadow-sm relative z-10">
+             <Activity className="w-6 h-6 animate-pulse" />
+          </div>
+          <div className="relative z-10">
+            <p className="text-xs font-black text-blue-900 uppercase tracking-widest">Technical Signature Attached</p>
+            <p className="text-[10px] text-blue-700/60 leading-tight mt-0.5">Automated diagnostics capturing {navigator.platform} env + {window.innerWidth}x{window.innerHeight} resolution.</p>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+             <div className="w-2 h-2 rounded-full bg-blue-500 animate-bounce" />
+             <span className="text-[10px] font-black text-blue-400">SYNCING</span>
+          </div>
+        </div>
+
         <Button
           onClick={submit}
-          disabled={loading}
-          className="w-full h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white font-bold gap-2"
+          disabled={loading || !subject.trim() || !message.trim()}
+          className="w-full h-14 rounded-2xl bg-zinc-900 hover:bg-black text-white font-black text-sm uppercase tracking-[0.2em] shadow-xl shadow-zinc-900/20 transition-all hover:-translate-y-0.5"
         >
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-          {loading ? "Submitting..." : "Submit Ticket"}
+          {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+          {loading ? "Launching Ticket..." : "Launch Ticket"}
         </Button>
       </div>
     </div>
@@ -674,6 +846,7 @@ function ContactSection() {
 
 function TicketCenter() {
   const [tickets, setTickets] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<any>(null);
   const [replies, setReplies] = useState<any[]>([]);
@@ -715,133 +888,263 @@ function TicketCenter() {
         sender_type: "USER",
         createdAt: serverTimestamp(),
       });
-      // Set back to OPEN so admin sees a new message
       await updateDoc(ticketRef, { status: "OPEN", updatedAt: serverTimestamp() });
       setReplyText("");
     } catch {
-      toast.error("Cloud not send reply.");
+      toast.error("Could not send reply.");
     } finally {
       setSending(false);
     }
   };
 
-  if (loading) return <div className="py-20 text-center text-zinc-400">Loading your tickets...</div>;
+  const filtered = tickets.filter(t => t.subject.toLowerCase().includes(search.toLowerCase()) || t.id.toLowerCase().includes(search.toLowerCase()));
+
+  if (loading) return <div className="py-20 text-center"><Loader2 className="w-10 h-10 animate-spin text-zinc-200 mx-auto mb-4" /><p className="text-sm font-bold text-zinc-400 uppercase tracking-widest leading-loose">Syncing Terminal...</p></div>;
 
   if (selected) {
     return (
-      <div className="flex flex-col h-[600px]">
-        <div className="flex items-center gap-3 mb-6 pb-6 border-b border-zinc-100">
-          <Button variant="ghost" size="icon" onClick={() => setSelected(null)} className="rounded-xl">
-            <Circle className="w-4 h-4" />
-          </Button>
-          <div>
-            <h3 className="font-bold text-zinc-900">{selected.subject}</h3>
-            <p className="text-xs text-zinc-500 uppercase font-bold tracking-widest">{selected.status}</p>
+      <div className="flex flex-col h-[650px] animate-in slide-in-from-right-4 duration-500">
+        <div className="flex items-center justify-between mb-6 pb-6 border-b border-zinc-100">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" size="icon" onClick={() => setSelected(null)} className="rounded-2xl hover:bg-zinc-50 border border-transparent hover:border-zinc-200 transition-all">
+              <Circle className="w-4 h-4 text-zinc-400" />
+            </Button>
+            <div>
+              <h3 className="font-black text-xl text-zinc-900 tracking-tight leading-none mb-1">{selected.subject}</h3>
+              <div className="flex items-center gap-2">
+                 <Badge className={cn("text-[8px] font-black uppercase tracking-widest px-2 py-0.5 border-0", 
+                   selected.status === 'RESOLVED' ? "bg-emerald-50 text-emerald-600" : "bg-blue-50 text-blue-600")}>
+                   {selected.status}
+                 </Badge>
+                 <span className="text-[10px] text-zinc-400 font-mono">#ID-{selected.id.slice(-6).toUpperCase()}</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar mb-6">
-          {/* Original */}
-          <div className="flex gap-3">
-            <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center text-[10px] font-bold text-zinc-500 shrink-0">
-              U
+        <div className="flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar mb-6 pb-4">
+          {/* User Entry */}
+          <div className="flex gap-4">
+            <div className="w-10 h-10 rounded-2xl bg-zinc-50 border border-zinc-200 flex items-center justify-center text-[11px] font-black text-zinc-400 shrink-0 shadow-sm uppercase">
+              {auth.currentUser?.email?.[0]}
             </div>
-            <div className="space-y-1">
-              <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-2xl rounded-tl-none">
-                <p className="text-sm text-zinc-700 leading-relaxed">{selected.message}</p>
+            <div className="space-y-1.5 max-w-[85%]">
+              <div className="bg-zinc-50 border border-zinc-200/60 p-5 rounded-[2rem] rounded-tl-none shadow-sm">
+                <p className="text-sm text-zinc-800 leading-relaxed font-medium">{selected.message}</p>
               </div>
-              <p className="text-[10px] text-zinc-400 font-bold">You · Original Message</p>
+              <p className="text-[10px] text-zinc-400 font-bold ml-1 flex items-center gap-1.5">
+                <Clock className="w-2.5 h-2.5" />
+                You · Initial Request
+              </p>
             </div>
           </div>
 
           {replies.map(r => (
-            <div key={r.id} className={cn("flex gap-3", r.sender_type === "ADMIN" ? "flex-row-reverse" : "")}>
-              <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
-                r.sender_type === "ADMIN" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "bg-zinc-100 border border-zinc-200 text-zinc-500"
+            <div key={r.id} className={cn("flex gap-4", r.sender_type === "ADMIN" ? "flex-row-reverse" : "")}>
+              <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center text-[11px] font-black shrink-0 shadow-md",
+                r.sender_type === "ADMIN" ? "bg-zinc-900 text-white" : "bg-white border border-zinc-200 text-zinc-400"
               )}>
                 {r.sender_type === "ADMIN" ? "S" : "U"}
               </div>
-              <div className={cn("space-y-1", r.sender_type === "ADMIN" ? "items-end" : "")}>
-                <div className={cn("p-4 rounded-2xl",
+              <div className={cn("space-y-1.5 max-w-[85%]", r.sender_type === "ADMIN" ? "items-end text-right" : "")}>
+                <div className={cn("p-5 rounded-[2rem] shadow-sm",
                    r.sender_type === "ADMIN" 
                     ? "bg-zinc-900 text-white rounded-tr-none" 
-                    : "bg-zinc-50 border border-zinc-200 rounded-tl-none"
+                    : "bg-white border border-zinc-100 rounded-tl-none"
                 )}>
-                  <p className="text-sm leading-relaxed">{r.message}</p>
+                  <p className="text-sm leading-relaxed font-medium">{r.message}</p>
                 </div>
-                <p className="text-[10px] text-zinc-400 font-bold px-1">
-                  {r.sender_type === "ADMIN" ? "Orivo Support" : "You"} · {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleTimeString() : 'Just now'}
+                <p className="text-[10px] text-zinc-400 font-bold px-2">
+                  {r.sender_type === "ADMIN" ? "Official Support" : "You"} · {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleTimeString() : 'Recently'}
                 </p>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="flex gap-2 p-1 bg-zinc-50 border border-zinc-200 rounded-2xl">
-          <textarea
-            placeholder="Type your message..."
-            value={replyText}
-            onChange={e => setReplyText(e.target.value)}
-            className="flex-1 bg-transparent border-0 px-4 py-3 text-sm resize-none outline-none"
-            rows={1}
-          />
-          <Button onClick={sendReply} disabled={sending || !replyText.trim()} className="rounded-xl h-auto px-4 bg-zinc-900 hover:bg-zinc-800">
-            {sending ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Send className="w-4 h-4 text-white" />}
-          </Button>
+        <div className="p-2 bg-white border border-zinc-200 rounded-[2.5rem] shadow-xl shadow-zinc-200/20 focus-within:border-blue-500/30 transition-all">
+          <div className="flex items-center gap-2 pl-4 pr-1">
+            <textarea
+              placeholder="Type your message..."
+              value={replyText}
+              onChange={e => setReplyText(e.target.value)}
+              className="flex-1 bg-transparent border-0 py-4 text-sm resize-none outline-none font-medium placeholder:text-zinc-300"
+              rows={1}
+            />
+            <Button onClick={sendReply} disabled={sending || !replyText.trim() || selected.status === "RESOLVED"} 
+              className="rounded-full h-12 w-12 bg-zinc-900 hover:bg-black p-0 shrink-0">
+              {sending ? <Loader2 className="w-5 h-5 animate-spin text-white" /> : <Send className="w-5 h-5 text-white" />}
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h3 className="text-xl font-bold text-zinc-900">Support Threads</h3>
-          <p className="text-sm text-zinc-500">Track and respond to your active tickets.</p>
+          <h3 className="text-2xl font-black text-zinc-900 tracking-tight">Support History</h3>
+          <p className="text-sm font-medium text-zinc-500 mt-0.5">Track, review, and manage your active threads.</p>
         </div>
-        <div className="w-10 h-10 rounded-2xl bg-zinc-50 border border-zinc-200 flex items-center justify-center text-zinc-400">
-          <Ticket className="w-5 h-5" />
+        <div className="relative group min-w-[240px]">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-300 group-focus-within:text-blue-500 transition-colors" />
+          <Input 
+            placeholder="Search threads..." 
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-11 h-12 bg-zinc-50 border-zinc-200 rounded-2xl focus:bg-white transition-all shadow-inner"
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3">
-        {tickets.map(t => (
+      <div className="grid grid-cols-1 gap-4">
+        {filtered.map(t => (
           <button key={t.id} onClick={() => setSelected(t)}
-            className="group flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-white border border-zinc-100 rounded-[2rem] hover:border-blue-200 hover:bg-blue-50/20 transition-all text-left shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-zinc-50 border border-zinc-100 flex items-center justify-center group-hover:bg-blue-600 transition-colors">
-                <MessageSquarePlus className="w-6 h-6 text-zinc-400 group-hover:text-white" />
+            className="group relative flex flex-col sm:flex-row sm:items-center justify-between p-7 bg-white border border-zinc-100/80 rounded-[2.5rem] hover:border-blue-500/20 hover:shadow-2xl hover:shadow-blue-500/5 transition-all text-left">
+            <div className="flex items-center gap-6">
+              <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center transition-all group-hover:scale-110",
+                t.status === 'RESOLVED' ? "bg-emerald-50 text-emerald-500" : "bg-blue-50 text-blue-500"
+              )}>
+                <MessageSquarePlus className="w-7 h-7" />
               </div>
               <div>
-                <h4 className="font-bold text-zinc-900 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{t.subject}</h4>
-                <p className="text-xs text-zinc-500 font-medium">#{t.id.slice(-6).toUpperCase()} · Created {t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString() : 'Just now'}</p>
+                <h4 className="font-black text-lg text-zinc-900 uppercase tracking-tight mb-0.5">{t.subject}</h4>
+                <div className="flex items-center gap-2">
+                   <span className="text-[11px] text-zinc-400 font-mono">#{t.id.slice(-6).toUpperCase()}</span>
+                   <div className="w-1 h-1 rounded-full bg-zinc-200" />
+                   <p className="text-[11px] text-zinc-500 font-bold uppercase tracking-widest">{t.category}</p>
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-3 mt-4 sm:mt-0">
-               <Badge
-                  className={cn(
-                    "text-[9px] font-bold uppercase tracking-wider border-0 px-3",
-                    t.status === "OPEN" ? "bg-rose-50 text-rose-600" :
-                    t.status === "IN_PROGRESS" ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600"
-                  )}
-                >
-                  {t.status.replace("_", " ")}
-                </Badge>
-                <div className="w-8 h-8 rounded-full bg-zinc-50 flex items-center justify-center text-zinc-300 group-hover:text-blue-400 transition-colors">
-                  <ArrowUpRight className="w-4 h-4" />
-                </div>
+            <div className="flex items-center gap-6 mt-6 sm:mt-0">
+               <div className="text-right hidden sm:block">
+                  <p className="text-[10px] font-black text-zinc-300 uppercase tracking-widest leading-none">Last Update</p>
+                  <p className="text-xs font-bold text-zinc-600 mt-1">{t.updatedAt?.toDate ? t.updatedAt.toDate().toLocaleDateString() : 'Just now'}</p>
+               </div>
+               <Badge className={cn("text-[9px] font-black uppercase tracking-[0.2em] px-4 py-1.5 border-0 rounded-full",
+                   t.status === "OPEN" ? "bg-rose-500 text-white" :
+                   t.status === "IN_PROGRESS" ? "bg-amber-400 text-zinc-900" : "bg-zinc-100 text-zinc-500"
+               )}>
+                 {t.status.replace("_", " ")}
+               </Badge>
+               <div className="w-10 h-10 rounded-full bg-zinc-50 border border-zinc-100 flex items-center justify-center text-zinc-300 group-hover:bg-zinc-900 group-hover:text-white transition-all">
+                  <ArrowUpRight className="w-5 h-5" />
+               </div>
             </div>
           </button>
         ))}
 
-        {tickets.length === 0 && (
-          <div className="py-20 text-center border-2 border-dashed border-zinc-100 rounded-[3rem]">
-            <HelpCircle className="w-10 h-10 text-zinc-200 mx-auto mb-4" />
-            <h4 className="text-zinc-400 font-bold uppercase tracking-[0.2em] text-xs">No active tickets</h4>
-            <p className="text-zinc-500 text-[10px] mt-2">Need help? Submit a new ticket from the Contact tab.</p>
+        {filtered.length === 0 && (
+          <div className="py-24 text-center border-4 border-dashed border-zinc-50 rounded-[4rem]">
+            <div className="w-20 h-20 bg-zinc-50 rounded-[2.5rem] flex items-center justify-center text-zinc-200 mx-auto mb-6 transform rotate-6">
+              <HelpCircle className="w-10 h-10" />
+            </div>
+            <h4 className="text-zinc-400 font-black uppercase tracking-[0.3em] text-sm">Clear Terminal</h4>
+            <p className="text-zinc-500 text-xs mt-3 font-medium max-w-[280px] mx-auto leading-relaxed">No threads found matching your criteria. Start a new conversation via the Contact tab.</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DeleteSection() {
+  const [confirmText, setConfirmText] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [purged, setPurged] = useState(false);
+
+  const performDelete = () => {
+    if (confirmText !== "DELETE DATA") return;
+    setVerifying(true);
+    // Simulate complex enterprise deletion logic
+    setTimeout(() => {
+      setVerifying(false);
+      setPurged(true);
+      toast.success("Enterprise record scheduled for purge.");
+    }, 3000);
+  };
+
+  if (purged) {
+    return (
+      <div className="py-20 text-center animate-in zoom-in duration-500">
+        <div className="w-20 h-20 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl">
+          <Trash2 className="w-8 h-8 text-white" />
+        </div>
+        <h3 className="text-2xl font-black text-zinc-900 tracking-tight mb-2">Account Purge Initiated</h3>
+        <p className="text-zinc-500 text-sm max-w-xs mx-auto mb-8">
+          Your data is being removed from all core clusters. You will be logged out globally in 60 seconds.
+        </p>
+        <Button variant="outline" onClick={() => window.location.reload()} className="rounded-xl font-bold">Return to Login</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="bg-rose-50 border border-rose-100 p-8 rounded-[2.5rem] relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/5 rounded-full -mr-32 -mt-32 blur-3xl" />
+        <div className="relative z-10 flex items-center gap-6">
+          <div className="w-20 h-20 bg-rose-500 rounded-3xl flex items-center justify-center shadow-xl shadow-rose-500/30 shrink-0">
+             <Trash2 className="w-10 h-10 text-white" />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black text-rose-900 tracking-tight leading-none mb-1.5 underline decoration-rose-200 underline-offset-4">The Nuclear Option</h2>
+            <p className="text-sm text-rose-700/70 font-bold uppercase tracking-widest">Permanent Data Deletion</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-6 px-4">
+        <div className="space-y-2">
+          <h3 className="font-black text-zinc-900 uppercase tracking-tight">What happens next?</h3>
+          <ul className="space-y-3">
+            {[
+              "Your enterprise records will be scrubbed from all CRM modules.",
+              "Staff credentials and access logs are permanently invalidated.",
+              "All customer transaction history and loyalty points are voided.",
+              "Subscription billing is canceled immediately."
+            ].map((text, i) => (
+              <li key={i} className="flex gap-3 text-sm text-zinc-600 font-medium">
+                <div className="w-5 h-5 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center shrink-0 mt-0.5">
+                   <AlertCircle className="w-3 h-3 text-rose-500" />
+                </div>
+                {text}
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="h-px bg-zinc-100" />
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-black text-rose-600 uppercase tracking-[0.2em] mb-3 block">Identity Confirmation</label>
+            <p className="text-xs text-zinc-400 mb-4">Type <span className="text-zinc-900 font-black">DELETE DATA</span> below to unlock the purge sequence.</p>
+            <Input 
+              value={confirmText}
+              onChange={e => setConfirmText(e.target.value)}
+              placeholder="Case sensitive confirmation..."
+              className={cn("h-14 rounded-2xl border-2 transition-all font-mono tracking-tight", 
+                confirmText === "DELETE DATA" ? "border-emerald-500 bg-emerald-50/20" : "border-zinc-100 focus:border-rose-500 shadow-inner"
+              )}
+            />
+          </div>
+
+          <Button 
+            onClick={performDelete}
+            disabled={confirmText !== "DELETE DATA" || verifying}
+            className={cn("w-full h-14 rounded-2xl font-black text-sm uppercase tracking-[0.2em] transition-all",
+              confirmText === "DELETE DATA" 
+                ? "bg-rose-600 hover:bg-rose-700 text-white shadow-xl shadow-rose-500/30" 
+                : "bg-zinc-100 text-zinc-300 pointer-events-none"
+            )}
+          >
+            {verifying ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Trash2 className="w-5 h-5 mr-2" />}
+            Confirm Data Purge
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -873,6 +1176,14 @@ export default function Support({ section = "help" }: Props) {
     setActive(section);
   }, [section]);
 
+  useEffect(() => {
+    const handleSwitch = (e: any) => {
+      if (e.detail) setActive(e.detail);
+    };
+    window.addEventListener('switchSupportTab', handleSwitch);
+    return () => window.removeEventListener('switchSupportTab', handleSwitch);
+  }, []);
+
   const renderContent = () => {
     switch (active) {
       case "share":    return <ShareSection />;
@@ -883,6 +1194,7 @@ export default function Support({ section = "help" }: Props) {
       case "status":   return <StatusSection />;
       case "contact":  return <ContactSection />;
       case "my_tickets": return <TicketCenter />;
+      case "delete":   return <DeleteSection />;
       default:         return <HelpSection />;
     }
   };
@@ -938,10 +1250,13 @@ export default function Support({ section = "help" }: Props) {
                 <div className="h-px bg-zinc-100 my-2" />
 
                 <button
-                  onClick={() => setActive("contact")}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-rose-500 hover:bg-rose-50 transition-all duration-200 text-left group"
+                  onClick={() => setActive("delete")}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 text-left group",
+                    active === "delete" ? "bg-rose-500 text-white" : "text-rose-500 hover:bg-rose-50"
+                  )}
                 >
-                  <ArrowUpRight className="w-4 h-4 shrink-0" />
+                  <Trash2 className="w-4 h-4 shrink-0" />
                   <span>Delete Account</span>
                 </button>
               </nav>

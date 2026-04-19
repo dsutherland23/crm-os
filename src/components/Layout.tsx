@@ -32,7 +32,9 @@ import {
   Activity,
   Headphones,
   Trash2,
-  ChevronUp
+  ChevronUp,
+  Lock,
+  ClipboardCheck
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -44,7 +46,7 @@ import { useModules } from "@/context/ModuleContext";
 import { motion, AnimatePresence } from "motion/react";
 import { auth, db } from "@/lib/firebase";
 import { signOut } from "firebase/auth";
-import { collection, onSnapshot, query, where } from "@/lib/firebase";
+import { collection, onSnapshot, query, where, doc, updateDoc, addDoc } from "@/lib/firebase";
 import { toast } from "sonner";
 import { OrbitalClock } from "@/components/ui/orbital-clock";
 import NotificationsMenu from "./NotificationsMenu";
@@ -68,11 +70,64 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen }: SidebarProps) {
-  const { isModuleEnabled, branding } = useModules();
-  const [supportOpen, setSupportOpen] = useState(() => activeTab.startsWith("support:"));
+  const { isModuleEnabled, branding, posSession, enterpriseId, grantedOverrides, addOverride, logout } = useModules();
+  const [supportOpen, setSupportOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [lastInteraction, setLastInteraction] = useState(Date.now());
+  const [accessPrompt, setAccessPrompt] = useState<{ itemLabel: string; targetTab: string } | null>(null);
+  const [overridePin, setOverridePin] = useState("");
+  const [overrideError, setOverrideError] = useState("");
+  const [staffList, setStaffList] = useState<any[]>([]);
 
-  // Keep the section open when an active support sub-route is present
+  useEffect(() => {
+    if (!enterpriseId) return;
+    const unsub = onSnapshot(
+      query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
+      (snap) => setStaffList(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)))
+    );
+    return () => unsub();
+  }, [enterpriseId]);
+
+  const handleOverridePin = (digit: string) => {
+    if (overridePin.length >= 4) return;
+    const next = overridePin + digit;
+    setOverridePin(next);
+    if (next.length === 4) {
+      const supervisor = staffList.find(s =>
+        s.pin === next &&
+        (s.payGrade === "SUPERVISOR" || s.payGrade === "EXECUTIVE")
+      );
+      if (supervisor) {
+        if (accessPrompt?.targetTab) {
+          addOverride(accessPrompt.targetTab);
+          setActiveTab(accessPrompt.targetTab);
+          setIsMobileOpen(false);
+        }
+        setAccessPrompt(null);
+        setOverridePin("");
+        setOverrideError("");
+        toast.success(`Override granted by ${supervisor.name}`);
+      } else {
+        setOverrideError("Invalid PIN or insufficient grade");
+        setTimeout(() => { setOverridePin(""); setOverrideError(""); }, 1200);
+      }
+    }
+  };
+
+  // Auto-collapse logic: If open and not interacted with for 10 seconds, close (unless active)
+  useEffect(() => {
+    if (!supportOpen) return;
+    const isOnSupportPage = activeTab.startsWith("support:");
+    const timer = setTimeout(() => {
+      if (!isOnSupportPage) {
+        setSupportOpen(false);
+      }
+    }, 10000);
+    return () => clearTimeout(timer);
+  }, [supportOpen, lastInteraction, activeTab]);
+
+  const resetInactivity = () => setLastInteraction(Date.now());
+
   useEffect(() => {
     if (activeTab.startsWith("support:")) setSupportOpen(true);
   }, [activeTab]);
@@ -88,24 +143,25 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
     { id: "delete",      label: "Delete Account",         icon: Trash2,            accent: false, danger: true },
   ];
 
+  const handleProtectedLogout = async () => {
+    if (posSession && posSession.payGrade !== "EXECUTIVE" && posSession.payGrade !== "SUPERVISOR") {
+      toast.error("Register Still Active", {
+        description: "You must close your register and end your shift on the POS page before signing out."
+      });
+      setActiveTab("pos");
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
+      }, 300);
+      setIsMobileOpen(false);
+      return;
+    }
+    await logout();
+  };
+
   const handleSupportItem = (id: string) => {
     if (id === "delete") { setShowDeleteConfirm(true); return; }
     setActiveTab(`support:${id}`);
     setIsMobileOpen(false);
-  };
-
-  const handleLogout = async () => {
-    try {
-      if (getMockUser()) {
-        clearMockUser();
-        toast.success("Logged out from Developer Mode");
-        return;
-      }
-      await signOut(auth);
-      toast.success("Logged out successfully");
-    } catch (error: any) {
-      toast.error("Logout failed");
-    }
   };
 
   const menuItems = [
@@ -123,6 +179,17 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
     { id: "staff", label: "Staff", icon: ShieldCheck, enabled: true },
     { id: "settings", label: "System", icon: Settings, enabled: true },
   ].filter(item => item.enabled);
+
+  // ── Pay Grade Access Control ─────────────────────────────────────
+  const STANDARD_ALLOWED = ["crm", "inventory", "pos"];
+  const isStandardSession = posSession?.payGrade === "STANDARD";
+
+  // Auto-redirect if STANDARD user somehow lands on a restricted page
+  useEffect(() => {
+    if (isStandardSession && !STANDARD_ALLOWED.includes(activeTab) && !grantedOverrides.includes(activeTab)) {
+      setActiveTab("pos");
+    }
+  }, [isStandardSession, activeTab, grantedOverrides]);
 
   return (
     <>
@@ -168,32 +235,50 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
               <div>
                 <p className="px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-4">Main Menu</p>
                 <nav className="space-y-1">
-                  {menuItems.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => {
-                        setActiveTab(item.id);
-                        setIsMobileOpen(false);
-                      }}
-                      className={cn(
-                        "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 group relative",
-                        activeTab === item.id 
-                          ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" 
-                          : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50"
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <item.icon className={cn(
-                          "w-5 h-5 transition-colors",
-                          activeTab === item.id ? "text-white" : "text-zinc-500 group-hover:text-zinc-300"
-                        )} />
-                        <span>{item.label}</span>
-                      </div>
-                      {activeTab === item.id && (
-                        <motion.div layoutId="active-pill" className="w-1.5 h-1.5 rounded-full bg-white" />
-                      )}
-                    </button>
-                  ))}
+                  {menuItems.map((item) => {
+                    const isLocked = isStandardSession && !STANDARD_ALLOWED.includes(item.id) && !grantedOverrides.includes(item.id);
+                    return (
+                      <button
+                        key={item.id}
+                        title={isLocked ? `${item.label} — Requires SUPERVISOR grade or above` : undefined}
+                        onClick={() => {
+                          if (isLocked) {
+                            setAccessPrompt({ itemLabel: item.label, targetTab: item.id });
+                            return;
+                          }
+                          setActiveTab(item.id);
+                          setIsMobileOpen(false);
+                        }}
+                        className={cn(
+                          "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                          isLocked
+                            ? "opacity-30 cursor-not-allowed text-zinc-600 hover:opacity-40 hover:bg-zinc-800/20"
+                            : activeTab === item.id 
+                              ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" 
+                              : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <item.icon className={cn(
+                            "w-5 h-5 transition-colors",
+                            isLocked ? "text-zinc-700" : activeTab === item.id ? "text-white" : "text-zinc-500 group-hover:text-zinc-300"
+                          )} />
+                          <span>{item.label}</span>
+                        </div>
+                        {isLocked ? (
+                          <div className="relative">
+                            <Lock className="w-3 h-3 text-zinc-700" />
+                            <div className="absolute right-6 top-1/2 -translate-y-1/2 w-max max-w-[160px] px-2.5 py-1.5 bg-zinc-950 text-white text-[10px] font-bold rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-50 border border-zinc-800 scale-90 group-hover:scale-100 origin-right">
+                              Requires SUPERVISOR+
+                              <div className="absolute right-[-4px] top-1/2 -translate-y-1/2 w-2 h-2 bg-zinc-950 border-r border-t border-zinc-800 rotate-45" />
+                            </div>
+                          </div>
+                        ) : activeTab === item.id ? (
+                          <motion.div layoutId="active-pill" className="w-1.5 h-1.5 rounded-full bg-white" />
+                        ) : null}
+                      </button>
+                    );
+                  })}
                 </nav>
               </div>
 
@@ -209,7 +294,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
               </div>
 
               {/* ── SUPPORT SECTION ── */}
-              <div>
+              <div onMouseMove={resetInactivity}>
                 <button
                   onClick={() => setSupportOpen(prev => !prev)}
                   className="w-full flex items-center justify-between px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2 hover:text-zinc-400 transition-colors group"
@@ -222,6 +307,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                 </button>
 
                 <motion.div
+                  onMouseMove={resetInactivity}
                   initial={false}
                   animate={{ height: supportOpen ? "auto" : 0, opacity: supportOpen ? 1 : 0 }}
                   transition={{ duration: 0.25, ease: "easeInOut" }}
@@ -269,6 +355,49 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
             </div>
           </ScrollArea>
 
+          {/* Supervisor Override Dialog */}
+          <Dialog open={!!accessPrompt} onOpenChange={(open) => { if (!open) { setAccessPrompt(null); setOverridePin(""); setOverrideError(""); } }}>
+            <DialogContent className="sm:max-w-[360px] rounded-3xl border-amber-100 p-0 overflow-hidden">
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 border-b border-amber-100">
+                <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-600 mb-4">
+                  <Lock className="w-6 h-6" />
+                </div>
+                <DialogTitle className="text-xl font-bold text-zinc-900">Supervisor Required</DialogTitle>
+                <DialogDescription className="text-sm text-zinc-500 mt-1">
+                  <strong className="text-zinc-700">{accessPrompt?.itemLabel}</strong> requires SUPERVISOR or EXECUTIVE grade access.
+                  <br /><br />
+                  Enter a supervisor PIN to override and continue.
+                </DialogDescription>
+              </div>
+              <div className="p-6 space-y-5">
+                <div className="flex justify-center gap-3">
+                  {[0,1,2,3].map(i => (
+                    <div key={i} className={cn(
+                      "w-4 h-4 rounded-full border-2 transition-all duration-150",
+                      overrideError ? "bg-rose-500 border-rose-500 animate-pulse" : overridePin.length > i ? "bg-amber-500 border-amber-500" : "border-zinc-300"
+                    )} />
+                  ))}
+                </div>
+                {overrideError && (
+                  <p className="text-center text-xs font-bold text-rose-500">{overrideError}</p>
+                )}
+                <div className="grid grid-cols-3 gap-2">
+                  {[1,2,3,4,5,6,7,8,9].map(n => (
+                    <button key={n} onClick={() => handleOverridePin(n.toString())}
+                      className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-900 font-bold text-lg hover:bg-amber-50 hover:border-amber-200 transition-all active:scale-95 shadow-sm">
+                      {n}
+                    </button>
+                  ))}
+                  <button onClick={() => setOverridePin("")} className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-500 text-xs font-bold uppercase tracking-widest hover:bg-zinc-50 transition-all active:scale-95">Clear</button>
+                  <button onClick={() => handleOverridePin("0")} className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-900 font-bold text-lg hover:bg-amber-50 hover:border-amber-200 transition-all active:scale-95 shadow-sm">0</button>
+                  <button onClick={() => setOverridePin(p => p.slice(0,-1))} className="h-12 rounded-xl border border-zinc-200 bg-white flex items-center justify-center hover:bg-zinc-50 transition-all active:scale-95">
+                    <X className="w-5 h-5 text-zinc-500" />
+                  </button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           {/* Delete Account Confirm Dialog */}
           <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
             <DialogContent className="sm:max-w-[400px] rounded-3xl border-rose-100 p-6">
@@ -294,6 +423,19 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          {/* Active POS Session Indicator */}
+          {posSession && (
+            <div className="mx-4 mb-2 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Terminal Active</p>
+                <p className="text-xs font-semibold text-zinc-300 truncate">{posSession.staffName}</p>
+                <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">{posSession.payGrade}</p>
+              </div>
+              <Lock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+            </div>
+          )}
 
           {/* Clock */}
           <div className="hidden lg:flex justify-center py-2">
@@ -322,7 +464,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
               <Button 
                 variant="ghost" 
                 size="icon" 
-                onClick={handleLogout}
+                onClick={handleProtectedLogout}
                 className="text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg"
               >
                 <LogOut className="w-4 h-4" />
@@ -336,7 +478,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
 }
 
 export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void, setActiveTab?: (tab: string) => void }) {
-  const { activeBranch, setActiveBranch, hasActiveTransaction, currency, setCurrency, formatCurrency, enterpriseId } = useModules();
+  const { activeBranch, setActiveBranch, hasActiveTransaction, currency, setCurrency, formatCurrency, enterpriseId, posSession, updateShiftStatus, clearSession, shiftTimePolicies, logout } = useModules();
   const [branches, setBranches] = useState<any[]>([]);
   const [pendingBranchTarget, setPendingBranchTarget] = useState<string | null>(null);
 
@@ -403,8 +545,156 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
 
   const activeBranchName = activeBranch === "all" ? "Global Operations" : branches.find((b: { id: string, name: string }) => b.id === activeBranch)?.name || "Main Branch";
 
+  // ── Shift Lock Overlay Logic ────────────────────────────────────
+  const [elapsed, setElapsed] = useState(0);
+  const [overTime, setOverTime] = useState(false);
+  const isOnShiftBreak = posSession && posSession.shiftStatus !== "ACTIVE";
+
+  useEffect(() => {
+    if (!isOnShiftBreak || !posSession?.statusSince) { setElapsed(0); setOverTime(false); return; }
+    const tick = setInterval(() => {
+      const secs = Math.floor((Date.now() - new Date(posSession.statusSince).getTime()) / 1000);
+      setElapsed(secs);
+      const allowedMins = posSession.shiftStatus === "ON_BREAK" ? shiftTimePolicies.breakDuration
+        : posSession.shiftStatus === "ON_LUNCH" ? shiftTimePolicies.lunchDuration
+        : shiftTimePolicies.meetingDuration;
+      const graceSecs = shiftTimePolicies.gracePeriod * 60;
+      setOverTime(secs > (allowedMins * 60) + graceSecs);
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [isOnShiftBreak, posSession?.statusSince, posSession?.shiftStatus, shiftTimePolicies]);
+
+  const handleReturnToWork = async () => {
+    if (!posSession?.sessionId) return;
+    try {
+      const newStatus = "ACTIVE";
+      await updateDoc(doc(db, "pos_sessions", posSession.sessionId), {
+        status: newStatus, lastActivity: new Date().toISOString(), enterprise_id: enterpriseId
+      });
+      await addDoc(collection(db, "audit_logs"), {
+        action: "Shift Status Change",
+        details: `${posSession.staffName} returned to work from ${posSession.shiftStatus}`,
+        timestamp: new Date().toISOString(), user: posSession.staffName, enterprise_id: enterpriseId
+      });
+      updateShiftStatus(newStatus);
+      toast.success("Welcome back! Status set to Active.");
+    } catch(e: any) { 
+       toast.error(e.message?.includes("permissions") ? "Permission Denied" : "Failed to update status."); 
+    }
+  };
+
+  const handleProtectedLogout = async () => {
+    if (posSession && posSession.payGrade !== "EXECUTIVE" && posSession.payGrade !== "SUPERVISOR") {
+      toast.error("Register Still Active", {
+        description: "Standard accounts must close their register before signing out. Opening settlement..."
+      });
+      setActiveTab?.("pos");
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
+      }, 300);
+      return;
+    }
+    await logout();
+  };
+
+  const fmtSecs = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const statusMeta = {
+    ON_BREAK:   { label: "On Break",     emoji: "☕", ringColor: "ring-amber-500",  textColor: "text-amber-400",  badgeCls: "bg-amber-500/20 text-amber-300 border-amber-500/30",  gradientCls: "from-amber-950 via-zinc-950 to-zinc-950" },
+    ON_LUNCH:   { label: "Lunch Break",  emoji: "🍽️", ringColor: "ring-sky-500",    textColor: "text-sky-400",    badgeCls: "bg-sky-500/20 text-sky-300 border-sky-500/30",        gradientCls: "from-sky-950 via-zinc-950 to-zinc-950" },
+    IN_MEETING: { label: "In Meeting",   emoji: "📋", ringColor: "ring-purple-500", textColor: "text-purple-400", badgeCls: "bg-purple-500/20 text-purple-300 border-purple-500/30", gradientCls: "from-purple-950 via-zinc-950 to-zinc-950" },
+  } as const;
+  const currentMeta = (posSession?.shiftStatus && posSession.shiftStatus !== "ACTIVE") ? statusMeta[posSession.shiftStatus as keyof typeof statusMeta] : null;
+
   return (
     <>
+      <AnimatePresence>
+        {isOnShiftBreak && currentMeta && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className={cn("fixed inset-0 z-[100] flex flex-col items-center justify-center p-6 bg-gradient-to-b", currentMeta.gradientCls)}
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="w-full max-w-lg space-y-12 text-center"
+            >
+              <div className="space-y-4">
+                <Badge className={cn("px-4 py-1.5 rounded-full font-bold text-xs uppercase tracking-[0.2em]", currentMeta.badgeCls)}>
+                  {currentMeta.label}
+                </Badge>
+                <h2 className="text-5xl font-black text-white tracking-tight flex items-center justify-center gap-4">
+                  {currentMeta.emoji} Status Locked
+                </h2>
+                <p className="text-zinc-400 font-medium">Please select Return to Work once your session is complete.</p>
+              </div>
+
+              <div className="relative flex items-center justify-center py-12">
+                <div className={cn(
+                  "w-64 h-64 rounded-full border-4 border-zinc-900 flex flex-col items-center justify-center relative transition-all duration-500",
+                  currentMeta.ringColor,
+                  overTime && "animate-pulse scale-105 ring-8 ring-rose-500/30 border-rose-900"
+                )}>
+                  <span className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] absolute top-12">Elapsed Time</span>
+                  <span className={cn("text-6xl font-black tracking-tighter", currentMeta.textColor, overTime && "text-rose-400")}>
+                    {fmtSecs(elapsed)}
+                  </span>
+                  {overTime && (
+                    <motion.span 
+                      animate={{ opacity: [0.4, 1, 0.4] }}
+                      transition={{ duration: 1, repeat: Infinity }}
+                      className="text-rose-400 text-[10px] font-black uppercase tracking-widest absolute bottom-12"
+                    >
+                      Over Allotted Time
+                    </motion.span>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Button 
+                  size="lg"
+                  className="h-16 rounded-2xl bg-white text-zinc-950 hover:bg-zinc-200 font-black text-sm transition-all active:scale-95 shadow-2xl shadow-white/10"
+                  onClick={handleReturnToWork}
+                >
+                  <Zap className="w-4 h-4 mr-2 fill-current" />
+                  Return to Work
+                </Button>
+                <Button 
+                  size="lg"
+                  variant="outline"
+                  className="h-16 rounded-2xl border-zinc-800 bg-zinc-900/50 text-white hover:bg-zinc-800 font-bold text-sm transition-all"
+                  onClick={() => {
+                    setActiveTab?.("pos");
+                    updateShiftStatus("ACTIVE");
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
+                    }, 150);
+                  }}
+                >
+                  <ClipboardCheck className="w-4 h-4 mr-2" />
+                  Registry Check Off
+                </Button>
+                <Button 
+                  size="lg"
+                  variant="outline"
+                  className="h-16 rounded-2xl border-zinc-800 bg-zinc-900/50 text-white hover:bg-rose-900/20 hover:text-rose-400 hover:border-rose-900 font-bold text-sm transition-all"
+                  onClick={handleProtectedLogout}
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Sign Out of Website
+                </Button>
+              </div>
+              
+              <p className="text-zinc-600 text-[10px] font-medium tracking-widest uppercase">
+                Enterprise ID: {enterpriseId?.substring(0,12)}
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <header className="sticky top-0 z-30 flex h-20 w-full items-center justify-between px-6 lg:px-10 bg-zinc-50/80 backdrop-blur-xl border-b border-zinc-200/50">
       <div className="flex items-center gap-6 flex-1">
         <Button 
@@ -508,6 +798,159 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* POS Operator Session Chip */}
+        {posSession && (
+          <DropdownMenu>
+            <DropdownMenuTrigger className="outline-none">
+              <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200/70 shadow-sm hover:bg-emerald-100/50 transition-colors cursor-pointer">
+                <div className="relative shrink-0">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-[11px]">
+                    {posSession.staffName.substring(0,2).toUpperCase()}
+                  </div>
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-white animate-pulse" />
+                </div>
+                <div className="flex flex-col leading-none text-left">
+                  <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest">Terminal Active</span>
+                  <span className="text-xs font-bold text-zinc-800 leading-tight truncate max-w-[80px]">{posSession.staffName}</span>
+                </div>
+                <span className={cn(
+                  "text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md border shrink-0",
+                  posSession.payGrade === "EXECUTIVE" ? "bg-purple-50 text-purple-600 border-purple-200" :
+                  posSession.payGrade === "SUPERVISOR" ? "bg-blue-50 text-blue-600 border-blue-200" :
+                  "bg-zinc-100 text-zinc-500 border-zinc-200"
+                )}>{posSession.payGrade}</span>
+              </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 rounded-2xl p-2 border-zinc-200 shadow-xl">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-1.5">
+                  Shift Operations
+                </DropdownMenuLabel>
+                <DropdownMenuItem 
+                  className="rounded-xl p-2 cursor-pointer"
+                  onClick={async () => {
+                    if (!posSession?.sessionId) return;
+                    try {
+                      const newStatus = "ON_BREAK";
+                      await updateDoc(doc(db, "pos_sessions", posSession.sessionId), { 
+                        status: newStatus, 
+                        lastActivity: new Date().toISOString(),
+                        enterprise_id: enterpriseId
+                      });
+                      await addDoc(collection(db, "audit_logs"), { 
+                        action: "Shift Status Change", 
+                        details: `${posSession.staffName} started break`, 
+                        timestamp: new Date().toISOString(), 
+                        user: posSession.staffName, 
+                        enterprise_id: enterpriseId 
+                      });
+                      updateShiftStatus(newStatus);
+                      toast.info("Status: On Break");
+                    } catch(e: any) { 
+                      console.error("Break update failed:", e);
+                      toast.error(e.message?.includes("permissions") ? "Permission Denied" : "Update failed"); 
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-600 flex items-center justify-center"><Zap className="w-4 h-4" /></div>
+                    <span className="font-bold text-sm">Start Break</span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className="rounded-xl p-2 cursor-pointer"
+                  onClick={async () => {
+                    if (!posSession?.sessionId) return;
+                    try {
+                      const newStatus = "ON_LUNCH";
+                      await updateDoc(doc(db, "pos_sessions", posSession.sessionId), { 
+                        status: newStatus, 
+                        lastActivity: new Date().toISOString(),
+                        enterprise_id: enterpriseId
+                      });
+                      await addDoc(collection(db, "audit_logs"), { 
+                        action: "Shift Status Change", 
+                        details: `${posSession.staffName} started lunch`, 
+                        timestamp: new Date().toISOString(), 
+                        user: posSession.staffName, 
+                        enterprise_id: enterpriseId 
+                      });
+                      updateShiftStatus(newStatus);
+                      toast.info("Status: On Lunch");
+                    } catch(e: any) { 
+                      console.error("Lunch update failed:", e);
+                      toast.error(e.message?.includes("permissions") ? "Update failed" : "Permission Denied"); 
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center"><Activity className="w-4 h-4" /></div>
+                    <span className="font-bold text-sm">Start Lunch</span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className="rounded-xl p-2 cursor-pointer"
+                  onClick={() => {
+                    setActiveTab?.("pos");
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
+                    }, 100);
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-zinc-100 text-zinc-600 flex items-center justify-center"><ClipboardCheck className="w-4 h-4" /></div>
+                    <span className="font-bold text-sm">Registry Check Off</span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem 
+                  className="rounded-xl p-2 cursor-pointer"
+                  onClick={async () => {
+                    if (!posSession?.sessionId) return;
+                    try {
+                      const newStatus = "IN_MEETING";
+                      await updateDoc(doc(db, "pos_sessions", posSession.sessionId), { 
+                        status: newStatus, 
+                        lastActivity: new Date().toISOString(),
+                        enterprise_id: enterpriseId
+                      });
+                      await addDoc(collection(db, "audit_logs"), { 
+                        action: "Shift Status Change", 
+                        details: `${posSession.staffName} entered meeting`, 
+                        timestamp: new Date().toISOString(), 
+                        user: posSession.staffName, 
+                        enterprise_id: enterpriseId 
+                      });
+                      updateShiftStatus(newStatus);
+                      toast.info("Status: In Meeting");
+                    } catch(e: any) { 
+                      console.error("Meeting update failed:", e);
+                      toast.error(e.message?.includes("permissions") ? "Permission Denied" : "Update failed"); 
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center"><Users className="w-4 h-4" /></div>
+                    <span className="font-bold text-sm">Meeting</span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator className="my-1 bg-zinc-100" />
+              <DropdownMenuItem 
+                className="rounded-xl p-3 cursor-pointer text-rose-600 focus:text-rose-600 focus:bg-rose-50 border border-transparent hover:border-rose-100"
+                onClick={handleProtectedLogout}
+              >
+                <div className="flex items-center gap-3 w-full">
+                  <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center font-bold shadow-sm"><LogOut className="w-5 h-5" /></div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-bold text-sm">Sign Out of Website</span>
+                    <span className="text-[10px] text-rose-400 font-medium">Exit system & go to login screen</span>
+                  </div>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         <div className="flex items-center gap-2">
           <NotificationsMenu />

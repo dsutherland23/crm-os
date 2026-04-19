@@ -23,6 +23,25 @@ interface ModuleContextType {
   setBranding: (branding: Partial<BrandingConfig>) => void;
   enterpriseId: string | null;
   setEnterpriseId: (id: string | null) => void;
+  posSession: { 
+    staffId: string; staffName: string; payGrade: string; 
+    sessionId: string; staffData: any;
+    shiftStatus: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING";
+    statusSince: string; // ISO timestamp
+  } | null;
+  setPosSession: (session: { 
+    staffId: string; staffName: string; payGrade: string; 
+    sessionId: string; staffData: any;
+    shiftStatus: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING";
+    statusSince: string;
+  } | null) => void;
+  updateShiftStatus: (status: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING") => void;
+  shiftTimePolicies: { breakDuration: number; lunchDuration: number; meetingDuration: number; gracePeriod: number };
+  setShiftTimePolicies: (p: { breakDuration: number; lunchDuration: number; meetingDuration: number; gracePeriod: number }) => void;
+  clearSession: () => void;
+  grantedOverrides: string[];
+  addOverride: (tabId: string) => void;
+  logout: () => Promise<void>;
 }
 
 export interface BrandingConfig {
@@ -93,6 +112,19 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     return localStorage.getItem("crm_enterprise_id") || null;
   });
 
+  const [posSession, setPosSession] = useState<{ 
+    staffId: string; staffName: string; payGrade: string; 
+    sessionId: string; staffData: any;
+    shiftStatus: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING";
+    statusSince: string;
+  } | null>(null);
+  const [grantedOverrides, setGrantedOverrides] = useState<string[]>([]);
+  const [shiftTimePolicies, setShiftTimePolicies] = useState({ breakDuration: 15, lunchDuration: 30, meetingDuration: 60, gracePeriod: 5 });
+
+  const updateShiftStatus = (status: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING") => {
+    setPosSession(prev => prev ? { ...prev, shiftStatus: status, statusSince: new Date().toISOString() } : null);
+  };
+
   const setBranding = (update: Partial<BrandingConfig>) => {
     setBrandingState(prev => ({ ...prev, ...update }));
   };
@@ -144,6 +176,40 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     else localStorage.removeItem("crm_enterprise_id");
   }, [enterpriseId]);
 
+  useEffect(() => {
+    if (!posSession) setGrantedOverrides([]);
+  }, [posSession]);
+
+  const addOverride = (tabId: string) => {
+    setGrantedOverrides(prev => [...new Set([...prev, tabId])]);
+  };
+
+  const clearSession = () => {
+    setPosSession(null);
+    setGrantedOverrides([]);
+  };
+
+  const logout = async () => {
+    try {
+      clearSession();
+      // Use dynamic imports or similar if auth is not available here, 
+      // but it's imported at the top of the file normally in this project.
+      const { auth } = await import("@/lib/firebase");
+      const { signOut } = await import("firebase/auth");
+      const { clearMockUser, getMockUser } = await import("@/lib/auth-mock");
+      
+      await signOut(auth);
+      
+      if (getMockUser()) {
+        clearMockUser();
+      } else {
+        window.location.reload(); // Traditional reload for real auth logout
+      }
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
   const toggleModule = (moduleName: keyof ModuleConfig) => {
     setConfig(prev => ({ ...prev, [moduleName]: !prev[moduleName] }));
   };
@@ -187,7 +253,16 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       branding,
       setBranding,
       enterpriseId,
-      setEnterpriseId
+      setEnterpriseId,
+      posSession,
+      setPosSession,
+      updateShiftStatus,
+      shiftTimePolicies,
+      setShiftTimePolicies,
+      grantedOverrides,
+      addOverride,
+      clearSession,
+      logout
     }}>
       {children}
     </ModuleContext.Provider>

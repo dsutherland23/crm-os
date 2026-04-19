@@ -24,7 +24,8 @@ import {
   ScanLine,
   Percent,
   Lock,
-  ArrowLeft
+  ArrowLeft,
+  ClipboardCheck
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -69,7 +70,13 @@ interface CartDiscount {
 }
 
 export default function POS() {
-  const { activeBranch, hasActiveTransaction, setHasActiveTransaction, formatCurrency, enterpriseId, branding } = useModules();
+  const { 
+    activeBranch, hasActiveTransaction, setHasActiveTransaction, 
+    formatCurrency, enterpriseId, branding, setPosSession, 
+    posSession, clearSession, updateShiftStatus, logout,
+    shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies 
+  } = useModules();
+  
   const [cart, setCart] = useState<{ product: any; quantity: number }[]>([]);
   
   useEffect(() => {
@@ -127,12 +134,15 @@ export default function POS() {
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  const [timePolicies, setTimePolicies] = useState({
-    breakDuration: 15,
-    lunchDuration: 30,
-    meetingDuration: 60,
-    gracePeriod: 10
-  });
+  // ── Sync with Global Session ────────────────────────────────────
+  useEffect(() => {
+    if (posSession && !isAuthorized) {
+      setIsAuthorized(true);
+      setSelectedAdmin(posSession.staffData);
+      setCurrentSessionId(posSession.sessionId);
+    }
+  }, [posSession]);
+
   const [globalTaxRate, setGlobalTaxRate] = useState(15.0); // Fallback to 15%
 
   useEffect(() => {
@@ -227,34 +237,39 @@ export default function POS() {
 
       // Check auto logouts for active break sessions that exceeded time
       const evaluateAutoLogout = async () => {
-        for (const session of activeSessions) {
-           if (session.status === 'ON_BREAK' || session.status === 'ON_LUNCH' || session.status === 'IN_MEETING') {
-              const lastActivity = new Date(session.lastActivity || session.startTime);
-              const minutesElapsed = Math.floor((now.getTime() - lastActivity.getTime()) / 60000);
-              
-              let allowedDuration = timePolicies.gracePeriod; // Default to just grace period if we don't know the status somehow
-              if (session.status === 'ON_BREAK') allowedDuration += timePolicies.breakDuration;
-              if (session.status === 'ON_LUNCH') allowedDuration += timePolicies.lunchDuration;
-              if (session.status === 'IN_MEETING') allowedDuration += timePolicies.meetingDuration;
+        for (const session of (activeSessions || [])) {
+          if (!session || !session.id) continue;
+          
+          const startTime = new Date(session.startTime);
+          const elapsedMinutes = (now.getTime() - startTime.getTime()) / 60000;
+          
+          let policies = timePolicies || { breakDuration: 15, lunchDuration: 30, meetingDuration: 60, gracePeriod: 10 };
+          let allowedDuration = policies.gracePeriod;
+          
+          if (session.status === "ON_BREAK") allowedDuration = policies.breakDuration;
+          if (session.status === "ON_LUNCH") allowedDuration = policies.lunchDuration;
+          if (session.status === "IN_MEETING") allowedDuration = policies.meetingDuration;
 
-              if (minutesElapsed >= allowedDuration) {
-                 try {
-                   await updateDoc(doc(db, "pos_sessions", session.id), {
-                     endTime: now.toISOString(),
-                     status: "CLOSED",
-                     notes: `System auto-logout due to exceeded ${session.status.replace('_', ' ').toLowerCase()} limits.`
-                   });
-                   await addDoc(collection(db, "audit_logs"), {
-                     action: "Shift Auto-Closed",
-                     details: `Staff member ${session.staffName} exceeded allowed time. Register closed automatically.`,
-                     timestamp: now.toISOString(),
-                     user: "System",
-                   });
-                 } catch (err) {
-                   console.error("Failed to auto logout session", err);
-                 }
-              }
-           }
+          if (elapsedMinutes > allowedDuration + (policies.gracePeriod || 5)) {
+            try {
+              await updateDoc(doc(db, "pos_sessions", session.id), {
+                status: "CLOSED",
+                endTime: now.toISOString(),
+                autoClosed: true,
+                closeReason: `Time limit (${allowedDuration}m) exceeded`
+              });
+              
+              await addDoc(collection(db, "audit_logs"), {
+                action: "Shift Auto-Closed",
+                details: `Staff member ${session.staffName || 'Unknown'} exceeded allowed time. Register closed automatically.`,
+                timestamp: now.toISOString(),
+                user: "System",
+                enterprise_id: enterpriseId
+              });
+            } catch (err) {
+              console.error("Failed to auto logout session", err);
+            }
+          }
         }
       };
 
@@ -270,6 +285,8 @@ export default function POS() {
         setCartDiscount(null);
         setSelectedCustomer(null);
         document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus();
+      } else if (e.detail === "CLOSE_REGISTER") {
+        setIsClosePromptOpen(true);
       }
     };
     window.addEventListener("app:action", handleAction);
@@ -378,6 +395,18 @@ export default function POS() {
       toast.error("Please enter a valid positive amount");
       return;
     }
+
+    // ── Grade-based discount cap ────────────────────────────────────
+    const grade = posSession?.payGrade || "EXECUTIVE";
+    const capPercent = grade === "STANDARD" ? 10 : grade === "SUPERVISOR" ? 25 : 100;
+    if (manualDiscount.type === "Percentage" && val > capPercent) {
+      toast.error(
+        `Your ${grade} grade is limited to ${capPercent}% discounts. Ask a SUPERVISOR to override.`,
+        { duration: 5000 }
+      );
+      return;
+    }
+
     if (manualDiscount.type === "Percentage" && val > 100) {
       toast.error("Percentage discount cannot exceed 100%");
       return;
@@ -531,6 +560,7 @@ export default function POS() {
             // Check for an existing open session for this user at this branch
             const activeSessionQuery = query(
               collection(db, "pos_sessions"),
+              where("enterprise_id", "==", enterpriseId),
               where("staffId", "==", selectedAdmin.id),
               where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH"]),
               orderBy("startTime", "desc"),
@@ -553,6 +583,7 @@ export default function POS() {
                    details: `Staff member ${selectedAdmin.name} returned from ${sessionData.status.replace('_', ' ')}`,
                    timestamp: new Date().toISOString(),
                    user: selectedAdmin.name,
+                   enterprise_id: enterpriseId
                  });
               } else {
                  await addDoc(collection(db, "audit_logs"), {
@@ -560,10 +591,24 @@ export default function POS() {
                    details: `Staff member ${selectedAdmin.name} unlocked the terminal`,
                    timestamp: new Date().toISOString(),
                    user: selectedAdmin.name,
+                   enterprise_id: enterpriseId
                  });
               }
-              setCurrentSessionId(existingSession.id);
+              const sysId = activeSessionSnap.docs[0].id;
+              const existingStatus = (activeSessionSnap.docs[0].data().status || "ACTIVE") as "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING";
+              setCurrentSessionId(sysId);
               toast.success(`Welcome back, ${selectedAdmin.name}`);
+              
+              setIsAuthorized(true);
+              setPosSession({
+                staffId: selectedAdmin.id,
+                staffName: selectedAdmin.name,
+                payGrade: selectedAdmin.payGrade || 'STANDARD',
+                sessionId: sysId,
+                staffData: selectedAdmin,
+                shiftStatus: existingStatus,
+                statusSince: activeSessionSnap.docs[0].data().lastActivity || new Date().toISOString()
+              });
             } else {
               // Create new session
               const docRef = await addDoc(collection(db, "pos_sessions"), {
@@ -579,11 +624,22 @@ export default function POS() {
                 details: `Staff member ${selectedAdmin.name} started a new shift`,
                 timestamp: new Date().toISOString(),
                 user: selectedAdmin.name,
+                enterprise_id: enterpriseId
               });
               setCurrentSessionId(docRef.id);
               toast.success("Authorization successful - Shift Started");
+
+              setIsAuthorized(true);
+              setPosSession({
+                staffId: selectedAdmin.id,
+                staffName: selectedAdmin.name,
+                payGrade: selectedAdmin.payGrade || 'STANDARD',
+                sessionId: docRef.id,
+                staffData: selectedAdmin,
+                shiftStatus: "ACTIVE",
+                statusSince: new Date().toISOString()
+              });
             }
-            setIsAuthorized(true);
           } catch (error: any) {
             toast.error("Failed to start session: " + error.message);
             setPinEntry("");
@@ -609,6 +665,7 @@ export default function POS() {
           details: `Staff member ${selectedAdmin?.name || 'Unknown'} changed status to ${statusType.replace('_', ' ')}`,
           timestamp: new Date().toISOString(),
           user: selectedAdmin?.name || "System",
+          enterprise_id: enterpriseId
         });
 
         toast.info(`Status updated to ${statusType.replace('_', ' ')}`);
@@ -622,16 +679,21 @@ export default function POS() {
           details: `Staff member ${selectedAdmin?.name || 'Unknown'} locked the terminal`,
           timestamp: new Date().toISOString(),
           user: selectedAdmin?.name || "System",
+          enterprise_id: enterpriseId
         });
       } catch (err) { }
       toast.info("Terminal Locked");
     }
     
-    // Always lock terminal layout back to PIN screen safely, using timeout to prevent DropdownMenu crash
+    // Auto-lock terminal layout back to PIN screen safely
     setTimeout(() => {
       setIsAuthorized(false);
       setSelectedAdmin(null);
       setPinEntry("");
+      // Only clear the GLOBAL session if they explicitly locked it or closed shift
+      if (statusType === "LOCKED") {
+        clearSession();
+      }
     }, 150);
   };
 
@@ -785,12 +847,17 @@ export default function POS() {
           details: `Staff member ${selectedAdmin?.name || 'Unknown'} closed the register with ${countedCash ? '$'+countedCash : 'no'} declared cash`,
           timestamp: new Date().toISOString(),
           user: selectedAdmin?.name || "System",
+          enterprise_id: enterpriseId
         });
       } catch (error) {
         console.error("Failed to update session record", error);
       }
     }
-    toast.success(`Register closed successfully for ${selectedAdmin?.name || 'User'}`);
+
+    const isStandard = selectedAdmin?.payGrade === "STANDARD";
+    const staffName = selectedAdmin?.name || 'User';
+
+    toast.success(`Register closed successfully for ${staffName}`);
     setIsClosePromptOpen(false);
     setIsAuthorized(false);
     setSelectedAdmin(null);
@@ -798,6 +865,12 @@ export default function POS() {
     setCountedCash("");
     setCloseRegisterNotes("");
     setCurrentSessionId(null);
+    setPosSession(null);
+
+    if (isStandard) {
+      toast.info("Standard session ended. Signing out of website...", { duration: 3000 });
+      setTimeout(() => logout(), 1500);
+    }
   };
 
   return (
@@ -809,50 +882,28 @@ export default function POS() {
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-blue-600 mb-1">
                 <History className="w-4 h-4" />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Branch: {activeBranch.toUpperCase()}</span>
-                {selectedAdmin && (
+                <span className="text-[10px] font-bold uppercase tracking-widest">Branch: {(activeBranch || 'all').toUpperCase()}</span>
+                {selectedAdmin?.name && (
                   <>
                     <span className="text-zinc-300 mx-1">•</span>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">User: {selectedAdmin.initials}</span>
-                    <span className="text-zinc-300 mx-1">•</span>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <button className="text-[10px] font-bold uppercase tracking-widest text-indigo-500 hover:text-indigo-600 transition-colors flex items-center gap-1">
-                            Shift Options
-                          </button>
-                        }
-                      />
-                      <DropdownMenuContent align="end" className="w-48 rounded-xl font-medium">
-                         <DropdownMenuGroup>
-                           <DropdownMenuLabel className="text-[10px] tracking-widest text-zinc-400">Terminal Control</DropdownMenuLabel>
-                           <DropdownMenuItem onClick={() => handleTimeClock("LOCKED")}>
-                             Lock Terminal
-                           </DropdownMenuItem>
-                         </DropdownMenuGroup>
-                         <DropdownMenuSeparator />
-                         <DropdownMenuGroup>
-                           <DropdownMenuLabel className="text-[10px] tracking-widest text-zinc-400">Time Clock</DropdownMenuLabel>
-                           <DropdownMenuItem onClick={() => handleTimeClock("ON_BREAK")}>
-                             Start Short Break
-                           </DropdownMenuItem>
-                           <DropdownMenuItem onClick={() => handleTimeClock("ON_LUNCH")}>
-                             Start Lunch
-                           </DropdownMenuItem>
-                           <DropdownMenuItem onClick={() => handleTimeClock("IN_MEETING")}>
-                             In Meeting
-                           </DropdownMenuItem>
-                         </DropdownMenuGroup>
-                         <DropdownMenuSeparator />
-                         <DropdownMenuItem onClick={() => setIsClosePromptOpen(true)} className="text-rose-600 focus:text-rose-600 focus:bg-rose-50 font-bold">
-                           Close Register
-                         </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Operator: {selectedAdmin.name}</span>
                   </>
                 )}
               </div>
-              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-zinc-900 font-display">Terminal</h1>
+              <div className="flex items-center gap-4">
+                <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-zinc-900 font-display whitespace-nowrap">Terminal</h1>
+                {posSession?.sessionId && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    className="rounded-xl border-zinc-200 bg-white text-zinc-600 font-bold h-9 px-4 hover:bg-zinc-50"
+                    onClick={() => setIsClosePromptOpen(true)}
+                  >
+                    <History className="w-4 h-4 mr-2" />
+                    Close Registry
+                  </Button>
+                )}
+              </div>
               <p className="text-xs lg:text-sm text-zinc-500">Quick-access product catalog and barcode scanner.</p>
             </div>
             <div className="relative w-full md:w-96 group flex gap-2">
@@ -998,31 +1049,29 @@ export default function POS() {
           </div>
 
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button 
-                  variant="outline" 
-                  className="w-full justify-start rounded-xl border-zinc-200 h-11 text-zinc-500 hover:text-zinc-900 bg-zinc-50/50"
-                >
-                  {selectedCustomer ? (
-                    <div className="flex items-center justify-between w-full">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold">
-                          {selectedCustomer.name.substring(0, 2).toUpperCase()}
-                        </div>
-                        <span className="text-sm font-bold text-zinc-900">{selectedCustomer.name}</span>
+            <DropdownMenuTrigger asChild>
+              <Button 
+                variant="outline" 
+                className="w-full justify-start rounded-xl border-zinc-200 h-11 text-zinc-500 hover:text-zinc-900 bg-zinc-50/50"
+              >
+                {selectedCustomer ? (
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold">
+                        {(selectedCustomer.name || 'CU').substring(0, 2).toUpperCase()}
                       </div>
-                      <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100">{selectedCustomer.points || 0} pts</Badge>
+                      <span className="text-sm font-bold text-zinc-900">{selectedCustomer.name}</span>
                     </div>
-                  ) : (
-                    <>
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Link Customer
-                    </>
-                  )}
-                </Button>
-              }
-            />
+                    <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100">{selectedCustomer.points || 0} pts</Badge>
+                  </div>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4 mr-2" />
+                    Link Customer
+                  </>
+                )}
+              </Button>
+            </DropdownMenuTrigger>
              <DropdownMenuContent className="w-80 rounded-xl border-zinc-200 p-2">
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2 pt-2">Link Customer</DropdownMenuLabel>
@@ -1297,7 +1346,7 @@ export default function POS() {
             <div className="w-full flex justify-between items-center mb-2 px-4">
                <div>
                   <h2 className="text-xl font-bold text-zinc-900">Transaction Finalized</h2>
-                  <p className="text-xs text-zinc-500">Order #{lastTransaction?.id?.substring(0,8).toUpperCase()}</p>
+                  <p className="text-xs text-zinc-500">Order #{(lastTransaction?.id || 'PENDING').substring(0,8).toUpperCase()}</p>
                </div>
                <div className="flex gap-2">
                   <Button 
@@ -1508,7 +1557,8 @@ export default function POS() {
                       action: "Stock Sync Requested",
                       details: `Manual stock deduction sync triggered by ${selectedAdmin?.name || 'Unknown'} at register close`,
                       timestamp: serverTimestamp(),
-                      user: selectedAdmin?.name || "System"
+                      user: selectedAdmin?.name || "System",
+                      enterprise_id: enterpriseId
                     });
                     toast.success("Stock deductions confirmed and logged");
                   } catch (err) {
@@ -1547,7 +1597,7 @@ export default function POS() {
           </div>
           <DialogFooter className="gap-2 sm:gap-0 pt-4">
             <Button variant="outline" onClick={() => setIsClosePromptOpen(false)} className="rounded-xl border-zinc-200 hover:bg-zinc-50 font-bold flex-1">Cancel</Button>
-            <Button className="rounded-xl bg-zinc-500 hover:bg-zinc-600 text-white font-bold flex-1" onClick={handleCloseRegister}>Close Register</Button>
+            <Button id="pos-close-shift-btn" className="rounded-xl bg-zinc-500 hover:bg-zinc-600 text-white font-bold flex-1" onClick={handleCloseRegister}>Close Register</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
