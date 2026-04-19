@@ -45,7 +45,7 @@ export const RipplePulseLoader: React.FC<RipplePulseLoaderProps> = ({
 
         {/* Core Branding Cavity */}
         <div className={cn(
-          "relative z-10 bg-white rounded-3xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] flex items-center justify-center border border-zinc-100 transition-all duration-500 animate-pulse-soft",
+          "relative z-10 bg-white rounded-full shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] flex items-center justify-center border border-zinc-100 transition-all duration-500 animate-pulse-soft",
           sizeClasses[size]
         )}>
           {!hideLogo && (
