@@ -1695,13 +1695,13 @@ export default function Inventory() {
       </Tabs>
 
       <Sheet open={isProductSheetOpen} onOpenChange={setIsProductSheetOpen}>
-        <SheetContent className="sm:max-w-xl w-full border-l border-zinc-200 bg-zinc-50/95 backdrop-blur-xl p-0 overflow-hidden flex flex-col shadow-2xl">
-          <SheetHeader className="p-6 md:p-8 bg-white border-b border-zinc-100/80">
-            <SheetTitle className="font-display tracking-tight text-2xl text-zinc-900">
+        <SheetContent className="w-full sm:max-w-xl border-l border-zinc-200 bg-zinc-50/95 backdrop-blur-xl p-0 overflow-hidden flex flex-col shadow-2xl h-[100dvh] sm:h-full">
+          <SheetHeader className="p-4 sm:p-8 bg-white border-b border-zinc-100/80 flex-none px-6">
+            <SheetTitle className="font-display tracking-tight text-xl sm:text-2xl text-zinc-900">
               {editingProductId ? "Edit Product" : "New Product"}
             </SheetTitle>
-            <SheetDescription className="text-zinc-500">
-              {editingProductId ? "Modify product details and pricing." : "Add a new product to your inventory catalog."}
+            <SheetDescription className="text-xs sm:text-sm text-zinc-500">
+              {editingProductId ? "Modify product details." : "Add to catalog."}
             </SheetDescription>
           </SheetHeader>
           
@@ -1715,7 +1715,7 @@ export default function Inventory() {
                 </div>
                 
                 <div className="flex flex-col items-center justify-center gap-4">
-                  <div className="relative w-full aspect-square max-w-[200px] rounded-[2.5rem] overflow-hidden bg-white border-2 border-zinc-100 shadow-inner flex items-center justify-center group">
+                  <div className="relative w-full aspect-square max-w-[160px] sm:max-w-[200px] rounded-[2rem] sm:rounded-[2.5rem] overflow-hidden bg-white border-2 border-zinc-100 shadow-inner flex items-center justify-center group">
                     {productForm.image_url ? (
                       <>
                         <img src={productForm.image_url} alt="Product" className="w-full h-full object-cover" />
@@ -1732,23 +1732,23 @@ export default function Inventory() {
                       </>
                     ) : (
                       <div className="flex flex-col items-center text-center p-6">
-                        <div className="w-12 h-12 rounded-2xl bg-zinc-50 flex items-center justify-center mb-3">
-                          <ImageIcon className="w-6 h-6 text-zinc-300" />
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-zinc-50 flex items-center justify-center mb-3">
+                          <ImageIcon className="w-5 h-5 sm:w-6 sm:h-6 text-zinc-300" />
                         </div>
-                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-relaxed">
-                          No Visual<br/>Asset Link
+                        <p className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-relaxed">
+                          No Asset<br/>Selected
                         </p>
                       </div>
                     )}
                   </div>
 
-                  <div className="flex gap-2 w-full max-w-[300px]">
+                  <div className="flex gap-2 w-full max-w-[280px] sm:max-w-[300px]">
                     <Button 
                       onClick={() => setIsCameraOpen(true)}
-                      className="flex-1 rounded-2xl h-12 bg-zinc-900 text-white hover:bg-zinc-800 font-bold gap-2"
+                      className="flex-1 rounded-2xl h-11 sm:h-12 bg-zinc-900 text-white hover:bg-zinc-800 font-bold gap-2 text-xs"
                     >
                       <Camera className="w-4 h-4" />
-                      Take Photo
+                      Camera
                     </Button>
                     <div className="relative flex-1">
                       <input 
@@ -1760,7 +1760,7 @@ export default function Inventory() {
                           const file = e.target.files?.[0];
                           if (!file) return;
                           
-                          const tid = toast.loading("Uploading product image...");
+                          const tid = toast.loading("Uploading...");
                           try {
                             const { getStorage, ref, uploadBytes, getDownloadURL } = await import("@/lib/firebase");
                             const storage = getStorage();
@@ -1768,25 +1768,24 @@ export default function Inventory() {
                             await uploadBytes(storageRef, file);
                             const url = await getDownloadURL(storageRef);
                             setProductForm(prev => ({ ...prev, image_url: url }));
-                            toast.success("Image uploaded", { id: tid });
+                            toast.success("Uploaded", { id: tid });
                           } catch (err) {
-                            toast.error("Upload failed", { id: tid });
+                            toast.error("Failed", { id: tid });
                           }
                         }}
                       />
                       <Button 
                         variant="outline"
-                        className="w-full rounded-2xl h-12 border-zinc-200 text-zinc-900 font-bold gap-2"
-                        render={
-                          <label htmlFor="product-image-upload" className="cursor-pointer">
-                            <Plus className="w-4 h-4" />
-                            Upload
-                          </label>
-                        }
-                      />
+                        className="w-full rounded-2xl h-11 sm:h-12 border-zinc-200 text-zinc-900 font-bold gap-2 text-xs"
+                        asChild
+                      >
+                        <label htmlFor="product-image-upload" className="cursor-pointer">
+                          <Plus className="w-4 h-4" />
+                          Upload
+                        </label>
+                      </Button>
                     </div>
                   </div>
-                  <p className="text-[9px] text-zinc-400 font-medium italic">High-resolution PBR captures recommended (1:1 Ratio)</p>
                 </div>
               </div>
 
@@ -1801,7 +1800,7 @@ export default function Inventory() {
                 <div className="space-y-2">
                   <label className="text-xs font-bold text-zinc-500">Product Name <span className="text-rose-500">*</span></label>
                   <Input 
-                    className="rounded-xl h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-blue-500/20" 
+                    className="rounded-xl h-11 sm:h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-blue-500/20 text-sm" 
                     value={productForm.name}
                     onChange={(e) => setProductForm({...productForm, name: e.target.value})}
                     placeholder="e.g. Ergonomic Office Chair"
@@ -1839,10 +1838,10 @@ export default function Inventory() {
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500">SKU Code</label>
                     <Input 
-                      className="rounded-xl h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20" 
+                      className="rounded-xl h-11 sm:h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20" 
                       value={productForm.sku}
                       onChange={(e) => setProductForm({...productForm, sku: e.target.value})}
-                      placeholder="e.g. FUR-CHR-01"
+                      placeholder="e.g. FUR-01"
                     />
                   </div>
                 </div>

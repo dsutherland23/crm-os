@@ -934,7 +934,7 @@ export default function CRM() {
 
   const AddCustomerDialog = (
     <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
-      <DialogContent className="rounded-3xl border-zinc-200 w-[95vw] max-w-5xl sm:max-w-4xl md:max-w-4xl lg:max-w-5xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden">
+      <DialogContent className="rounded-3xl border-zinc-200 w-[95vw] max-w-5xl sm:max-w-4xl md:max-w-4xl lg:max-w-5xl max-h-[96vh] p-0 shadow-2xl flex flex-col bg-white overflow-hidden">
         <DialogHeader className="px-8 py-6 border-b border-zinc-100 flex flex-row items-center justify-between sticky top-0 bg-white z-10 w-full relative">
           <div className="flex items-center gap-3">
             <UserPlus className="w-6 h-6 text-zinc-900" />
@@ -2181,12 +2181,12 @@ export default function CRM() {
 
           {/* Create Invoice Dialog */}
           <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
-            <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-[500px]">
-              <DialogHeader>
-                <DialogTitle className="text-2xl font-bold">Create Invoice</DialogTitle>
-                <DialogDescription>Generate a new billable document for {selectedCustomer.name}.</DialogDescription>
+            <DialogContent className="rounded-3xl border-zinc-200 w-[95vw] sm:max-w-[500px] max-h-[96vh] p-0 overflow-hidden flex flex-col">
+              <DialogHeader className="p-4 md:p-6 border-b border-zinc-100 flex-none px-6 sm:px-8">
+                <DialogTitle className="text-xl md:text-2xl font-bold">Create Invoice</DialogTitle>
+                <DialogDescription className="text-xs">Generate a new billable document for {selectedCustomer.name}.</DialogDescription>
               </DialogHeader>
-              <div className="space-y-6 py-4">
+              <div className="flex-1 overflow-y-auto px-6 sm:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Invoice Number</Label>
@@ -2194,13 +2194,13 @@ export default function CRM() {
                       placeholder="INV-001" 
                       value={invoiceData.invoiceNumber}
                       onChange={(e) => setInvoiceData({...invoiceData, invoiceNumber: e.target.value})}
-                      className="rounded-xl h-14 font-bold"
+                      className="rounded-xl h-11 sm:h-14 font-bold text-sm"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Status</Label>
                     <Select value={invoiceData.status} onValueChange={(v) => setInvoiceData({...invoiceData, status: v})}>
-                      <SelectTrigger className="rounded-xl h-14">
+                      <SelectTrigger className="rounded-xl h-11 sm:h-14 text-sm">
                         <SelectValue placeholder="Select status" />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl">
@@ -2213,7 +2213,7 @@ export default function CRM() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Invoice Amount ($)</Label>
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Invoice Amount ($)</Label>
                   <div className="relative">
                     <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                     <Input 
@@ -2223,33 +2223,33 @@ export default function CRM() {
                       placeholder="0.00" 
                       value={invoiceData.amount}
                       onChange={(e) => setInvoiceData({...invoiceData, amount: e.target.value})}
-                      className="rounded-xl h-14 pl-10 text-lg font-bold"
+                      className="rounded-xl h-11 sm:h-14 pl-10 text-base sm:text-lg font-bold"
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Service/Product Description</Label>
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Description</Label>
                   <Textarea 
-                    placeholder="Enter invoice details..." 
+                    placeholder="Enter details..." 
                     value={invoiceData.description}
                     onChange={(e) => setInvoiceData({...invoiceData, description: e.target.value})}
-                    className="rounded-xl min-h-[100px] resize-none"
+                    className="rounded-xl min-h-[80px] sm:min-h-[100px] text-sm resize-none"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Due Date</Label>
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Due Date</Label>
                   <Input 
                     type="date"
                     min={new Date().toISOString().split('T')[0]}
                     value={invoiceData.dueDate}
                     onChange={(e) => setInvoiceData({...invoiceData, dueDate: e.target.value})}
-                    className="rounded-xl h-12"
+                    className="rounded-xl h-11 sm:h-12 text-sm"
                   />
                 </div>
               </div>
-              <DialogFooter>
+              <DialogFooter className="p-4 sm:p-8 border-t border-zinc-100 flex-none px-6 sm:px-8">
                 <Button 
-                  className="w-full rounded-xl bg-emerald-600 text-white h-14 font-bold shadow-lg shadow-emerald-600/20 hover:bg-emerald-700"
+                  className="w-full rounded-xl bg-emerald-600 text-white h-12 sm:h-14 font-bold shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 text-xs sm:text-sm"
                   onClick={handleCreateInvoice}
                   disabled={isSubmittingInvoice}
                 >
