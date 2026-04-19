@@ -614,7 +614,7 @@ export default function CRM() {
       - [Action 2]`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: prompt
       });
       
@@ -663,7 +663,7 @@ export default function CRM() {
       The email should be concise, helpful, and encourage them to connect or check out our latest offers.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: prompt,
       });
 
@@ -786,16 +786,24 @@ export default function CRM() {
     setIsSubmittingCall(true);
     try {
       const content = `Scheduled Call: ${callData.objective} on ${callData.date} at ${callData.time}`;
-      await addDoc(collection(db, "communications"), {
-        customer_id: selectedCustomer.id,
-        customer_name: selectedCustomer.name,
-        type: "Call",
-        content,
-        date: callData.date,
-        timestamp: serverTimestamp(),
-        sender: auth.currentUser?.displayName || "System",
-        status: "Scheduled"
-      });
+      
+      // Attempt to log to global communications first
+      try {
+        await addDoc(collection(db, "communications"), {
+          customer_id: selectedCustomer.id,
+          customer_name: selectedCustomer.name,
+          type: "Call",
+          content,
+          date: callData.date,
+          timestamp: serverTimestamp(),
+          sender: auth.currentUser?.displayName || "System",
+          status: "Scheduled"
+        });
+      } catch (logErr) {
+        console.warn("Global log failed (continuing to customer update):", logErr);
+      }
+
+      // Update customer document
       await updateDoc(doc(db, "customers", selectedCustomer.id), {
         communications: arrayUnion({
           id: Date.now().toString(),
@@ -805,11 +813,12 @@ export default function CRM() {
           timestamp: new Date().toISOString()
         })
       });
+      
       toast.success("Call scheduled and logged");
       setIsScheduleCallOpen(false);
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to schedule call");
+    } catch (error: any) {
+      console.error("Schedule Call Failure:", error);
+      toast.error(`Failed to schedule call: ${error.message || 'Check database permissions'}`);
     } finally {
       setIsSubmittingCall(false);
     }
@@ -1434,7 +1443,8 @@ export default function CRM() {
                         credit_limit: selectedCustomer.credit_limit || 0,
                         birthday: selectedCustomer.birthday || "",
                         segment: selectedCustomer.segment || "No Group",
-                        address: selectedCustomer.address || ""
+                        address: selectedCustomer.address || "",
+                        photo_url: selectedCustomer.photo_url || ""
                       });
                       setIsEditCustomerOpen(true);
                     }}>

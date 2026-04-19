@@ -197,15 +197,10 @@ export default function Inventory() {
 
   // ── NEURAL LENS ENGINE (2026) ──────────────────────────────────
   useEffect(() => {
-    let activeStream: MediaStream | null = null;
-
     const startCamera = async () => {
       if (!isCameraOpen) return;
       
-      // Hardware Handoff Delay
-      await new Promise(resolve => setTimeout(resolve, 600));
-
-      // Cleanup
+      // Cleanup previous streams
       if (cameraStream) {
         cameraStream.getTracks().forEach(t => t.stop());
       }
@@ -215,7 +210,7 @@ export default function Inventory() {
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: cameraMode, width: { ideal: 1280 }, height: { ideal: 720 } }
+          video: { facingMode: cameraMode }
         });
         
         if (isCameraOpen) {
@@ -230,12 +225,9 @@ export default function Inventory() {
           if (isCameraOpen) {
             setCameraStream(stream);
             setHasCameraAccess(true);
-          } else {
-            stream.getTracks().forEach(t => t.stop());
           }
-        } catch (fErr) {
-          toast.error("Lens hardware unavailable.");
-          setIsCameraOpen(false);
+        } catch (innerErr) {
+          console.error("Camera Access Failed:", innerErr);
         }
       } finally {
         setIsInitializing(false);
@@ -2321,59 +2313,30 @@ export default function Inventory() {
       </DialogContent>
     </Dialog>
 
-    {/* ── 2026 NEURAL CAMERA INTERFACE ────────────────────────────── */}
+    {/* Camera Interface */}
     <Dialog open={isCameraOpen} onOpenChange={setIsCameraOpen}>
       <DialogContent showCloseButton={false} className="max-w-4xl w-[95vw] h-[85vh] md:h-auto p-0 overflow-hidden rounded-[2.5rem] border-none bg-black shadow-[0_0_100px_rgba(0,0,0,1)] outline-none border-white/5 top-1/2 -translate-y-1/2">
         <div className="relative h-full w-full flex flex-col overflow-hidden bg-zinc-950">
           
-          {/* ── IMMERSIVE VIEWPORT (Top Section) ────────────────────── */}
+          {/* Clean Viewport */}
           <div className="relative flex-1 w-full bg-black overflow-hidden">
-            {/* Stable Video Feed */}
             <video 
               ref={videoRef} 
               autoPlay 
               playsInline 
               muted 
-              className={cn(
-                "absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 contrast-[1.1]",
-                (hasCameraAccess && !isInitializing) ? "opacity-100" : "opacity-0"
-              )} 
+              className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
             />
 
-            {/* Shutter Flash Effect */}
-            <AnimatePresence>
-              {isCapturing && (
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.1 }}
-                  className="absolute inset-0 bg-white z-[100]"
-                />
-              )}
-            </AnimatePresence>
-
-            {/* Neural Viewfinder Overlays */}
-            <div className="absolute inset-0 pointer-events-none p-6 sm:p-12 z-40">
-              <div className="relative w-full h-full">
-                 {/* Scanning Beam */}
-                 {hasCameraAccess && (
-                    <motion.div 
-                      animate={{ top: ['5%', '95%', '5%'] }}
-                      transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-                      className="absolute left-0 right-0 h-px bg-gradient-to-r from-transparent via-blue-400/40 to-transparent shadow-[0_0_15px_rgba(96,165,250,0.4)] z-10"
-                    />
-                 )}
-
-                 {/* Corner Brackets */}
-                 <div className="absolute inset-4 border border-white/5 rounded-[1.5rem]">
-                    <div className="absolute -top-1 -left-1 w-8 h-8 border-t-2 border-l-2 border-blue-500/40 rounded-tl-xl" />
-                    <div className="absolute -top-1 -right-1 w-8 h-8 border-t-2 border-r-2 border-blue-500/40 rounded-tr-xl" />
-                    <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-2 border-l-2 border-blue-500/40 rounded-bl-xl" />
-                    <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-2 border-r-2 border-blue-500/40 rounded-br-xl" />
-                 </div>
+            {/* Status Feedback */}
+            {(!hasCameraAccess || isInitializing) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 text-zinc-500 bg-black z-50">
+                <RefreshCw className="w-12 h-12 animate-spin text-blue-500/40" />
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-400 animate-pulse">
+                  {isInitializing ? "Starting Lens" : "Waiting for Access"}
+                </p>
               </div>
-            </div>
+            )}
 
             {/* HUD: HUD Buttons (Close / Flash / Flip) */}
             <div className="absolute top-6 left-6 right-6 flex items-center justify-between z-50">
@@ -2405,35 +2368,6 @@ export default function Inventory() {
                 </Button>
               </div>
             </div>
-
-            {/* Initialization Loader & Manual Override */}
-            {(!hasCameraAccess || isInitializing) && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 text-zinc-500 bg-black z-50">
-                <div className="relative">
-                  <div className="absolute inset-0 blur-3xl bg-blue-600/20 rounded-full animate-pulse" />
-                  <RefreshCw className="w-12 h-12 animate-spin relative z-10 text-blue-500/60" />
-                </div>
-                <div className="flex flex-col items-center gap-4">
-                  <p className="text-[9px] font-black uppercase tracking-[0.6em] text-zinc-500 animate-pulse">
-                    {isInitializing ? "Initializing Neural Link" : "Lens Hardware Locked"}
-                  </p>
-                  {!isInitializing && (
-                    <Button 
-                      variant="outline" 
-                      className="rounded-full border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-8 font-bold text-[10px] uppercase tracking-widest h-9"
-                      onClick={() => {
-                        setIsInitializing(true);
-                        // Force re-trigger of effect
-                        setIsCameraOpen(false);
-                        setTimeout(() => setIsCameraOpen(true), 100);
-                      }}
-                    >
-                      Initialize Lens
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* ── NEURAL CONTROL DECK (Bottom Section) ────────────────── */}
@@ -2446,10 +2380,6 @@ export default function Inventory() {
                   <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Stable</span>
                </div>
                <div className="w-px h-2.5 bg-white/10" />
-               <span className="text-[8px] font-mono text-zinc-500">HDR ACTIVE</span>
-               <span className="text-[8px] font-mono text-zinc-500">AI SHARP</span>
-            </div>
-
             {/* Primary Actions */}
             <div className="w-full flex items-center justify-between max-w-sm">
                {/* Gallery Preview */}
@@ -2469,8 +2399,7 @@ export default function Inventory() {
                   if (!videoRef.current || !canvasRef.current || isCapturing) return;
                   setIsCapturing(true);
                   
-                  // Tacit & Physical Haptic Feedback
-                  if (navigator.vibrate) navigator.vibrate([10, 30, 10]); // Multi-burst haptic
+                  if (navigator.vibrate) navigator.vibrate(50);
                   new Audio("https://assets.mixkit.co/active_storage/sfx/702/702-preview.mp3").play().catch(() => {});
 
                   const canvas = canvasRef.current;
@@ -2478,30 +2407,26 @@ export default function Inventory() {
                   canvas.width = video.videoWidth;
                   canvas.height = video.videoHeight;
                   const ctx = canvas.getContext('2d');
-                  if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                  
+                  ctx?.drawImage(video, 0, 0);
+
                   canvas.toBlob(async (blob) => {
                     if (!blob) return;
-                    const tid = toast.loading("Optimizing Neural Asset...");
+                    
+                    const tid = toast.loading("Saving image...");
                     try {
                       const { getStorage, ref, uploadBytes, getDownloadURL } = await import("@/lib/firebase");
-                      const storageRef = ref(getStorage(), `products/neural_asset_${Date.now()}.jpg`);
-                      
-                      // Perform upload with specific metadata
-                      const metadata = { contentType: 'image/jpeg' };
-                      await uploadBytes(storageRef, blob, metadata);
-                      
+                      const storageRef = ref(getStorage(), `products/product_${Date.now()}.jpg`);
+                      await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
                       const url = await getDownloadURL(storageRef);
                       setProductForm(prev => ({ ...prev, image_url: url }));
-                      toast.success("Asset Secured in Cloud", { id: tid });
+                      toast.success("Saved successfully", { id: tid });
                       setIsCameraOpen(false);
                     } catch (err: any) {
-                      console.error("Storage Error:", err);
-                      toast.error(`Upload Failed: ${err.message || 'Unknown Error'}`, { id: tid });
+                      toast.error(`Error: ${err.message}`, { id: tid });
                     } finally {
                       setIsCapturing(false);
                     }
-                  }, 'image/jpeg', 0.95);
+                  }, 'image/jpeg', 0.85);
                 }}
                >
                  <div className="absolute inset-2 sm:inset-3 rounded-full border-2 border-white opacity-20 group-hover:opacity-100 transition-opacity" />
