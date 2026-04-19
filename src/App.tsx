@@ -30,10 +30,10 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 function AppContent() {
-  // ── Admin Portal shortcut ───────────────────────────────────────
   // Navigate to /#/admin or append ?admin=1 to access the portal
   const isAdminRoute =
-    window.location.hash === "#/admin" ||
+    window.location.hash.startsWith("#/admin") ||
+    window.location.pathname === "/admin" ||
     new URLSearchParams(window.location.search).get("admin") === "1";
   if (isAdminRoute) return <AdminPortal />;
   const [activeTab, setActiveTab] = useState("dashboard");

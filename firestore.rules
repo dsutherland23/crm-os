@@ -113,14 +113,19 @@ service cloud.firestore {
     }
 
     // ─── Admin Users Registry ─────────────────────────────────────────
-    // Only super_admins can manage the admin list.
-    // Admins can read the list to verify peers.
+    // Any signed-in user can read THEIR OWN admin_users document.
+    // This breaks the chicken-and-egg read loop: to check if you're admin
+    // you must first be able to read admin_users/{your_uid} without being admin.
+    // Full list reads are restricted to confirmed admins only.
     match /admin_users/{adminId} {
-      allow read: if isAdmin();
+      // Self-read: any authenticated user can check their own doc
       allow read: if isOwner(adminId);
+      // Peer-reads: confirmed admins can read all admin docs
+      allow read, list: if isAdmin();
+      // Writes require super_admin claim OR existing super_admin doc (bootstrap fallback)
       allow write: if hasAdminClaim() && request.auth.token.role == 'super_admin';
-      // Fallback: if claims aren't yet set but the user is in the collection as super_admin
-      allow write: if get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin';
+      allow write: if isOwner(adminId) == false
+        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin';
     }
 
     // ─── Admin Audit Logs ─────────────────────────────────────────────

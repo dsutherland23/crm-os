@@ -22,6 +22,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -127,27 +128,56 @@ export default function AdminPortal() {
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) { setPhase("login"); setAdminUser(null); setAdminRecord(null); return; }
-      const snap = await getDoc(doc(db, "admin_users", user.uid));
-      if (snap.exists()) {
-        setAdminUser(user);
-        setAdminRecord(snap.data() as AdminRecord);
-        setPhase("portal");
-      } else {
+      console.log("Admin Auth State Change:", user ? `User ${user.uid}` : "No User");
+      if (!user) { 
+        setPhase("login"); 
+        setAdminUser(null); 
+        setAdminRecord(null); 
+        return; 
+      }
+      
+      try {
+        console.log("Checking admin record for UID:", user.uid);
+        let snap = await getDoc(doc(db, "admin_users", user.uid));
+        
+        // Fallback: Check if they used their email as the document ID (common mistake)
+        if (!snap.exists() && user.email) {
+          console.log("UID not found, trying email lookup for:", user.email);
+          snap = await getDoc(doc(db, "admin_users", user.email));
+        }
+
+        if (snap.exists()) {
+          console.log("Admin record found:", snap.data());
+          setAdminUser(user);
+          setAdminRecord(snap.data() as AdminRecord);
+          setPhase("portal");
+        } else {
+          console.warn("No admin record found for UID or Email.");
+          toast.error("Access denied: UID not found in registry.");
+          await signOut(auth);
+          setPhase("login");
+        }
+      } catch (err: any) {
+        console.error("Error verifying admin clearance:", err);
+        toast.error(`Clearance verification failed: ${err.message || 'Unknown error'}`);
         await signOut(auth);
         setPhase("login");
-        setAdminUser(null);
       }
     });
     return unsub;
   }, []);
 
-  if (phase === "checking") return <SplashScreen />;
-  if (phase === "login")   return <AdminLogin onSuccess={() => {}} />;
-  if (phase === "portal" && adminUser && adminRecord) {
-    return <AdminShell user={adminUser} record={adminRecord} />;
-  }
-  return <AdminLogin onSuccess={() => {}} />;
+  return (
+    <>
+      <Toaster position="top-right" richColors />
+      {phase === "checking" && <SplashScreen />}
+      {phase === "login" && <AdminLogin onSuccess={() => {}} />}
+      {phase === "portal" && adminUser && adminRecord && (
+        <AdminShell user={adminUser} record={adminRecord} />
+      )}
+      {phase === "portal" && (!adminUser || !adminRecord) && <AdminLogin onSuccess={() => {}} />}
+    </>
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -183,14 +213,20 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
     if (!email || !password) { toast.error("Enter email and password."); return; }
     setLoading(true);
     try {
+      console.log("Attempting admin login for:", email);
       const cred = await signInWithEmailAndPassword(auth, email, password);
+      console.log("Auth success, checking doc:", cred.user.uid);
+      
       const adminSnap = await getDoc(doc(db, "admin_users", cred.user.uid));
       if (!adminSnap.exists()) {
+        console.warn("Login success but UID not in admin_users list.");
         await signOut(auth);
-        toast.error("Access denied. This account is not an admin.");
+        toast.error("Access denied. This account is not in the admin registry.");
         setAttempts(a => { const next = a + 1; if (next >= 5) { setLocked(true); setTimeout(() => { setLocked(false); setAttempts(0); }, 30000); } return next; });
         return;
       }
+      
+      console.log("Admin verified, logging entry...");
       await addDoc(collection(db, "admin_audit_logs"), {
         action: "ADMIN_LOGIN", admin_uid: cred.user.uid, admin_email: cred.user.email,
         timestamp: serverTimestamp(), resource_type: "session",
@@ -198,10 +234,11 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
       toast.success("Welcome, Admin.");
       onSuccess();
     } catch (err: any) {
+      console.error("Admin Login Error:", err);
       const code = err.code;
       if (code === "auth/invalid-credential" || code === "auth/wrong-password") toast.error("Invalid credentials.");
       else if (code === "auth/too-many-requests") { toast.error("Too many failed attempts."); setLocked(true); setTimeout(() => setLocked(false), 60000); }
-      else toast.error("Sign-in failed.");
+      else toast.error(`Sign-in failed: ${err.message || 'Unknown error'}`);
       setAttempts(a => { const next = a + 1; if (next >= 5) { setLocked(true); setTimeout(() => { setLocked(false); setAttempts(0); }, 30000); } return next; });
     } finally { setLoading(false); }
   };
