@@ -12,6 +12,8 @@ import {
   AlertTriangle,
   Eye,
   RefreshCw,
+  X as XIcon,
+  X
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -220,49 +222,60 @@ function GroupBuilderDialog({ open, onClose }: BuilderProps) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="sm:max-w-2xl w-[95vw] rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
-        <DialogHeader className="p-6 sm:p-8 bg-zinc-900 text-white">
-          <DialogTitle className="text-xl sm:text-2xl font-bold text-white">Create Customer Group</DialogTitle>
-          <DialogDescription className="text-zinc-400 text-sm">
-            Define rules to automatically segment customers, or create a manual group.
-          </DialogDescription>
+      <DialogContent showCloseButton={false} className="w-full sm:max-w-3xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-[2.5rem] border-none">
+        <DialogHeader className="p-5 sm:p-8 lg:p-10 bg-zinc-900 text-white flex-none relative">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-blue-400 mb-1">
+              <Users className="w-4 h-4 md:w-5 md:h-5" />
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em]">Segmentation Suite</span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <DialogTitle className="text-xl md:text-3xl font-black text-white font-display tracking-tight leading-tight">Create Customer Group</DialogTitle>
+              <Button variant="ghost" size="icon" onClick={handleClose} className="md:hidden text-white/50 hover:text-white">
+                <XIcon className="w-5 h-5" />
+              </Button>
+            </div>
+            <DialogDescription className="text-zinc-500 font-medium text-[10px] md:text-sm">
+              Define rule-based segmentation or manual collections.
+            </DialogDescription>
+          </div>
         </DialogHeader>
 
-        <ScrollArea className="max-h-[65vh]">
-          <div className="p-6 sm:p-8 space-y-6">
+        <div className="flex-1 overflow-y-auto no-scrollbar">
+          <div className="p-5 md:p-8 lg:p-10 space-y-6 md:space-y-10">
             {/* Name & Type */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <div className="space-y-2">
-                <Label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">
+              <div className="space-y-2.5">
+                <Label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">
                   Group Name <span className="text-rose-500">*</span>
                 </Label>
                 <Input
                   placeholder="e.g. VIP Customers"
-                  className="h-12 rounded-xl bg-zinc-50 border-zinc-200"
+                  className="h-11 md:h-14 rounded-xl md:rounded-2xl bg-zinc-50 border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold text-sm md:text-lg px-4 md:px-6"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   maxLength={60}
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Group Type</Label>
+              <div className="space-y-2.5">
+                <Label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Group Type</Label>
                 <Select value={type} onValueChange={(v) => setType(v as "Dynamic" | "Manual")}>
-                  <SelectTrigger className="h-12 rounded-xl bg-zinc-50 border-zinc-200">
+                  <SelectTrigger className="h-11 md:h-14 rounded-xl md:rounded-2xl bg-white border-zinc-200 shadow-sm font-bold text-sm">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="Dynamic">Dynamic (Rule-based)</SelectItem>
-                    <SelectItem value="Manual">Manual</SelectItem>
+                  <SelectContent className="rounded-2xl shadow-2xl border-none p-1">
+                    <SelectItem value="Dynamic" className="rounded-xl py-3 px-4 focus:bg-blue-50 font-medium">Dynamic (Rule-based)</SelectItem>
+                    <SelectItem value="Manual" className="rounded-xl py-3 px-4 focus:bg-blue-50 font-medium">Manual</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Description</Label>
+            <div className="space-y-2.5">
+              <Label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Description</Label>
               <Input
-                placeholder="Briefly describe who belongs in this group..."
-                className="h-12 rounded-xl bg-zinc-50 border-zinc-200"
+                placeholder="Briefly describe this segment..."
+                className="h-11 md:h-14 rounded-xl md:rounded-2xl bg-zinc-50 border-zinc-200 px-4 md:px-6 text-sm font-medium"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
@@ -270,11 +283,11 @@ function GroupBuilderDialog({ open, onClose }: BuilderProps) {
 
             {/* Dynamic Rules */}
             {type === "Dynamic" && (
-              <div className="space-y-4 pt-2 border-t border-zinc-100">
+              <div className="space-y-4 md:space-y-6 pt-4 border-t border-zinc-100">
                 <div className="flex items-center justify-between">
-                  <Label className="text-sm font-bold text-zinc-900">Dynamic Rules</Label>
-                  <Button variant="outline" size="sm" className="rounded-lg text-xs font-bold h-8" onClick={handleAddRule}>
-                    <Plus className="w-3 h-3 mr-1" /> Add Rule
+                  <Label className="text-[10px] md:text-sm font-black text-zinc-900 uppercase tracking-widest">Logic Conditions</Label>
+                  <Button variant="outline" size="sm" className="rounded-xl text-[10px] font-black uppercase h-9 border-zinc-200 hover:bg-zinc-50" onClick={handleAddRule}>
+                    <Plus className="w-3 h-3 mr-2" /> Add Param
                   </Button>
                 </div>
                 <AnimatePresence>
@@ -286,32 +299,32 @@ function GroupBuilderDialog({ open, onClose }: BuilderProps) {
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden"
                     >
-                      <div className="flex flex-col sm:flex-row gap-2 p-4 border border-zinc-100 rounded-xl bg-white shadow-sm">
-                        <span className="text-xs font-bold text-zinc-400 sm:hidden uppercase">Rule {idx + 1}</span>
+                      <div className="flex flex-col sm:flex-row gap-2.5 p-4 md:p-6 border border-zinc-100 rounded-2xl bg-white shadow-sm mb-3">
+                        <span className="text-[9px] font-black text-zinc-400 sm:hidden uppercase mb-1">Criterion {idx + 1}</span>
                         <Select value={rule.field} onValueChange={(v) => handleUpdateRule(rule.id, "field", v)}>
-                          <SelectTrigger className="h-10 rounded-lg bg-zinc-50 border-zinc-200 flex-1">
+                          <SelectTrigger className="h-11 rounded-xl bg-zinc-50 border-zinc-200 flex-1 font-bold text-xs">
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="rounded-xl">
+                          <SelectContent className="rounded-2xl shadow-2xl border-none p-1">
                             {Object.entries(FIELD_LABELS).map(([v, l]) => (
-                              <SelectItem key={v} value={v}>{l}</SelectItem>
+                              <SelectItem key={v} value={v} className="rounded-xl py-2.5">{l}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                         <Select value={rule.operator} onValueChange={(v) => handleUpdateRule(rule.id, "operator", v)}>
-                          <SelectTrigger className="h-10 rounded-lg bg-zinc-50 border-zinc-200 flex-1">
+                          <SelectTrigger className="h-11 rounded-xl bg-zinc-50 border-zinc-200 flex-1 font-bold text-xs">
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="rounded-xl">
+                          <SelectContent className="rounded-2xl shadow-2xl border-none p-1">
                             {Object.entries(OPERATOR_LABELS).map(([v, l]) => (
-                              <SelectItem key={v} value={v}>{l}</SelectItem>
+                              <SelectItem key={v} value={v} className="rounded-xl py-2.5">{l}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
                         <div className="flex gap-2 flex-1">
                           <Input
                             placeholder="Value..."
-                            className="h-10 rounded-lg bg-zinc-50 border-zinc-200 flex-1"
+                            className="h-11 rounded-xl bg-zinc-50 border-zinc-200 flex-1 font-bold text-xs px-4"
                             value={rule.value}
                             onChange={(e) => handleUpdateRule(rule.id, "value", e.target.value)}
                           />
@@ -319,7 +332,7 @@ function GroupBuilderDialog({ open, onClose }: BuilderProps) {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-10 w-10 min-w-[40px] text-rose-500 hover:bg-rose-50 rounded-lg"
+                              className="h-11 w-11 min-w-[44px] text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl"
                               onClick={() => handleRemoveRule(rule.id)}
                             >
                               <Trash2 className="w-4 h-4" />
@@ -330,23 +343,25 @@ function GroupBuilderDialog({ open, onClose }: BuilderProps) {
                     </motion.div>
                   ))}
                 </AnimatePresence>
-                <p className="text-[11px] text-zinc-400 flex items-center gap-1.5">
-                  <AlertTriangle className="w-3 h-3 text-amber-400" />
-                  All rules are combined with AND logic. Members must match every condition.
-                </p>
+                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 flex gap-3 items-start">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 mt-0.5 flex-none" />
+                  <p className="text-[10px] text-amber-700 leading-relaxed italic">
+                    Sequential filters apply AND-gate logic. Segments update in real-time as customer metadata evolves.
+                  </p>
+                </div>
               </div>
             )}
           </div>
-        </ScrollArea>
+        </div>
 
-        <DialogFooter className="p-5 sm:p-6 bg-zinc-50 border-t border-zinc-100">
-          <Button variant="ghost" className="rounded-xl font-bold px-5" onClick={handleClose} disabled={saving}>Cancel</Button>
+        <DialogFooter className="p-5 md:p-10 bg-zinc-50 border-t border-zinc-100 flex-none flex flex-row items-center gap-3 md:gap-4 sticky bottom-0 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+          <Button variant="outline" className="rounded-xl h-12 md:h-14 px-6 md:px-8 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition-all text-[10px] uppercase tracking-widest flex-1 md:flex-none" onClick={handleClose} disabled={saving}>Cancel</Button>
           <Button
             onClick={handleCreate}
             disabled={saving}
-            className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold px-7 shadow-lg shadow-blue-600/20"
+            className="rounded-xl md:rounded-2xl h-12 md:h-16 px-6 md:px-14 font-black uppercase tracking-[0.2em] text-[10px] md:text-xs bg-zinc-900 hover:bg-zinc-800 text-white shadow-xl shadow-zinc-900/10 transition-all flex-1 md:flex-none flex items-center justify-center gap-2"
           >
-            {saving ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving...</> : "Save Group"}
+            {saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Syncing...</> : <><Plus className="w-4 h-4 text-blue-400" /> Save Segment</>}
           </Button>
         </DialogFooter>
       </DialogContent>

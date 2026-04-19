@@ -249,38 +249,40 @@ export default function StaffManager() {
   };
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight text-zinc-900">Staff & Terminal Access</h2>
-          <p className="text-sm text-zinc-500 mt-1">Manage POS PIN codes, track sessions, and monitor register closures.</p>
+    <div className="space-y-8 max-w-7xl mx-auto px-4 sm:px-8 lg:px-10 overflow-x-hidden pb-20">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-zinc-400 mb-1">
+            <ShieldAlert className="w-4 h-4 text-orange-500" />
+            <span className="text-[10px] font-black uppercase tracking-[0.3em]">Credentials & Security</span>
+          </div>
+          <h2 className="text-3xl md:text-5xl font-black tracking-tight text-zinc-900 font-display">Staff Registry</h2>
+          <p className="text-sm text-zinc-500 font-medium max-w-md">Manage POS PIN codes, track sessions, and monitor enterprise register closures.</p>
         </div>
         <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
-          <DialogTrigger
-            render={
-              <Button 
-                className="rounded-xl px-6 h-11 bg-zinc-900 text-white hover:bg-zinc-800 font-bold shadow-xl shadow-zinc-200"
-                onClick={() => {
-                  setIsEditing(false);
-                  setNewUser({ 
-                    name: "", 
-                    role: "Cashier", 
-                    pin: "", 
-                    branches: ["all"],
-                    email: "",
-                    phone: "",
-                    salaryType: "HOURLY",
-                    baseRate: 25,
-                    payGrade: "STANDARD",
-                    productivityTarget: 2500
-                  });
-                  setIsAddUserOpen(true);
-                }}
-              >
-                <Plus className="w-4 h-4 mr-2" /> Provision New Access
-              </Button>
-            }
-          />
+          <DialogTrigger asChild>
+            <Button 
+              className="rounded-2xl px-8 h-14 bg-zinc-900 text-white hover:bg-zinc-800 font-black shadow-2xl shadow-zinc-900/20 text-xs uppercase tracking-widest w-full md:w-auto"
+              onClick={() => {
+                setIsEditing(false);
+                setNewUser({ 
+                  name: "", 
+                  role: "Cashier", 
+                  pin: "", 
+                  branches: ["all"],
+                  email: "",
+                  phone: "",
+                  salaryType: "HOURLY",
+                  baseRate: 25,
+                  payGrade: "STANDARD",
+                  productivityTarget: 2500
+                });
+                setIsAddUserOpen(true);
+              }}
+            >
+              <Plus className="w-4 h-4 mr-2" /> Provision Access
+            </Button>
+          </DialogTrigger>
           <DialogContent className="rounded-3xl border-zinc-100 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-3">
@@ -453,7 +455,7 @@ export default function StaffManager() {
       </div>
 
       {/* ── PERFORMANCE DASHBOARD (2026 INTELLIGENCE) ──────────────── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <Card className="card-modern bg-zinc-900 text-white border-zinc-800 shadow-2xl relative overflow-hidden group">
            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/10 rounded-full -mr-16 -mt-16 blur-3xl" />
            <CardContent className="p-6 relative z-10">

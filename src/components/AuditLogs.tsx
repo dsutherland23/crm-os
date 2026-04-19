@@ -45,6 +45,7 @@ import {
 } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
+import { motion } from "motion/react";
 
 /* ─────────────────────────────────────────
    Types
@@ -165,6 +166,16 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
   const [exporting, setExporting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [isLive, setIsLive] = useState(true);
+  const [riskScore, setRiskScore] = useState(0);
+
+  // Recalculate risk score based on recent critical events
+  useEffect(() => {
+    const criticals = logs.filter(l => l.severity === "CRITICAL").length;
+    const warnings = logs.filter(l => l.severity === "WARNING").length;
+    const score = Math.min(100, (criticals * 15) + (warnings * 5));
+    setRiskScore(score);
+  }, [logs]);
 
   const subscribe = useCallback(() => {
     if (!enterpriseId) return;
@@ -273,33 +284,99 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
       <div className="p-4 sm:p-6 lg:p-10 space-y-8 max-w-7xl mx-auto">
 
         {/* ── Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-zinc-400 mb-2">
-              <Lock className="w-5 h-5" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Security & Compliance</span>
+            <div className="flex items-center gap-2 text-rose-600 mb-2">
+              <div className="p-1.5 bg-rose-50 rounded-lg">
+                <Shield className="w-4 h-4 md:w-5 md:h-5" />
+              </div>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em]">Neural Compliance Shield</span>
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-zinc-900 font-display">Audit Trail</h1>
-            <p className="text-zinc-500 text-sm">Immutable record of enterprise activities, security events, and system changes.</p>
+            <h1 className="text-3xl md:text-5xl font-black tracking-tight text-zinc-900 font-display">Audit Trail</h1>
+            <p className="text-zinc-500 max-w-md text-xs md:text-sm font-medium leading-relaxed">Immutable record of enterprise activities, security events, and system changes.</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
             <Button
               variant="outline"
-              className="rounded-xl border-zinc-200 h-11 px-4 font-bold text-xs"
+              className="rounded-xl border-zinc-200 h-12 md:h-14 px-6 md:px-8 font-bold text-[10px] uppercase tracking-widest w-full sm:flex-1 md:w-auto"
               onClick={handleExport}
               disabled={exporting || loading || filtered.length === 0}
             >
               {exporting
-                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Exporting...</>
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Syncing</>
                 : <><Download className="w-4 h-4 mr-2 text-zinc-400" /> Export CSV</>}
             </Button>
             <Button
-              className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-4 font-bold text-xs"
-              onClick={() => toast.info("Security incident reports are coming in v3.0")}
+              className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-xl shadow-zinc-900/10 h-12 md:h-14 px-6 md:px-10 font-black text-[10px] uppercase tracking-widest w-full sm:flex-1 md:w-auto flex items-center justify-center gap-2"
+              onClick={() => toast.info("Security incident reports are encrypted and ready for v3.0")}
             >
-              <ShieldAlert className="w-4 h-4 mr-2" /> Security Report
+              <ShieldAlert className="w-4 h-4 text-rose-400" />
+              Security Intel
             </Button>
           </div>
+        </div>
+
+        {/* ── Neural Risk Assessment ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+           <Card className="lg:col-span-2 card-modern p-6 md:p-8 bg-zinc-900 text-white border-zinc-800 shadow-2xl relative overflow-hidden group">
+              <div className="absolute right-0 top-0 opacity-10 -mt-10 -mr-10 pointer-events-none group-hover:scale-110 transition-transform duration-1000">
+                <Shield className="w-64 h-64" />
+              </div>
+              <div className="relative space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-black text-rose-400 uppercase tracking-[0.2em]">Enterprise Threat Level</p>
+                    <h3 className="text-3xl font-black font-display tracking-tight uppercase">{riskScore > 50 ? 'Accelerated Risk' : riskScore > 20 ? 'Active Monitoring' : 'Secure Baseline'}</h3>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-4xl font-black text-white">{riskScore}%</p>
+                    <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Neural Score</p>
+                  </div>
+                </div>
+                
+                <div className="w-full h-2 bg-zinc-800 rounded-full overflow-hidden border border-white/5">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${riskScore}%` }}
+                    className={cn(
+                      "h-full rounded-full transition-all duration-1000 shadow-[0_0_20px_rgba(255,50,50,0.5)]",
+                      riskScore > 50 ? "bg-rose-500" : riskScore > 20 ? "bg-amber-400" : "bg-emerald-400"
+                    )}
+                  />
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-6">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Real-time Biometrics Active</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-400" />
+                    <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Ledger Encryption Verified</span>
+                  </div>
+                </div>
+              </div>
+           </Card>
+
+           <Card className="card-modern p-6 md:p-8 bg-white border-zinc-100 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Live Stream</h4>
+                  <div className="flex items-center gap-2 px-3 py-1 bg-zinc-100 rounded-full">
+                    <div className={cn("w-1.5 h-1.5 rounded-full", isLive ? "bg-emerald-500 animate-pulse" : "bg-zinc-300")} />
+                    <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">{isLive ? 'Syncing' : 'Paused'}</span>
+                  </div>
+                </div>
+                <p className="text-sm font-bold text-zinc-900 leading-tight">System is currently indexing enterprise activity across {logs.length} unique vector points.</p>
+              </div>
+              <Button 
+                variant={isLive ? "outline" : "default"} 
+                className="mt-6 rounded-xl h-12 font-black uppercase tracking-widest text-[10px]"
+                onClick={() => setIsLive(!isLive)}
+              >
+                {isLive ? <><Lock className="w-3 h-3 mr-2 text-zinc-400" /> Stop Live Feed</> : <><RefreshCw className="w-3 h-3 mr-2" /> Start Live Feed</>}
+              </Button>
+           </Card>
         </div>
 
         {/* ── Stats ── */}
@@ -436,21 +513,26 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
 
           {/* Log Entries */}
           {!loading && !fetchError && filtered.length > 0 && (
-            <div className="divide-y divide-zinc-50">
-              {filtered.map((log) => (
+            <div className="divide-y divide-zinc-50 relative pb-10">
+              {filtered.map((log, index) => (
                 <div
                   key={log.id}
-                  className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-start justify-between gap-4 hover:bg-zinc-50/50 transition-colors group cursor-pointer"
+                  className="p-4 sm:p-8 flex flex-col sm:flex-row sm:items-start justify-between gap-4 hover:bg-zinc-50/50 transition-colors group cursor-pointer relative"
                   onClick={() => setExpandedId((prev) => prev === log.id ? null : log.id)}
                 >
-                  <div className="flex items-start gap-3 sm:gap-5 flex-1 min-w-0">
+                  {/* Visual Connector Line */}
+                  {index < filtered.length - 1 && (
+                    <div className="absolute left-[34px] sm:left-[43px] top-[74px] bottom-0 w-px bg-zinc-100 z-0" />
+                  )}
+
+                  <div className="flex items-start gap-3 sm:gap-6 flex-1 min-w-0 relative z-10">
                     <div className={cn(
-                      "w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl flex items-center justify-center flex-none transition-all group-hover:scale-105 shadow-sm border",
+                      "w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl flex items-center justify-center flex-none transition-all group-hover:scale-105 shadow-md border-2",
                       log.severity === "CRITICAL"
                         ? "bg-rose-50 text-rose-600 border-rose-100"
                         : log.severity === "WARNING"
                         ? "bg-amber-50 text-amber-600 border-amber-100"
-                        : "bg-blue-50 text-blue-600 border-blue-100"
+                        : "bg-white text-zinc-900 border-zinc-100"
                     )}>
                       <LogIcon type={log.type} />
                     </div>

@@ -873,21 +873,27 @@ export default function Inventory() {
                 </Button>
               }
             />
-            <DialogContent className="rounded-[2.5rem] border-none p-0 lg:w-[1100px] w-[95vw] h-[90vh] overflow-hidden flex flex-col shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] bg-zinc-50">
-              <DialogHeader className="p-8 lg:p-12 bg-zinc-900 text-white relative flex-none">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
-                  <div className="space-y-2 max-w-2xl">
-                    <div className="flex items-center gap-2 text-emerald-400 mb-2">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                        <Plus className="w-4 h-4" />
+            <DialogContent showCloseButton={false} className="w-full sm:w-[95vw] lg:w-[1100px] h-[100dvh] sm:h-[90vh] overflow-hidden flex flex-col p-0 border-none bg-zinc-50 rounded-none sm:rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
+              <DialogHeader className="p-5 sm:p-8 lg:p-12 bg-zinc-900 text-white relative flex-none">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-8">
+                  <div className="space-y-1 md:space-y-2 max-w-2xl">
+                    <div className="flex items-center gap-2 text-emerald-400 mb-1 md:mb-2">
+                      <div className="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                        <Plus className="w-3 h-3 md:w-4 md:h-4" />
                       </div>
-                      <span className="text-[11px] font-black uppercase tracking-[0.3em]">Supply Chain Operations</span>
+                      <span className="text-[9px] md:text-[11px] font-black uppercase tracking-[0.3em]">Supply Chain Ops</span>
                     </div>
-                    <DialogTitle className="font-display tracking-tight text-2xl md:text-4xl lg:text-5xl font-black leading-tight break-words">Issue Purchase Order</DialogTitle>
-                    <DialogDescription className="text-zinc-400 font-medium text-sm md:text-base lg:text-lg">Provision inventory acquisition with professional SKU configuration.</DialogDescription>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <DialogTitle className="font-display tracking-tight text-xl md:text-3xl lg:text-5xl font-black leading-tight">Issue order</DialogTitle>
+                      <Badge className="bg-emerald-500/10 text-emerald-400 border-none font-mono text-[10px] md:text-xs">Ref: {newPO.reference}</Badge>
+                      <Button variant="ghost" size="icon" onClick={() => setIsPurchaseOrderOpen(false)} className="md:hidden ml-auto text-white/50 hover:text-white">
+                        <XIcon className="w-5 h-5" />
+                      </Button>
+                    </div>
+                    <DialogDescription className="text-zinc-500 font-medium text-[10px] md:text-base hidden sm:block">Provision inventory acquisition with professional SKU configuration.</DialogDescription>
                   </div>
-                  <div className="bg-white/10 backdrop-blur-xl rounded-2xl p-6 border border-white/10 min-w-[220px] shadow-inner">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2">Reference ID</p>
+                  <div className="hidden md:block bg-white/10 backdrop-blur-xl rounded-2xl p-6 border border-white/10 min-w-[220px] shadow-inner text-right">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2">Tracking Pointer</p>
                     <p className="text-2xl font-mono font-black text-white">{newPO.reference}</p>
                   </div>
                 </div>
@@ -897,17 +903,17 @@ export default function Inventory() {
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-12">
                   {/* Left Column: Vendor & Date */}
                   <div className="xl:col-span-4 space-y-10">
-                    <div className="space-y-8 p-8 bg-white rounded-3xl border border-zinc-200 shadow-sm">
+                    <div className="space-y-6 p-6 md:p-8 bg-white rounded-3xl border border-zinc-200 shadow-sm">
                       <div className="flex items-center gap-2 text-zinc-900 border-b border-zinc-100 pb-4">
                         <Truck className="w-4 h-4 text-emerald-500" />
-                        <span className="text-[11px] font-black uppercase tracking-widest">General Allocation</span>
+                        <span className="text-[10px] md:text-[11px] font-black uppercase tracking-widest text-zinc-400">General Allocation</span>
                       </div>
                       
-                      <div className="space-y-6">
-                        <div className="space-y-2.5">
-                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Supplier Entity</label>
+                      <div className="space-y-5">
+                        <div className="space-y-2">
+                          <label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest">Supplier Entity</label>
                           <Select value={newPO.supplierId} onValueChange={(v) => setNewPO({...newPO, supplierId: v})}>
-                            <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-2 border-zinc-100 shadow-none text-zinc-900 font-bold px-6 focus:ring-2 focus:ring-emerald-500/20 transition-all">
+                            <SelectTrigger className="rounded-xl md:rounded-2xl h-11 md:h-14 bg-white border border-zinc-200 shadow-sm text-zinc-900 font-bold px-4 md:px-6 focus:ring-4 focus:ring-emerald-500/10 transition-all">
                               <SelectValue placeholder="Select Supplier" />
                             </SelectTrigger>
                             <SelectContent className="rounded-2xl border-none shadow-2xl p-2">
@@ -915,23 +921,23 @@ export default function Inventory() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="space-y-2.5">
-                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Expected Delivery</label>
+                        <div className="space-y-2">
+                          <label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest">Expected Delivery</label>
                           <div className="relative group">
-                            <Clock className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
+                            <Clock className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
                             <Input 
                               type="date" 
-                              className="rounded-2xl h-14 bg-zinc-50 border-2 border-zinc-100 shadow-none pl-14 pr-6 focus:ring-2 focus:ring-emerald-500/20 transition-all font-bold" 
+                              className="rounded-xl md:rounded-2xl h-11 md:h-14 bg-white border border-zinc-200 shadow-sm pl-11 md:pl-14 pr-4 md:pr-6 focus:ring-4 focus:ring-emerald-500/10 transition-all font-bold text-xs md:text-sm" 
                               value={newPO.expectedDate} 
                               onChange={(e) => setNewPO({...newPO, expectedDate: e.target.value})}
                             />
                           </div>
                         </div>
-                        <div className="space-y-2.5">
-                          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Internal Notes</label>
+                        <div className="space-y-2">
+                          <label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest">Internal Notes</label>
                           <textarea 
-                            className="w-full rounded-2xl min-h-[140px] bg-zinc-50 border-2 border-zinc-100 shadow-none p-6 focus:ring-2 focus:ring-emerald-500/20 transition-all font-medium text-sm text-zinc-600 resize-none"
-                            placeholder="Add special instructions or delivery notes..."
+                            className="w-full rounded-xl md:rounded-2xl min-h-[100px] md:min-h-[140px] bg-white border border-zinc-200 shadow-sm p-4 md:p-6 focus:ring-4 focus:ring-emerald-500/10 transition-all font-medium text-xs md:text-sm text-zinc-600 resize-none"
+                            placeholder="Delivery notes..."
                             value={newPO.notes}
                             onChange={(e) => setNewPO({...newPO, notes: e.target.value})}
                           />
@@ -1035,16 +1041,16 @@ export default function Inventory() {
                 </div>
               </div>
 
-              <DialogFooter className="p-8 lg:p-12 bg-white border-t border-zinc-200 flex-none gap-6">
-                <Button variant="ghost" className="rounded-2xl h-18 px-10 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 flex-1 md:flex-none transition-all" onClick={() => setIsPurchaseOrderOpen(false)}>
+              <DialogFooter className="p-5 md:p-8 bg-zinc-50 border-t border-zinc-200 flex-none flex flex-col md:flex-row gap-4 items-center md:justify-between px-6 sm:px-12 sticky bottom-0 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+                <Button variant="ghost" className="rounded-xl h-10 md:h-14 px-4 md:px-8 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition-all text-xs order-2 md:order-1" onClick={() => setIsPurchaseOrderOpen(false)}>
                   Discard Order Draft
                 </Button>
                 <Button 
-                  className="rounded-2xl bg-emerald-600 text-white hover:bg-emerald-700 h-18 px-16 font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-emerald-500/30 border-b-4 border-emerald-800 hover:border-b-2 hover:translate-y-[2px] active:translate-y-[4px] active:border-b-0 transition-all flex-1 md:flex-none flex items-center justify-center gap-4" 
+                  className="rounded-xl md:rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 h-12 md:h-16 px-6 md:px-14 font-bold transition-all flex-[2] md:flex-none flex items-center justify-center gap-3 shadow-xl shadow-zinc-900/10 order-1 md:order-2 w-full md:w-auto" 
                   onClick={handlePurchaseOrder}
                 >
-                  <FileText className="w-5 h-5" />
-                  Finalize & Issue Order
+                  <FileText className="w-5 h-5 text-emerald-400" />
+                  Issue Purchase Order
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -1703,18 +1709,22 @@ export default function Inventory() {
       </Tabs>
 
       <Sheet open={isProductSheetOpen} onOpenChange={setIsProductSheetOpen}>
-        <SheetContent className="w-full sm:max-w-xl border-l border-zinc-200 bg-zinc-50/95 backdrop-blur-xl p-0 overflow-hidden flex flex-col shadow-2xl h-[100dvh] sm:h-full">
-          <SheetHeader className="p-4 sm:p-8 bg-white border-b border-zinc-100/80 flex-none px-6">
-            <SheetTitle className="font-display tracking-tight text-xl sm:text-2xl text-zinc-900">
-              {editingProductId ? "Edit Product" : "New Product"}
-            </SheetTitle>
-            <SheetDescription className="text-xs sm:text-sm text-zinc-500">
-              {editingProductId ? "Modify product details." : "Add to catalog."}
-            </SheetDescription>
+        <SheetContent side="right" className="w-full sm:max-w-xl border-none sm:border-l border-zinc-200 bg-zinc-50 flex flex-col p-0 shadow-2xl h-[100dvh] transition-transform duration-500">
+          <SheetHeader className="p-5 sm:p-8 bg-white border-b border-zinc-100 flex-none relative">
+            <div className="flex items-center justify-between pr-8">
+              <div>
+                <SheetTitle className="font-display tracking-tight text-xl sm:text-2xl text-zinc-900">
+                  {editingProductId ? "Edit Product" : "New Product"}
+                </SheetTitle>
+                <SheetDescription className="text-[10px] sm:text-sm text-zinc-500">
+                  {editingProductId ? "Modify product details." : "Add to catalog directory."}
+                </SheetDescription>
+              </div>
+            </div>
           </SheetHeader>
           
-          <ScrollArea className="flex-1">
-            <div className="p-6 md:p-8 space-y-8">
+          <div className="flex-1 overflow-y-auto no-scrollbar touch-pan-y">
+            <div className="p-5 md:p-8 space-y-6 md:space-y-8">
               {/* Product Image Section */}
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-zinc-900 mb-4 border-b border-zinc-200/50 pb-2">
@@ -1938,22 +1948,22 @@ export default function Inventory() {
                 </div>
               </div>
             </div>
-          </ScrollArea>
+          </div>
           
-          <SheetFooter className="p-6 bg-white border-t border-zinc-100 flex-none">
+          <div className="p-5 sm:p-6 bg-white border-t border-zinc-100 flex-none sticky bottom-0">
             <Button 
-              className="w-full rounded-xl bg-zinc-900 text-white h-14 font-bold text-sm shadow-xl shadow-zinc-900/10 hover:bg-zinc-800 transition-all" 
+              className="w-full rounded-2xl bg-zinc-900 text-white h-12 md:h-14 font-bold text-sm shadow-xl shadow-zinc-900/10 hover:bg-zinc-800 transition-all" 
               onClick={handleSaveProduct}
               disabled={isSavingProduct}
             >
               {isSavingProduct ? (
                 <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Saving...
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Processing...
                 </div>
               ) : editingProductId ? "Save Changes" : "Create Product"}
             </Button>
-          </SheetFooter>
+          </div>
         </SheetContent>
       </Sheet>
 

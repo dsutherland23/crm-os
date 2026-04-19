@@ -934,17 +934,19 @@ export default function CRM() {
 
   const AddCustomerDialog = (
     <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
-      <DialogContent showCloseButton={false} className="rounded-3xl border-zinc-200 w-[95vw] max-w-5xl sm:max-w-4xl md:max-w-4xl lg:max-w-5xl max-h-[96vh] sm:max-h-[90vh] p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
+      <DialogContent showCloseButton={false} className="w-full sm:max-w-4xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-3xl border-none">
         <DialogHeader className="px-6 py-4 sm:px-8 sm:py-6 border-b border-zinc-100 flex flex-row items-center justify-between sticky top-0 bg-white z-10 w-full relative flex-none">
           <div className="flex items-center gap-3">
-            <UserPlus className="w-6 h-6 text-zinc-900" />
-            <DialogTitle className="text-xl font-bold text-zinc-900">Add New Customer</DialogTitle>
+            <UserPlus className="w-5 h-5 md:w-6 md:h-6 text-zinc-900" />
+            <div>
+              <DialogTitle className="text-lg md:text-2xl font-bold font-display tracking-tight text-zinc-900">Add New Customer</DialogTitle>
+              <DialogDescription className="text-[10px] md:text-sm hidden sm:block">Register a new client into the directory.</DialogDescription>
+            </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setIsAddCustomerOpen(false)} className="rounded-full text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 absolute right-4 top-4">
+          <Button variant="ghost" size="icon" onClick={() => setIsAddCustomerOpen(false)} className="rounded-full h-10 w-10 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100">
             <XIcon className="w-5 h-5" />
           </Button>
         </DialogHeader>
-
         <div className="flex-1 overflow-y-auto min-h-0 bg-zinc-50/10">
           <div className="p-6 sm:p-8 space-y-6 sm:space-y-8">
             
@@ -1159,21 +1161,21 @@ export default function CRM() {
           </div>
         </div>
 
-        <DialogFooter className="px-6 py-4 sm:px-8 sm:py-5 bg-white border-t border-zinc-100 flex flex-row gap-3 sm:gap-4 flex-none">
-          <Button 
-            className="flex-1 rounded-xl bg-[#2C2D33] text-white hover:bg-[#1E1F24] h-12 font-medium" 
-            onClick={handleCreateCustomer}
-            disabled={isSubmittingCustomer}
-          >
-            {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-            Add Customer
-          </Button>
+        <DialogFooter className="px-6 py-4 sm:px-8 sm:py-6 bg-white border-t border-zinc-100 flex flex-row gap-3 sm:gap-4 flex-none sticky bottom-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <Button 
             variant="outline" 
-            className="flex-1 rounded-xl border-zinc-200 h-12 font-medium text-zinc-900 hover:bg-zinc-50" 
+            className="flex-1 rounded-xl border-zinc-200 h-12 md:h-14 font-bold text-zinc-900 hover:bg-zinc-50" 
             onClick={() => setIsAddCustomerOpen(false)}
           >
             Cancel
+          </Button>
+          <Button 
+            className="flex-[2] rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 h-12 md:h-14 font-bold shadow-xl shadow-zinc-900/10" 
+            onClick={handleCreateCustomer}
+            disabled={isSubmittingCustomer}
+          >
+            {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <UserPlus className="w-4 h-4 mr-2" />}
+            Register Customer
           </Button>
         </DialogFooter>
       </DialogContent>

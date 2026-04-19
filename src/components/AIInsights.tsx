@@ -70,6 +70,7 @@ export default function AIInsights() {
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -99,23 +100,25 @@ export default function AIInsights() {
 
   const getBusinessContext = async () => {
     try {
-      const [productsSnap, inventorySnap, customersSnap, invoicesSnap] = await Promise.all([
+      const [productsSnap, inventorySnap, customersSnap, invoicesSnap, staffSnap] = await Promise.all([
         getDocs(collection(db, "products")),
         getDocs(collection(db, "inventory")),
         getDocs(collection(db, "customers")),
-        getDocs(query(collection(db, "invoices"), orderBy("timestamp", "desc"), limit(10)))
+        getDocs(query(collection(db, "invoices"), orderBy("timestamp", "desc"), limit(10))),
+        getDocs(collection(db, "staff"))
       ]);
-
       const products = productsSnap.docs.map(d => d.data());
       const inventory = inventorySnap.docs.map(d => d.data());
       const customers = customersSnap.docs.map(d => d.data());
       const recentInvoices = invoicesSnap.docs.map(d => d.data());
+      const staff = staffSnap.docs.map(d => d.data());
 
       return JSON.stringify({
         summary: {
           totalProducts: products.length,
           totalCustomers: customers.length,
           recentSalesCount: recentInvoices.length,
+          activeStaff: staff.filter((s: any) => s.status === "Active").length,
         },
         inventoryAlerts: inventory.filter((i: any) => i.quantity < 10).map((i: any) => {
           const p = products.find((prod: any) => prod.id === i.product_id);
@@ -218,7 +221,7 @@ export default function AIInsights() {
   }, []);
 
   return (
-    <div className="flex h-full bg-zinc-50/50 overflow-hidden">
+    <div className="flex h-[100dvh] bg-zinc-50/50 overflow-hidden">
       {/* Sidebar - History & Suggestions */}
       <div className="w-80 border-r border-zinc-200 bg-white hidden xl:flex flex-col shadow-sm z-10">
         <div className="p-8 border-b border-zinc-100">
@@ -280,32 +283,79 @@ export default function AIInsights() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col relative">
+      <div className="flex-1 flex flex-col relative w-full min-w-0 overflow-hidden">
         {/* Chat Header */}
-        <div className="p-6 border-b border-zinc-200 bg-white/80 backdrop-blur-xl sticky top-0 z-10 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-zinc-900 flex items-center justify-center text-white shadow-2xl shadow-zinc-900/20">
-              <BrainCircuit className="w-7 h-7" />
+        <div className="p-4 md:p-6 border-b border-zinc-200 bg-white/80 backdrop-blur-xl sticky top-0 z-20 flex items-center justify-between shadow-sm pt-[max(1rem,env(safe-area-inset-top))]">
+          <div className="flex items-center gap-3 md:gap-4">
+            <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-zinc-900 flex items-center justify-center text-white shadow-2xl shadow-zinc-900/20">
+              <BrainCircuit className="w-5 h-5 md:w-7 md:h-7" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-zinc-900 font-display tracking-tight">Enterprise Copilot</h2>
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Neural Core v2.4 Online</span>
+              <h2 className="text-sm md:text-xl font-black text-zinc-900 font-display tracking-tight">Enterprise Copilot</h2>
+              <div className="flex items-center gap-1.5 md:gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-[8px] md:text-[10px] font-black text-emerald-600 uppercase tracking-widest">Neural v2.4 Online</span>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <Badge variant="outline" className="rounded-lg border-zinc-200 text-zinc-500 font-mono text-[10px] px-3 py-1 bg-white">GEMINI-2.0-FLASH</Badge>
+          <div className="flex items-center gap-2 md:gap-3">
+            <Badge variant="outline" className="hidden sm:inline-flex rounded-lg border-zinc-200 text-zinc-500 font-mono text-[10px] px-3 py-1 bg-white uppercase">Neural Flash</Badge>
+            <Button variant="ghost" size="icon" onClick={() => setIsShortcutsOpen(!isShortcutsOpen)} className="xl:hidden rounded-xl text-zinc-400 hover:bg-zinc-100">
+              <Lightbulb className="w-5 h-5" />
+            </Button>
             <Button variant="ghost" size="icon" className="rounded-xl text-zinc-400 hover:bg-zinc-100">
               <MoreHorizontal className="w-5 h-5" />
             </Button>
           </div>
         </div>
 
+        {/* Mobile Shortcuts Overlay */}
+        <AnimatePresence>
+          {isShortcutsOpen && (
+            <motion.div 
+              initial={{ opacity: 0, x: 300 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 300 }}
+              className="absolute inset-0 z-50 bg-white xl:hidden flex flex-col h-full"
+            >
+              <div className="p-6 border-b border-zinc-100 flex items-center justify-between">
+                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Intelligence Shortcuts</p>
+                <Button variant="ghost" size="icon" onClick={() => setIsShortcutsOpen(false)}>
+                  <ChevronRight className="rotate-180 w-5 h-5" />
+                </Button>
+              </div>
+              <ScrollArea className="flex-1 p-6">
+                <div className="space-y-6">
+                  {[
+                    { title: "Revenue Deep-Dive", icon: TrendingUp, color: "text-emerald-500", desc: "Analyze branch performance", prompt: "Analyze revenue performance across all branches and identify the top 3 growth opportunities." },
+                    { title: "Stock Optimization", icon: Warehouse, color: "text-amber-500", desc: "Predict replenishment needs", prompt: "Identify all products that are critically low on stock and suggest optimal reorder quantities." },
+                    { title: "Customer Sentiment", icon: Users, color: "text-blue-500", desc: "Analyze feedback logs", prompt: "Analyze customer activity data and identify any churn risks or high-value engagement trends." },
+                  ].map((s, i) => (
+                    <div key={i} className="p-6 rounded-2xl border border-zinc-100 bg-zinc-50/50 active:bg-white hover:bg-white transition-all shadow-sm" onClick={() => { handleSend(s.prompt); setIsShortcutsOpen(false); }}>
+                      <div className={cn("p-2.5 rounded-xl bg-white shadow-sm w-fit mb-4", s.color)}>
+                        <s.icon className="w-5 h-5" />
+                      </div>
+                      <p className="text-sm font-black text-zinc-900 mb-1">{s.title}</p>
+                      <p className="text-[11px] text-zinc-500 leading-relaxed font-bold">{s.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+              <div className="p-6 border-t border-zinc-100 bg-zinc-50">
+                <Button className="w-full rounded-2xl bg-zinc-900 text-white h-12 font-black uppercase tracking-widest text-[10px]" onClick={() => {
+                  setMessages([{ id: Date.now().toString(), role: "assistant", content: "Session reset. How can I assist?", timestamp: new Date(), type: "text" }]);
+                  setIsShortcutsOpen(false);
+                }}>
+                  Reset Intelligence Session
+                </Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Messages */}
-        <ScrollArea className="flex-1 p-4 md:p-10" ref={scrollRef}>
-          <div className="max-w-4xl mx-auto space-y-6 md:y-10">
+        <ScrollArea className="flex-1 p-4 md:p-10 w-full" ref={scrollRef}>
+          <div className="max-w-4xl mx-auto space-y-6 md:space-y-10 w-full px-1">
             <AnimatePresence initial={false}>
               {messages.map((msg) => (
                 <motion.div 
@@ -313,8 +363,8 @@ export default function AIInsights() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   className={cn(
-                    "flex gap-3 md:gap-6",
-                    msg.role === "user" ? "flex-row-reverse" : "flex-row"
+                    "flex gap-2.5 md:gap-6 w-full",
+                    msg.role === "user" ? "flex-row-reverse pl-8" : "flex-row pr-8"
                   )}
                 >
                   <div className={cn(
@@ -328,10 +378,10 @@ export default function AIInsights() {
                     msg.role === "user" ? "text-right" : "text-left"
                   )}>
                     <div className={cn(
-                      "p-4 md:p-8 rounded-2xl md:rounded-[2rem] text-sm leading-relaxed shadow-xl border transition-all",
+                      "p-4 md:p-8 rounded-2xl md:rounded-[2.5rem] md:rounded-tr-none text-sm leading-relaxed shadow-xl border transition-all break-words overflow-hidden",
                       msg.role === "user" 
-                        ? "bg-zinc-900 text-white border-zinc-800 rounded-tr-none" 
-                        : "bg-white text-zinc-700 border-zinc-100 rounded-tl-none"
+                        ? "bg-zinc-900 text-white border-zinc-800" 
+                        : "bg-white text-zinc-700 border-zinc-100 md:rounded-tr-[2.5rem] md:rounded-tl-none rounded-tl-none"
                     )}>
                       {msg.content}
                       
@@ -396,18 +446,34 @@ export default function AIInsights() {
         </ScrollArea>
 
         {/* Input Area */}
-        <div className="p-4 md:p-10 bg-gradient-to-t from-zinc-50 via-zinc-50 to-transparent">
-          <div className="max-w-4xl mx-auto">
+        <div className="p-3 md:p-8 bg-gradient-to-t from-zinc-50 via-zinc-50 to-transparent flex-none pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <div className="max-w-4xl mx-auto w-full px-1 sm:px-0">
+            {/* Chips sit ABOVE the input now to 'carry up' the controls */}
+            <div className="flex flex-row items-center justify-center gap-4 md:gap-7 mb-4 md:mb-6 overflow-x-auto no-scrollbar pb-1 px-4">
+              <div className="flex items-center gap-2 text-[9px] md:text-[10px] font-black text-zinc-400 hover:text-blue-600 transition-colors uppercase tracking-[0.2em] whitespace-nowrap cursor-pointer" onClick={() => handleSend("Analyze Branches")}>
+                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
+                Analyze Branches
+              </div>
+              <div className="flex items-center gap-2 text-[9px] md:text-[10px] font-black text-zinc-400 hover:text-blue-600 transition-colors uppercase tracking-[0.2em] whitespace-nowrap cursor-pointer" onClick={() => handleSend("Check Inventory Alert")}>
+                <Zap className="w-3.5 h-3.5 text-blue-500" />
+                Stock Audits
+              </div>
+              <div className="flex items-center gap-2 text-[9px] md:text-[10px] font-black text-zinc-400 hover:text-blue-600 transition-colors uppercase tracking-[0.2em] whitespace-nowrap cursor-pointer" onClick={() => handleSend("Run Revenue Simulation")}>
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+                Growth Models
+              </div>
+            </div>
+
             <div className="relative group">
-              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl md:rounded-[2.5rem] blur opacity-10 group-focus-within:opacity-25 transition duration-1000"></div>
-              <div className="relative bg-white border border-zinc-200 rounded-2xl md:rounded-[2.5rem] shadow-2xl overflow-hidden p-2 md:p-3 flex items-end gap-2 md:gap-3">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-[2rem] md:rounded-[2.5rem] blur opacity-10 group-focus-within:opacity-20 transition duration-1000 hidden md:block"></div>
+              <div className="relative bg-white border border-zinc-200 rounded-[2rem] md:rounded-[2.5rem] shadow-xl md:shadow-2xl overflow-hidden p-1.5 md:p-3 flex items-end gap-1.5 md:gap-3">
                 <Button variant="ghost" size="icon" className="rounded-full text-zinc-400 hover:text-zinc-900 shrink-0 h-10 w-10 md:h-12 md:w-12">
                   <Plus className="w-5 h-5 md:w-6 md:h-6" />
                 </Button>
                 <textarea 
                   rows={1}
                   placeholder="Ask your copilot..."
-                  className="flex-1 bg-transparent border-none focus:ring-0 text-sm py-3 md:py-4 px-1 md:px-2 resize-none max-h-48 scrollbar-hide font-medium"
+                  className="flex-1 bg-transparent border-none focus:ring-0 text-[13px] md:text-sm py-3 md:py-4 px-1 md:px-2 resize-none max-h-48 scrollbar-hide font-medium"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -418,27 +484,14 @@ export default function AIInsights() {
                   }}
                 />
                 <div className="flex items-center gap-1 md:gap-2 shrink-0 pb-1 md:pb-1.5 pr-1 md:pr-1.5">
-                  <Button variant="ghost" size="icon" className="hidden sm:flex rounded-full text-zinc-400 hover:text-zinc-900 h-10 w-10">
-                    <Mic className="w-5 h-5" />
-                  </Button>
                   <Button 
                     size="icon" 
-                    className="rounded-full bg-zinc-900 text-white hover:bg-zinc-800 shadow-2xl shadow-zinc-900/40 h-10 w-10 md:h-12 md:w-12 transition-transform active:scale-95"
-                    onClick={handleSend}
+                    className="rounded-full bg-zinc-900 text-white hover:bg-zinc-800 shadow-xl shadow-zinc-900/40 h-10 w-10 md:h-12 md:w-12 transition-transform active:scale-95"
+                    onClick={() => handleSend()}
                   >
                     <Send className="w-4 h-4 md:w-5 md:h-5" />
                   </Button>
                 </div>
-              </div>
-            </div>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8 mt-4 md:mt-6">
-              <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">
-                <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
-                Try: "Analyze North Branch sales"
-              </div>
-              <div className="flex items-center gap-2 text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">
-                <Zap className="w-3.5 h-3.5 text-blue-500" />
-                Try: "Check low stock alerts"
               </div>
             </div>
           </div>

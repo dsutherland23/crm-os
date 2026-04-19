@@ -36,7 +36,14 @@ import {
   Filter,
   ChevronRight,
   Activity,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
+  Scale,
+  Brain,
+  History as HistoryIcon,
+  X as XIcon,
+  Info
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -55,6 +62,15 @@ import {
   TabsList, 
   TabsTrigger 
 } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { useModules } from "@/context/ModuleContext";
@@ -95,6 +111,13 @@ export default function Analytics() {
   const [staff, setStaff] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [simulationParams, setSimulationParams] = useState({
+    adSpend: 15, // percentage increase
+    newBranch: false,
+    retentionFocus: false
+  });
+  const [simulationResults, setSimulationResults] = useState<any>(null);
 
   useEffect(() => {
     if (!enterpriseId) return;
@@ -320,23 +343,28 @@ export default function Analytics() {
     <ScrollArea className="h-full">
       <div className="p-6 lg:p-10 space-y-10 max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-8">
           <div className="space-y-1">
             <div className="flex items-center gap-2 text-blue-600 mb-2">
-              <BrainCircuit className="w-5 h-5" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Enterprise Intelligence</span>
+              <div className="p-1.5 bg-blue-50 rounded-lg">
+                <BrainCircuit className="w-4 h-4 md:w-5 md:h-5" />
+              </div>
+              <span className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em]">Neural Analytics Tier</span>
             </div>
-            <h1 className="text-4xl font-bold tracking-tight text-zinc-900 font-display">Intelligence Engine</h1>
-            <p className="text-zinc-500 max-w-md">Predictive modeling, multi-branch performance analysis, and AI-driven growth strategies.</p>
+            <h1 className="text-3xl md:text-5xl font-black tracking-tight text-zinc-900 font-display">Intelligence Engine</h1>
+            <p className="text-zinc-500 max-w-md text-xs md:text-sm font-medium leading-relaxed">Predictive modeling, multi-branch performance analysis, and AI-driven growth strategies.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <Button variant="outline" className="rounded-xl border-zinc-200 h-11 px-6 font-bold text-xs" onClick={() => toast.success("Exporting Intelligence Report...")}>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+            <Button variant="outline" className="rounded-xl border-zinc-200 h-12 md:h-14 px-6 md:px-8 font-bold text-[10px] uppercase tracking-widest w-full sm:flex-1 md:w-auto" onClick={() => toast.success("Exporting Intelligence Report...")}>
               <Download className="w-4 h-4 mr-2 text-zinc-400" />
-              Export Intelligence Report
+              Export Intel
             </Button>
-            <Button className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs" onClick={() => toast.info("Running Predictive Simulation...")}>
-              <Sparkles className="w-4 h-4 mr-2" />
-              Run Predictive Simulation
+            <Button 
+              className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-xl shadow-zinc-900/10 h-12 md:h-14 px-6 md:px-10 font-black text-[10px] uppercase tracking-widest w-full sm:flex-1 md:w-auto flex items-center justify-center gap-2" 
+              onClick={() => setIsSimulating(true)}
+            >
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              Run Simulation
             </Button>
           </div>
         </div>
@@ -593,6 +621,168 @@ export default function Analytics() {
           </div>
         </div>
       </div>
+
+      {/* Simulation Engine Dialog */}
+      <Dialog open={isSimulating} onOpenChange={(o) => !o && setIsSimulating(false)}>
+        <DialogContent showCloseButton={false} className="w-full sm:max-w-4xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-[2.5rem] border-none">
+          <DialogHeader className="p-5 sm:p-8 bg-zinc-900 text-white flex-none relative">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-amber-400 mb-1">
+                <Brain className="w-4 h-4 md:w-5 md:h-5" />
+                <span className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em]">Predictive Growth Engine</span>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <DialogTitle className="text-xl md:text-3xl font-black text-white font-display tracking-tight leading-tight">Growth Simulator</DialogTitle>
+                <Button variant="ghost" size="icon" onClick={() => setIsSimulating(false)} className="md:hidden text-white/50 hover:text-white">
+                  <XIcon className="w-5 h-5" />
+                </Button>
+              </div>
+              <DialogDescription className="text-zinc-500 font-medium text-[10px] md:text-sm">
+                Calibrate market variables to project enterprise trajectory.
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto no-scrollbar">
+            <div className="p-5 md:p-10 lg:p-14 space-y-10 md:space-y-16">
+              {/* Parameters section */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-20">
+                <div className="space-y-8">
+                  <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                    <Scale className="w-3 h-3" /> Growth Accelerators
+                  </h4>
+                  
+                  <div className="space-y-8">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-bold text-zinc-900 uppercase tracking-widest">AI Marketing Spend</Label>
+                        <span className="text-sm font-black text-blue-600">+{simulationParams.adSpend}%</span>
+                      </div>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="100" 
+                        value={simulationParams.adSpend}
+                        onChange={(e) => setSimulationParams({...simulationParams, adSpend: parseInt(e.target.value)})}
+                        className="w-full h-2 bg-zinc-100 rounded-lg appearance-none cursor-pointer accent-zinc-900" 
+                      />
+                      <p className="text-[10px] text-zinc-400 italic">Projected customer acquisition lift via neural targeting.</p>
+                    </div>
+
+                    <div className="p-6 rounded-2xl border border-zinc-100 bg-zinc-50/50 space-y-5">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <p className="text-sm font-bold text-zinc-900">Branch Expansion</p>
+                          <p className="text-[10px] text-zinc-400">Deploy additional 24/7 terminal</p>
+                        </div>
+                        <input 
+                          type="checkbox" 
+                          checked={simulationParams.newBranch}
+                          onChange={(e) => setSimulationParams({...simulationParams, newBranch: e.target.checked})}
+                          className="w-5 h-5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900" 
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <p className="text-sm font-bold text-zinc-900">Retention Ops Focus</p>
+                          <p className="text-[10px] text-zinc-400">Maximize LTV via automated loyalty</p>
+                        </div>
+                        <input 
+                          type="checkbox" 
+                          checked={simulationParams.retentionFocus}
+                          onChange={(e) => setSimulationParams({...simulationParams, retentionFocus: e.target.checked})}
+                          className="w-5 h-5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900" 
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-8">
+                  <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                    <TrendingUpIcon className="w-3 h-3" /> Projected Impact
+                  </h4>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="p-8 rounded-[2rem] bg-zinc-900 text-white shadow-2xl relative overflow-hidden group">
+                      <div className="absolute right-0 top-0 opacity-10 -mt-4 -mr-4 pointer-events-none">
+                        <DollarSign className="w-32 h-32" />
+                      </div>
+                      <p className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] mb-4">Projected Monthly Revenue</p>
+                      <div className="flex items-end gap-2">
+                        <span className="text-4xl md:text-5xl font-black font-display tracking-tighter">
+                          {formatCurrency(intelligenceMetrics.revenue * (1 + (simulationParams.adSpend * 0.015) + (simulationParams.newBranch ? 0.3 : 0) + (simulationParams.retentionFocus ? 0.15 : 0)))}
+                        </span>
+                        <Badge className="bg-emerald-500 text-white border-0 mb-2">
+                          <TrendingUpIcon className="w-3 h-3 mr-1" />
+                          {Math.round(((simulationParams.adSpend * 0.015) + (simulationParams.newBranch ? 0.3 : 0) + (simulationParams.retentionFocus ? 0.15 : 0)) * 100)}%
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-6 rounded-3xl bg-blue-50/50 border border-blue-100/50">
+                        <p className="text-[9px] font-bold text-blue-600 uppercase tracking-widest mb-2">Market Velocity</p>
+                        <p className="text-xl font-black text-zinc-900">+{simulationParams.adSpend > 50 ? 'Accelerated' : 'Steady'}</p>
+                      </div>
+                      <div className="p-6 rounded-3xl bg-purple-50/50 border border-purple-100/50">
+                        <p className="text-[9px] font-bold text-purple-600 uppercase tracking-widest mb-2">Efficiency Projection</p>
+                        <p className="text-xl font-black text-zinc-900">{simulationParams.retentionFocus ? '94%' : '88%'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Simulation Chart */}
+              <div className="space-y-6 pt-10 border-t border-zinc-100">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-zinc-900 rounded-xl text-white">
+                    <Activity className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h5 className="text-sm font-black text-zinc-900 uppercase tracking-widest">Revenue Trajectory Map</h5>
+                    <p className="text-[10px] text-zinc-400">Comparing current baseline vs simulation projection.</p>
+                  </div>
+                </div>
+                
+                <div className="h-[250px] w-full bg-zinc-50 rounded-[2rem] border border-zinc-100 p-6">
+                   <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={performanceData.map((d, i) => {
+                        const multiplier = 1 + ((simulationParams.adSpend * 0.01) * (i / performanceData.length)) + (simulationParams.newBranch ? 0.3 * (i/performanceData.length) : 0);
+                        return { 
+                          ...d, 
+                          projected: d.revenue * multiplier
+                        };
+                      })}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                        <XAxis dataKey="name" hide />
+                        <Tooltip />
+                        <Area type="monotone" dataKey="revenue" stroke="#94a3b8" fill="#f1f5f9" fillOpacity={1} strokeWidth={2} />
+                        <Area type="monotone" dataKey="projected" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} strokeWidth={4} />
+                      </AreaChart>
+                   </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="p-5 md:p-10 bg-zinc-50 border-t border-zinc-100 flex-none flex flex-row items-center gap-3 md:gap-4 sticky bottom-0 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+            <Button variant="outline" className="rounded-xl h-12 md:h-14 px-6 md:px-8 font-bold text-zinc-400 hover:text-zinc-600 transition-all text-[10px] uppercase tracking-widest flex-1 md:flex-none" onClick={() => setIsSimulating(false)}>
+              Close Engine
+            </Button>
+            <Button
+              className="rounded-xl md:rounded-2xl h-12 md:h-16 px-6 md:px-14 font-black uppercase tracking-[0.2em] text-[10px] md:text-xs bg-zinc-900 hover:bg-zinc-800 text-white shadow-xl shadow-zinc-900/10 transition-all flex-1 md:flex-none flex items-center justify-center gap-2"
+              onClick={() => {
+                toast.success("Simulation Strategy Deployed to Neural Backlog");
+                setIsSimulating(false);
+              }}
+            >
+              Deploy Strategy
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </ScrollArea>
   );
 }

@@ -29,7 +29,9 @@ import {
   Zap,
   Users,
   Activity,
-  ShieldCheck
+  ShieldCheck,
+  Archive,
+  X as XIcon
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -2073,55 +2075,61 @@ export default function Revenue() {
 
       {/* Create New Invoice Dialog */}
       <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
-        <DialogContent className="sm:max-w-6xl w-[95vw] max-h-[92vh] overflow-hidden flex flex-col p-0 border-none bg-white rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)]">
-          <DialogHeader className="p-8 pb-6 bg-zinc-900 text-white flex-none">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-blue-400 mb-1">
-                  <Receipt className="w-5 h-5" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em]">Billing & Revenue</span>
+          <DialogContent showCloseButton={false} className="sm:max-w-6xl w-full sm:w-[95vw] h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-hidden flex flex-col p-0 border-none bg-white rounded-none sm:rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
+            <DialogHeader className="p-4 sm:p-8 bg-zinc-900 text-white flex-none">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-blue-400 mb-0.5">
+                    <Receipt className="w-4 h-4 md:w-5 md:h-5" />
+                    <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em]">Billing & Revenue</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <DialogTitle className="text-lg md:text-3xl font-bold font-display tracking-tight text-white uppercase italic">Issue Invoice</DialogTitle>
+                    <Button variant="ghost" size="icon" onClick={() => setIsInvoiceDialogOpen(false)} className="md:hidden text-white/50 hover:text-white">
+                      <XIcon className="w-5 h-5" />
+                    </Button>
+                  </div>
+                  <DialogDescription className="text-zinc-500 text-[10px] md:text-sm hidden sm:block">Authorize professional tax documentation.</DialogDescription>
                 </div>
-                <DialogTitle className="text-3xl font-bold font-display tracking-tight text-white">Create New Invoice</DialogTitle>
-                <DialogDescription className="text-zinc-400 text-sm">Issue a professional tax invoice to your client or lead.</DialogDescription>
+                
+                <div className="flex items-center gap-2 md:gap-3">
+                  <Button 
+                    variant="outline" 
+                    className={cn(
+                      "rounded-xl h-9 md:h-11 px-4 md:px-6 font-bold text-[9px] md:text-xs uppercase tracking-wider transition-all flex-1 md:flex-none backdrop-blur-md",
+                      isInvoicePreviewVisible ? "bg-white text-zinc-900 border-white" : "border-white/10 bg-white/5 text-white hover:bg-white/10"
+                    )}
+                    onClick={() => setIsInvoicePreviewVisible(!isInvoicePreviewVisible)}
+                  >
+                    {isInvoicePreviewVisible ? "Editor mode" : "View Preview"}
+                  </Button>
+                  <Button className="rounded-xl bg-blue-600 text-white hover:bg-blue-500 h-9 md:h-11 px-4 md:px-6 font-bold text-[9px] md:text-xs uppercase tracking-wider shadow-lg shadow-blue-600/20 flex-1 md:flex-none">
+                    Template
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <Button 
-                  variant={isInvoicePreviewVisible ? "default" : "outline"} 
-                  className={cn(
-                    "rounded-xl h-11 px-6 font-bold text-xs uppercase tracking-wider transition-all",
-                    isInvoicePreviewVisible ? "bg-white text-zinc-900 hover:bg-zinc-100" : "border-zinc-700 bg-zinc-800 text-white hover:bg-zinc-700"
-                  )}
-                  onClick={() => setIsInvoicePreviewVisible(!isInvoicePreviewVisible)}
-                >
-                  {isInvoicePreviewVisible ? "Hide Preview" : "Live Preview"}
-                </Button>
-                <Button className="rounded-xl bg-blue-600 text-white hover:bg-blue-500 h-11 px-6 font-bold text-xs uppercase tracking-wider shadow-lg shadow-blue-600/20">
-                  Import Template
-                </Button>
-              </div>
-            </div>
-          </DialogHeader>
+            </DialogHeader>
 
           <div className="flex-1 min-h-0 flex flex-row overflow-hidden bg-zinc-50/50">
             <div className="flex-1 overflow-y-auto min-w-0 border-r border-zinc-100 no-scrollbar">
-            <div className="p-8 lg:p-12 space-y-12">
+            <div className="p-5 md:p-10 space-y-8 md:space-y-12">
               {/* Section 1: Header Details */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
                 <div className="lg:col-span-8 space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div className="space-y-3">
-                      <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-1">Invoice Reference</Label>
+                  <div className="grid grid-cols-2 gap-3 md:gap-8">
+                    <div className="space-y-2">
+                      <Label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-1">Reference</Label>
                       <Input 
-                        placeholder="IV-2024-0001" 
-                        className="rounded-2xl h-14 bg-white border-zinc-200 shadow-sm focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-lg px-6"
+                        placeholder="IV-0001" 
+                        className="rounded-xl md:rounded-2xl h-11 md:h-14 bg-white border-zinc-200 shadow-sm focus:ring-4 focus:ring-blue-500/10 transition-all font-mono text-sm md:text-lg px-4 md:px-6"
                         value={newInvoiceData.invoiceNumber}
                         onChange={(e) => setNewInvoiceData({...newInvoiceData, invoiceNumber: e.target.value})}
                       />
                     </div>
-                    <div className="space-y-3">
-                      <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-1">Document Status</Label>
+                    <div className="space-y-2">
+                      <Label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-1">Status</Label>
                       <Select value={newInvoiceData.status} onValueChange={(v) => setNewInvoiceData({...newInvoiceData, status: v})}>
-                        <SelectTrigger className="rounded-2xl h-14 bg-white border-zinc-200 shadow-sm focus:ring-4 focus:ring-blue-500/10 px-6 font-bold">
+                        <SelectTrigger className="rounded-xl md:rounded-2xl h-11 md:h-14 bg-white border-zinc-200 shadow-sm focus:ring-4 focus:ring-blue-500/10 px-4 md:px-6 font-bold">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="rounded-2xl border-zinc-200 shadow-xl p-1">
@@ -2133,12 +2141,12 @@ export default function Revenue() {
                     </div>
                   </div>
 
-                  <div className="space-y-3">
-                    <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-1">Bill To Customer *</Label>
-                    <Select value={newInvoiceData.customer_id} onValueChange={(v) => setNewInvoiceData({...newInvoiceData, customer_id: v})}>
-                      <SelectTrigger className="rounded-2xl h-14 bg-white border-zinc-200 shadow-sm focus:ring-4 focus:ring-blue-500/10 px-6 font-bold">
-                        <SelectValue placeholder="Select a customer from your directory..." />
-                      </SelectTrigger>
+                    <div className="space-y-3 lg:col-span-8">
+                      <Label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] ml-1">Bill To Customer *</Label>
+                      <Select value={newInvoiceData.customer_id} onValueChange={(v) => setNewInvoiceData({...newInvoiceData, customer_id: v})}>
+                        <SelectTrigger className="rounded-xl md:rounded-2xl h-12 md:h-14 bg-white border-zinc-200 shadow-sm focus:ring-4 focus:ring-blue-500/10 px-4 md:px-6 font-bold">
+                          <SelectValue placeholder="Select a customer..." />
+                        </SelectTrigger>
                       <SelectContent className="rounded-2xl border-zinc-200 shadow-xl p-1 max-h-80">
                         {customers.map(c => (
                           <SelectItem key={c.id} value={c.id} className="rounded-xl py-4 group">
@@ -2457,29 +2465,23 @@ export default function Revenue() {
             )}
           </div>
 
-          <DialogFooter className="p-8 lg:p-10 bg-white border-t border-zinc-100 flex-none flex flex-col md:flex-row gap-6 items-center md:justify-between">
-            <div className="flex items-center gap-3">
-               <Button variant="ghost" className="rounded-xl h-14 px-8 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition-all" onClick={() => setIsInvoiceDialogOpen(false)}>
-                Discard Changes
-              </Button>
-            </div>
-            <div className="flex items-center gap-4 w-full md:w-auto">
+          <DialogFooter className="px-5 py-4 sm:px-8 sm:py-6 bg-white border-t border-zinc-100 flex-none flex flex-row items-center gap-3 md:gap-6 sticky bottom-0 pb-[max(1rem,env(safe-area-inset-bottom))] z-20">
+            <Button 
+              variant="outline" 
+              className="rounded-xl h-11 md:h-14 px-4 md:px-8 font-bold border-zinc-200 text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition-all text-[10px] flex-1 md:flex-none uppercase tracking-widest"
+              onClick={() => setIsInvoiceDialogOpen(false)}
+            >
+              <Archive className="w-4 h-4 mr-2" />
+              Discard
+            </Button>
+            <div className="flex items-center gap-3 flex-[2] md:flex-none">
               <Button 
-                variant="outline" 
-                className="rounded-2xl h-16 px-10 font-bold border-2 border-zinc-900 text-zinc-900 hover:bg-zinc-900 hover:text-white transition-all duration-300 flex items-center gap-3 flex-1 md:flex-none shadow-lg shadow-zinc-200"
-                onClick={() => handleCreateInvoice(false)}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Building2 className="w-5 h-5" />}
-                Archive as Draft
-              </Button>
-              <Button 
-                className="rounded-2xl h-16 px-14 font-bold bg-zinc-900 text-white hover:bg-zinc-800 shadow-2xl shadow-zinc-900/40 hover:scale-[1.02] active:scale-95 transition-all duration-300 flex items-center gap-3 flex-1 md:flex-none"
+                className="rounded-xl md:rounded-2xl h-11 md:h-16 px-6 md:px-14 font-bold bg-zinc-900 text-white hover:bg-zinc-800 shadow-xl shadow-zinc-900/10 transition-all flex items-center justify-center gap-3 flex-1 md:flex-none"
                 onClick={() => handleCreateInvoice(true)}
                 disabled={isSubmitting}
               >
-                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <ArrowUpRight className="w-5 h-5" />}
-                Authorize & Dispatch
+                {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin font-bold" /> : <ArrowUpRight className="w-4 h-4 text-blue-400" />}
+                Authorize Invoice
               </Button>
             </div>
           </DialogFooter>
@@ -2519,64 +2521,71 @@ export default function Revenue() {
       </Dialog>
 
       <Dialog open={isTaxDialogOpen} onOpenChange={setIsTaxDialogOpen}>
-        <DialogContent className="sm:max-w-3xl w-[95vw] p-0 overflow-hidden shadow-2xl flex flex-col rounded-3xl border-none">
-          <DialogHeader className="p-8 lg:p-10 bg-white border-b border-zinc-100 flex-none">
+        <DialogContent showCloseButton={false} className="w-full sm:max-w-2xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-[2.5rem] border-none">
+          <DialogHeader className="p-5 sm:p-8 lg:p-10 bg-white border-b border-zinc-100 flex-none relative">
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-zinc-400 mb-2">
-                <SettingsIcon className="w-5 h-5" />
+                <SettingsIcon className="w-4 h-4 md:w-5 md:h-5" />
                 <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Compliance & Configuration</span>
               </div>
-              <DialogTitle className="font-display tracking-tight text-3xl font-black text-zinc-900">Tax Engine Control</DialogTitle>
-              <DialogDescription className="text-zinc-500 font-medium">Calibrate tax parameters and algorithmic compliance rules.</DialogDescription>
+              <div className="flex items-center justify-between gap-4">
+                <DialogTitle className="font-display tracking-tight text-xl md:text-3xl font-black text-zinc-900 leading-tight">Tax Engine Control</DialogTitle>
+                <Button variant="ghost" size="icon" onClick={() => setIsTaxDialogOpen(false)} className="md:hidden text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100">
+                  <XIcon className="w-5 h-5" />
+                </Button>
+              </div>
+              <DialogDescription className="text-zinc-500 font-medium text-xs md:text-sm">Calibrate tax parameters and algorithmic compliance rules.</DialogDescription>
             </div>
           </DialogHeader>
-          <div className="p-8 lg:p-10 space-y-8">
-            <div className="space-y-6">
-              <div className="p-6 bg-zinc-50 rounded-2xl border border-zinc-100 flex justify-between items-center group hover:bg-white hover:shadow-xl transition-all duration-300">
-                <div className="space-y-1">
-                  <p className="font-bold text-zinc-900 text-lg">Standard Sales Tax Base</p>
-                  <p className="text-xs text-zinc-500">Corporate default rate applicable to all primary revenue channels</p>
+          <div className="flex-1 overflow-y-auto">
+            <div className="p-5 md:p-8 lg:p-10 space-y-6 md:space-y-8">
+              <div className="space-y-4 md:space-y-6">
+                <div className="p-5 md:p-6 bg-zinc-50 rounded-2xl border border-zinc-100 flex justify-between items-center group hover:bg-white hover:shadow-xl transition-all duration-300">
+                  <div className="space-y-1">
+                    <p className="font-bold text-zinc-900 text-sm md:text-lg">Standard Sales Tax Base</p>
+                    <p className="text-[10px] md:text-xs text-zinc-500">Corporate default rate applicable to all primary revenue channels</p>
+                  </div>
+                  <div className="flex items-center gap-2 md:gap-3 bg-white p-2 rounded-xl shadow-sm border border-zinc-100">
+                    <Input 
+                      type="number"
+                      step="0.01"
+                      className="w-16 md:w-24 text-right font-black text-lg md:text-xl border-none focus:ring-0 p-0 h-8 md:h-10" 
+                      value={globalTaxRate} 
+                      onChange={(e) => setGlobalTaxRate(Number(e.target.value))}
+                    />
+                    <span className="font-black text-zinc-400 text-base md:text-lg mr-1 md:mr-2">%</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 bg-white p-2 rounded-xl shadow-sm border border-zinc-100">
-                  <Input 
-                    type="number"
-                    step="0.01"
-                    className="w-24 text-right font-black text-xl border-none focus:ring-0 p-0 h-10" 
-                    value={globalTaxRate} 
-                    onChange={(e) => setGlobalTaxRate(Number(e.target.value))}
-                  />
-                  <span className="font-black text-zinc-400 text-lg mr-2">%</span>
+
+                <div className="flex items-center justify-between p-5 md:p-6 bg-zinc-50 rounded-2xl border border-zinc-100 group hover:bg-white hover:shadow-xl transition-all duration-300">
+                  <div className="space-y-1">
+                    <p className="font-bold text-zinc-900 text-sm md:text-lg">Dynamic Nexus Calculation</p>
+                    <p className="text-[10px] md:text-xs text-zinc-500">Automated jurisdictional calculation based on payload routing</p>
+                  </div>
+                  <div className="flex items-center gap-2 md:gap-4">
+                     <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Active</span>
+                     </div>
+                     <Switch checked={true} />
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-6 bg-zinc-50 rounded-2xl border border-zinc-100 group hover:bg-white hover:shadow-xl transition-all duration-300">
-                <div className="space-y-1">
-                  <p className="font-bold text-zinc-900 text-lg">Dynamic Nexus Calculation</p>
-                  <p className="text-xs text-zinc-500">Automated jurisdictional calculation based on payload routing</p>
-                </div>
-                <div className="flex items-center gap-4">
-                   <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100">
-                      <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      <span className="text-[10px] font-black uppercase tracking-widest">Active</span>
-                   </div>
-                   <Switch checked={true} />
-                </div>
+              <div className="p-5 md:p-6 bg-blue-50/50 rounded-2xl border border-blue-100 flex gap-4 items-start">
+                 <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600 flex-none">
+                    <AlertCircle className="w-4 h-4 md:w-5 md:h-5" />
+                 </div>
+                 <div>
+                    <h5 className="text-[10px] md:text-xs font-bold text-blue-900 uppercase tracking-widest leading-none mb-1">Regional Notice</h5>
+                    <p className="text-[10px] text-blue-700 leading-relaxed max-w-md italic">Engine settings impacts all branches. Real-time changes are logged for fiscal transparency and year-end audits.</p>
+                 </div>
               </div>
-            </div>
-
-            <div className="p-6 bg-blue-50/50 rounded-2xl border border-blue-100 flex gap-4 items-start">
-               <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600">
-                  <AlertCircle className="w-5 h-5" />
-               </div>
-               <div>
-                  <h5 className="text-xs font-bold text-blue-900 uppercase tracking-widest leading-none mb-1">Regional Notice</h5>
-                  <p className="text-[10px] text-blue-700 leading-relaxed max-w-md italic">Engine settings impacts all branches. Real-time changes are logged for fiscal transparency and year-end audits.</p>
-               </div>
             </div>
           </div>
-          <DialogFooter className="p-8 lg:p-10 bg-zinc-50 border-t border-zinc-100 flex-none gap-4">
-            <Button variant="ghost" className="rounded-xl h-14 px-8 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 flex-1 md:flex-none" onClick={() => setIsTaxDialogOpen(false)}>Discard</Button>
-            <Button className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 h-16 px-14 font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-zinc-900/40 hover:scale-[1.02] transition-all flex-1 md:flex-none" onClick={handleSaveTaxSettings}>Deploy Changes</Button>
+          <DialogFooter className="p-5 md:p-8 lg:p-10 bg-zinc-50 border-t border-zinc-100 flex-none flex flex-row items-center gap-3 md:gap-4 sticky bottom-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            <Button variant="outline" className="rounded-xl h-12 md:h-14 px-6 md:px-8 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 flex-1 md:flex-none uppercase text-[10px] tracking-widest" onClick={() => setIsTaxDialogOpen(false)}>Discard</Button>
+            <Button className="rounded-xl md:rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 h-12 md:h-16 px-6 md:px-14 font-black uppercase tracking-[0.2em] text-[10px] md:text-xs shadow-xl shadow-zinc-900/10 transition-all flex-1 md:flex-none" onClick={handleSaveTaxSettings}>Deploy Changes</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
