@@ -115,6 +115,14 @@ interface SupportTicket {
   createdAt: any;
 }
 
+interface TicketReply {
+  id: string;
+  message: string;
+  sender_email: string;
+  sender_type: "ADMIN" | "USER";
+  createdAt: any;
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // NAV
 // ══════════════════════════════════════════════════════════════════════
@@ -1634,6 +1642,41 @@ function SupportPane() {
     } catch (e) { toast.error("Failed to update status."); }
   };
 
+  const [replies, setReplies] = useState<TicketReply[]>([]);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!selectedTicket) { setReplies([]); return; }
+    const qReplies = query(collection(db, `support_tickets/${selectedTicket.id}/replies`), orderBy("createdAt", "asc"));
+    return onSnapshot(qReplies, (snap) => {
+      setReplies(snap.docs.map(d => ({ id: d.id, ...d.data() } as TicketReply)));
+    });
+  }, [selectedTicket?.id]);
+
+  const sendReply = async (newStatus?: string) => {
+    if (!selectedTicket || (!replyText.trim() && !newStatus)) return;
+    setSending(true);
+    try {
+      const ticketRef = doc(db, "support_tickets", selectedTicket.id);
+      
+      if (replyText.trim()) {
+        await addDoc(collection(db, `support_tickets/${selectedTicket.id}/replies`), {
+          message: replyText.trim(),
+          sender_email: auth.currentUser?.email,
+          sender_type: "ADMIN",
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      const status = newStatus || "IN_PROGRESS";
+      await updateDoc(ticketRef, { status, updatedAt: serverTimestamp() });
+      toast.success(newStatus ? `Status updated to ${newStatus}` : "Reply sent.");
+      setReplyText("");
+    } catch (e) { toast.error("Failed to send reply."); }
+    finally { setSending(false); }
+  };
+
   return (
     <Wrap>
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/[0.05] pb-6">
@@ -1658,83 +1701,137 @@ function SupportPane() {
       </div>
 
       {subTab === "tickets" ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="space-y-3">
-            <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Recent Tickets</p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-280px)]">
+          {/* List View */}
+          <div className="lg:col-span-4 space-y-3 overflow-y-auto pr-2 custom-scrollbar">
+            <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Tickets Thread</p>
             {tickets.map(t => (
               <button key={t.id} onClick={() => setSelectedTicket(t)}
-                className={cn("w-full text-left p-4 rounded-2xl border transition-all group",
+                className={cn("w-full text-left p-4 rounded-2xl border transition-all group relative",
                   selectedTicket?.id === t.id ? "bg-blue-600/10 border-blue-500/30" : "bg-zinc-900 border-white/[0.05] hover:border-zinc-700"
                 )}>
                 <div className="flex items-center justify-between gap-4 mb-2">
                   <Badge className={cn("text-[9px] font-black uppercase tracking-widest",
                     t.status === "OPEN" ? "bg-rose-500/20 text-rose-400" :
+                    t.status === "IN_PROGRESS" ? "bg-amber-500/20 text-amber-400" :
                     t.status === "RESOLVED" ? "bg-emerald-500/20 text-emerald-400" : "bg-zinc-800 text-zinc-500"
                   )}>{t.status}</Badge>
-                  <span className="text-[10px] text-zinc-600">
-                    {t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString() : 'Just now'}
+                  <span className="text-[9px] text-zinc-700 font-mono">
+                    #{t.id.slice(-6).toUpperCase()}
                   </span>
                 </div>
-                <p className="text-white text-sm font-bold truncate group-hover:text-blue-400 transition-colors">{t.subject}</p>
-                <div className="flex items-center gap-2 mt-2">
-                  <div className="w-4 h-4 rounded-full bg-zinc-800 flex items-center justify-center text-[8px] text-zinc-500 font-bold shrink-0">
-                    {t.user_email?.[0]?.toUpperCase()}
-                  </div>
-                  <p className="text-[10px] text-zinc-500 truncate">{t.user_email}</p>
-                </div>
+                <p className="text-white text-sm font-bold truncate group-hover:text-blue-400 transition-colors uppercase tracking-tight">{t.subject}</p>
+                <p className="text-[10px] text-zinc-600 mt-1 truncate">{t.user_email}</p>
               </button>
             ))}
             {tickets.length === 0 && !loading && (
               <div className="py-20 text-center border-2 border-dashed border-white/[0.03] rounded-3xl">
                 <LifeBuoy className="w-10 h-10 text-zinc-800 mx-auto mb-3" />
-                <p className="text-zinc-600 text-xs font-bold">No tickets yet.</p>
+                <p className="text-zinc-600 text-xs font-bold">No active threads.</p>
               </div>
             )}
           </div>
 
-          <div className="lg:sticky lg:top-6 space-y-6">
+          {/* Chat / Details View */}
+          <div className="lg:col-span-8 flex flex-col h-full bg-zinc-900/50 border border-white/[0.05] rounded-[2rem] overflow-hidden">
             {selectedTicket ? (
-              <div className="bg-zinc-900 border border-white/[0.05] rounded-3xl overflow-hidden shadow-2xl">
-                <div className="p-6 border-b border-white/[0.05] flex items-center justify-between">
-                  <div>
-                    <Badge className="bg-blue-500/20 text-blue-400 text-[10px] uppercase font-black tracking-widest mb-1">
-                      {selectedTicket.category}
-                    </Badge>
-                    <h3 className="text-white font-black text-xl">{selectedTicket.subject}</h3>
+              <>
+                {/* Chat Header */}
+                <div className="p-5 border-b border-white/[0.05] bg-zinc-900/80 backdrop-blur-md flex items-center justify-between shrink-0">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-2xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                      <LifeBuoy className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-white font-black text-sm tracking-tight">{selectedTicket.subject}</h3>
+                      <p className="text-[10px] text-zinc-500 font-medium">Ticket submitted by {selectedTicket.user_email}</p>
+                    </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => updateTicketStatus(selectedTicket.id, "RESOLVED")}
-                      className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 h-8 text-[10px] font-black">
-                      RESOLVE
+                    <Button variant="outline" size="sm" onClick={() => sendReply("RESOLVED")}
+                      className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 h-8 text-[9px] font-black uppercase tracking-widest px-3 rounded-lg">
+                      Mark as Fixed
                     </Button>
                     <Button variant="outline" size="sm" onClick={() => setSelectedTicket(null)}
-                      className="border-white/10 text-zinc-400 hover:text-white h-8 w-8 p-0">
+                      className="border-white/10 text-zinc-600 hover:text-white h-8 w-8 p-0 rounded-lg">
                       <X className="w-4 h-4" />
                     </Button>
                   </div>
                 </div>
-                <div className="p-6 space-y-6">
-                  <div className="p-4 bg-black/40 rounded-2xl border border-white/[0.03]">
-                    <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{selectedTicket.message}</p>
+
+                {/* Chat Body */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                  {/* Original Message */}
+                  <div className="flex gap-4">
+                    <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] text-zinc-500 font-black shrink-0 border border-white/5">
+                      {selectedTicket.user_email?.[0]?.toUpperCase()}
+                    </div>
+                    <div className="space-y-1 max-w-[85%]">
+                      <div className="bg-zinc-800/80 p-4 rounded-2xl rounded-tl-none border border-white/[0.05]">
+                        <p className="text-sm text-zinc-200 leading-relaxed font-medium">{selectedTicket.message}</p>
+                      </div>
+                      <p className="text-[9px] text-zinc-600 font-bold ml-1">USER · {selectedTicket.createdAt?.toDate ? selectedTicket.createdAt.toDate().toLocaleTimeString() : 'Just now'}</p>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-zinc-800/50 p-4 rounded-2xl border border-white/[0.03]">
-                      <p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest mb-1">Requester</p>
-                      <p className="text-white text-xs font-bold truncate">{selectedTicket.user_email}</p>
+
+                  {/* Replies Thread */}
+                  {replies.map((r) => (
+                    <div key={r.id} className={cn("flex gap-4", r.sender_type === "ADMIN" ? "flex-row-reverse" : "")}>
+                      <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 border border-white/5",
+                        r.sender_type === "ADMIN" ? "bg-blue-600 text-white border-blue-400/20" : "bg-zinc-800 text-zinc-500"
+                      )}>
+                        {(r.sender_email || "A")?.[0]?.toUpperCase()}
+                      </div>
+                      <div className={cn("space-y-1 max-w-[85%]", r.sender_type === "ADMIN" ? "items-end text-right" : "")}>
+                        <div className={cn("p-4 rounded-2xl border border-white/[0.05]",
+                          r.sender_type === "ADMIN" ? "bg-blue-600/10 border-blue-500/20 rounded-tr-none" : "bg-zinc-800/50 rounded-tl-none"
+                        )}>
+                          <p className="text-sm text-white leading-relaxed font-medium">{r.message}</p>
+                        </div>
+                        <p className="text-[9px] text-zinc-600 font-bold px-1">
+                          {r.sender_type} · {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleTimeString() : 'Just now'}
+                        </p>
+                      </div>
                     </div>
-                    <div className="bg-zinc-800/50 p-4 rounded-2xl border border-white/[0.03]">
-                      <p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest mb-1">Enterprise ID</p>
-                      <p className="text-blue-400 text-xs font-mono font-bold truncate">{selectedTicket.enterprise_id}</p>
-                    </div>
+                  ))}
+                </div>
+
+                {/* Chat Input */}
+                <div className="p-4 bg-zinc-900 border-t border-white/[0.05] space-y-3">
+                  <div className="flex gap-2">
+                    <button onClick={() => sendReply("IN_PROGRESS")} className="px-3 h-7 bg-amber-500/10 border border-amber-500/20 rounded-full text-[9px] font-black text-amber-500 uppercase tracking-widest hover:bg-amber-500/20 transition-all">
+                      Working on it
+                    </button>
+                    <button onClick={() => { setReplyText("We have identified the issue and our engineers are working on a fix."); }} className="px-3 h-7 bg-white/5 border border-white/10 rounded-full text-[9px] font-black text-zinc-400 uppercase tracking-widest hover:bg-white/10 transition-all">
+                      Use Template
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <textarea 
+                      placeholder="Type your response to the user..."
+                      value={replyText}
+                      onChange={e => setReplyText(e.target.value)}
+                      className="w-full bg-black/40 border border-white/[0.1] rounded-2xl px-5 py-4 text-sm text-white placeholder:text-zinc-600 outline-none focus:border-blue-500/40 transition-all resize-none pr-14 min-h-[100px]"
+                    />
+                    <Button 
+                      onClick={() => sendReply()}
+                      disabled={sending || !replyText.trim()}
+                      className="absolute bottom-4 right-4 w-10 h-10 rounded-xl bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/30 p-0"
+                    >
+                      {sending ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    </Button>
                   </div>
                 </div>
-              </div>
+              </>
             ) : (
-              <div className="h-[400px] flex flex-col items-center justify-center bg-zinc-900 border border-dashed border-white/[0.05] rounded-3xl text-zinc-700">
-                <div className="w-16 h-16 bg-white/[0.02] rounded-full flex items-center justify-center mb-4">
-                  <ChevronRight className="w-6 h-6" />
+              <div className="h-full flex flex-col items-center justify-center text-zinc-800 space-y-4">
+                <div className="w-20 h-20 bg-white/[0.01] rounded-[2.5rem] border border-white/[0.03] flex items-center justify-center rotate-3 group-hover:rotate-0 transition-transform duration-500">
+                  <MessageSquare className="w-8 h-8 text-zinc-800" />
                 </div>
-                <p className="text-xs font-bold uppercase tracking-widest">Select a ticket to view details</p>
+                <div className="text-center">
+                  <p className="text-xs font-black uppercase tracking-[0.3em] text-zinc-700">Support Terminal</p>
+                  <p className="text-[10px] text-zinc-800 font-bold mt-1">Select a thread to start communicating</p>
+                </div>
               </div>
             )}
           </div>

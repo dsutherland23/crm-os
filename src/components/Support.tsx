@@ -34,6 +34,7 @@ import {
   Phone,
   MapPin,
   Loader2,
+  Ticket,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -43,7 +44,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
-import { auth, db, addDoc, collection, serverTimestamp } from "@/lib/firebase";
+import { auth, db, addDoc, collection, serverTimestamp, onSnapshot, query, where, orderBy, doc, updateDoc } from "@/lib/firebase";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -56,6 +57,7 @@ type SupportSection =
   | "help"
   | "status"
   | "contact"
+  | "my_tickets"
   | "delete";
 
 interface Props {
@@ -670,6 +672,181 @@ function ContactSection() {
   );
 }
 
+function TicketCenter() {
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<any>(null);
+  const [replies, setReplies] = useState<any[]>([]);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!auth.currentUser?.email) return;
+    const q = query(
+      collection(db, "support_tickets"),
+      where("user_email", "==", auth.currentUser.email),
+      orderBy("createdAt", "desc")
+    );
+    return onSnapshot(q, (snap) => {
+      setTickets(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selected) { setReplies([]); return; }
+    const q = query(
+      collection(db, `support_tickets/${selected.id}/replies`),
+      orderBy("createdAt", "asc")
+    );
+    return onSnapshot(q, (snap) => {
+      setReplies(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+  }, [selected?.id]);
+
+  const sendReply = async () => {
+    if (!selected || !replyText.trim()) return;
+    setSending(true);
+    try {
+      const ticketRef = doc(db, "support_tickets", selected.id);
+      await addDoc(collection(db, `support_tickets/${selected.id}/replies`), {
+        message: replyText.trim(),
+        sender_email: auth.currentUser?.email,
+        sender_type: "USER",
+        createdAt: serverTimestamp(),
+      });
+      // Set back to OPEN so admin sees a new message
+      await updateDoc(ticketRef, { status: "OPEN", updatedAt: serverTimestamp() });
+      setReplyText("");
+    } catch {
+      toast.error("Cloud not send reply.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  if (loading) return <div className="py-20 text-center text-zinc-400">Loading your tickets...</div>;
+
+  if (selected) {
+    return (
+      <div className="flex flex-col h-[600px]">
+        <div className="flex items-center gap-3 mb-6 pb-6 border-b border-zinc-100">
+          <Button variant="ghost" size="icon" onClick={() => setSelected(null)} className="rounded-xl">
+            <Circle className="w-4 h-4" />
+          </Button>
+          <div>
+            <h3 className="font-bold text-zinc-900">{selected.subject}</h3>
+            <p className="text-xs text-zinc-500 uppercase font-bold tracking-widest">{selected.status}</p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar mb-6">
+          {/* Original */}
+          <div className="flex gap-3">
+            <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center text-[10px] font-bold text-zinc-500 shrink-0">
+              U
+            </div>
+            <div className="space-y-1">
+              <div className="bg-zinc-50 border border-zinc-200 p-4 rounded-2xl rounded-tl-none">
+                <p className="text-sm text-zinc-700 leading-relaxed">{selected.message}</p>
+              </div>
+              <p className="text-[10px] text-zinc-400 font-bold">You · Original Message</p>
+            </div>
+          </div>
+
+          {replies.map(r => (
+            <div key={r.id} className={cn("flex gap-3", r.sender_type === "ADMIN" ? "flex-row-reverse" : "")}>
+              <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
+                r.sender_type === "ADMIN" ? "bg-blue-600 text-white shadow-lg shadow-blue-500/20" : "bg-zinc-100 border border-zinc-200 text-zinc-500"
+              )}>
+                {r.sender_type === "ADMIN" ? "S" : "U"}
+              </div>
+              <div className={cn("space-y-1", r.sender_type === "ADMIN" ? "items-end" : "")}>
+                <div className={cn("p-4 rounded-2xl",
+                   r.sender_type === "ADMIN" 
+                    ? "bg-zinc-900 text-white rounded-tr-none" 
+                    : "bg-zinc-50 border border-zinc-200 rounded-tl-none"
+                )}>
+                  <p className="text-sm leading-relaxed">{r.message}</p>
+                </div>
+                <p className="text-[10px] text-zinc-400 font-bold px-1">
+                  {r.sender_type === "ADMIN" ? "Orivo Support" : "You"} · {r.createdAt?.toDate ? r.createdAt.toDate().toLocaleTimeString() : 'Just now'}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-2 p-1 bg-zinc-50 border border-zinc-200 rounded-2xl">
+          <textarea
+            placeholder="Type your message..."
+            value={replyText}
+            onChange={e => setReplyText(e.target.value)}
+            className="flex-1 bg-transparent border-0 px-4 py-3 text-sm resize-none outline-none"
+            rows={1}
+          />
+          <Button onClick={sendReply} disabled={sending || !replyText.trim()} className="rounded-xl h-auto px-4 bg-zinc-900 hover:bg-zinc-800">
+            {sending ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Send className="w-4 h-4 text-white" />}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-xl font-bold text-zinc-900">Support Threads</h3>
+          <p className="text-sm text-zinc-500">Track and respond to your active tickets.</p>
+        </div>
+        <div className="w-10 h-10 rounded-2xl bg-zinc-50 border border-zinc-200 flex items-center justify-center text-zinc-400">
+          <Ticket className="w-5 h-5" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3">
+        {tickets.map(t => (
+          <button key={t.id} onClick={() => setSelected(t)}
+            className="group flex flex-col sm:flex-row sm:items-center justify-between p-5 bg-white border border-zinc-100 rounded-[2rem] hover:border-blue-200 hover:bg-blue-50/20 transition-all text-left shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-zinc-50 border border-zinc-100 flex items-center justify-center group-hover:bg-blue-600 transition-colors">
+                <MessageSquarePlus className="w-6 h-6 text-zinc-400 group-hover:text-white" />
+              </div>
+              <div>
+                <h4 className="font-bold text-zinc-900 group-hover:text-blue-600 transition-colors uppercase tracking-tight">{t.subject}</h4>
+                <p className="text-xs text-zinc-500 font-medium">#{t.id.slice(-6).toUpperCase()} · Created {t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString() : 'Just now'}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 mt-4 sm:mt-0">
+               <Badge
+                  className={cn(
+                    "text-[9px] font-bold uppercase tracking-wider border-0 px-3",
+                    t.status === "OPEN" ? "bg-rose-50 text-rose-600" :
+                    t.status === "IN_PROGRESS" ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600"
+                  )}
+                >
+                  {t.status.replace("_", " ")}
+                </Badge>
+                <div className="w-8 h-8 rounded-full bg-zinc-50 flex items-center justify-center text-zinc-300 group-hover:text-blue-400 transition-colors">
+                  <ArrowUpRight className="w-4 h-4" />
+                </div>
+            </div>
+          </button>
+        ))}
+
+        {tickets.length === 0 && (
+          <div className="py-20 text-center border-2 border-dashed border-zinc-100 rounded-[3rem]">
+            <HelpCircle className="w-10 h-10 text-zinc-200 mx-auto mb-4" />
+            <h4 className="text-zinc-400 font-bold uppercase tracking-[0.2em] text-xs">No active tickets</h4>
+            <p className="text-zinc-500 text-[10px] mt-2">Need help? Submit a new ticket from the Contact tab.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN EXPORT
 // ─────────────────────────────────────────────────────────────────────────────
@@ -686,6 +863,7 @@ const SECTIONS: {
   { id: "help",     label: "Help Center",            icon: LifeBuoy },
   { id: "status",   label: "System Status",          icon: Activity },
   { id: "contact",  label: "Contact Support",        icon: Headphones },
+  { id: "my_tickets", label: "My Tickets",           icon: Ticket, accent: true },
 ];
 
 export default function Support({ section = "help" }: Props) {
@@ -704,6 +882,7 @@ export default function Support({ section = "help" }: Props) {
       case "help":     return <HelpSection />;
       case "status":   return <StatusSection />;
       case "contact":  return <ContactSection />;
+      case "my_tickets": return <TicketCenter />;
       default:         return <HelpSection />;
     }
   };
