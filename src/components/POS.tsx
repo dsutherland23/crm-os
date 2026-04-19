@@ -71,7 +71,7 @@ interface CartDiscount {
 
 export default function POS() {
   const { 
-    activeBranch, hasActiveTransaction, setHasActiveTransaction, 
+    activeBranch, setActiveBranch, hasActiveTransaction, setHasActiveTransaction, 
     formatCurrency, enterpriseId, branding, setPosSession, 
     posSession, clearSession, updateShiftStatus, logout,
     shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies 
@@ -598,8 +598,12 @@ export default function POS() {
               const existingStatus = (activeSessionSnap.docs[0].data().status || "ACTIVE") as "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING";
               setCurrentSessionId(sysId);
               toast.success(`Welcome back, ${selectedAdmin.name}`);
-              
-              setIsAuthorized(true);
+               const primaryBranch = selectedAdmin.branches?.[0];
+               if (primaryBranch && primaryBranch !== "all") {
+                 setActiveBranch(primaryBranch);
+               }
+               
+               setIsAuthorized(true);
               setPosSession({
                 staffId: selectedAdmin.id,
                 staffName: selectedAdmin.name,
@@ -610,11 +614,18 @@ export default function POS() {
                 statusSince: activeSessionSnap.docs[0].data().lastActivity || new Date().toISOString()
               });
             } else {
-              // Create new session
-              const docRef = await addDoc(collection(db, "pos_sessions"), {
-                staffId: selectedAdmin.id,
-                staffName: selectedAdmin.name,
-                branchId: activeBranch,
+               // Update global branch if user has a primary one
+               const primaryBranch = selectedAdmin.branches?.[0];
+               const targetBranch = (primaryBranch && primaryBranch !== "all") ? primaryBranch : activeBranch;
+               if (primaryBranch && primaryBranch !== "all") {
+                 setActiveBranch(primaryBranch);
+               }
+
+               // Create new session
+               const docRef = await addDoc(collection(db, "pos_sessions"), {
+                 staffId: selectedAdmin.id,
+                 staffName: selectedAdmin.name,
+                 branchId: targetBranch,
                 startTime: new Date().toISOString(),
                 status: "ACTIVE",
                 enterprise_id: enterpriseId

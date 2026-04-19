@@ -32,12 +32,16 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
       timer = setTimeout(async () => {
         const element = document.getElementById(scannerDivId);
         if (!element) {
-          console.error("Scanner div not found");
-          if (isComponentMounted) {
-            setIsInitializing(false);
-            setCameraError("Scanner container not found.");
+          console.error("Scanner div not found at initialization.");
+          // Attempt one immediate retry if not found
+          await new Promise(r => setTimeout(r, 200));
+          if (!document.getElementById(scannerDivId)) {
+            if (isComponentMounted) {
+              setIsInitializing(false);
+              setCameraError("Scanner container not found in DOM.");
+            }
+            return;
           }
-          return;
         }
 
         // Explicitly check for camera permissions first

@@ -817,14 +817,6 @@ export default function Auth() {
               <span className="flex items-center gap-1"><Shield className="w-3 h-3" /> SOC 2</span>
               <span>·</span><span>GDPR</span>
               <span>·</span><span>256-bit AES</span>
-              <span>·</span>
-              <button
-                type="button"
-                onClick={() => import("@/lib/auth-mock").then(m => m.setMockUser())}
-                className="text-zinc-300 hover:text-zinc-500 transition-colors"
-              >
-                Dev Bypass
-              </button>
             </div>
             <div className="text-center">
               <a

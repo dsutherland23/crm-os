@@ -229,7 +229,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       minimumFractionDigits: 2
     }).format(converted);
 
-    return `${formatted} ${currency}`;
+    return formatted;
   };
 
   return (

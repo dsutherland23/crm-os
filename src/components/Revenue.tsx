@@ -742,7 +742,7 @@ export default function Revenue() {
 
   return (
     <ScrollArea className="h-full">
-      <div className="p-6 lg:p-10 space-y-10 max-w-7xl mx-auto">
+      <div className="responsive-container">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-1">

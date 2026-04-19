@@ -130,11 +130,37 @@ function AppContent() {
   // ── Guard 1: Auth state not yet resolved ─────────────────────────
   if (user === undefined || (user && enterpriseLoading)) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 gap-4">
-        <RipplePulseLoader size="lg" />
-        <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest animate-pulse">
-          {user ? "Provisioning workspace…" : "Loading…"}
-        </p>
+      <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 relative overflow-hidden">
+        {/* Animated Background Gradients */}
+        <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-blue-600/10 rounded-full blur-[140px] animate-pulse" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse" />
+        
+        <div className="relative z-10 flex flex-col items-center gap-8">
+          <div className="relative">
+            <RipplePulseLoader size="lg" hideLogo={true} />
+            <div className="absolute inset-0 flex items-center justify-center z-20">
+              <span className="text-zinc-950 font-black text-[11px] uppercase tracking-[0.2em] translate-x-[0.1em] animate-in fade-in zoom-in duration-1000">
+                ORIVO
+              </span>
+            </div>
+          </div>
+          
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.3em] ml-[0.3em]">
+              {user ? "Provisioning Workspace" : "Initializing Engine"}
+            </p>
+            <div className="w-32 h-[1px] bg-zinc-800 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 w-1/3 animate-[progress_2s_ease-in-out_infinite]" />
+            </div>
+          </div>
+        </div>
+
+        <style dangerouslySetInnerHTML={{ __html: `
+          @keyframes progress {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(300%); }
+          }
+        `}} />
       </div>
     );
   }
@@ -169,21 +195,21 @@ function AppContent() {
             </p>
           </div>
           <div className="space-y-3">
-            <Button
-              variant="outline"
+            <Button 
+              variant="outline" 
               className="w-full h-12 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-all"
               onClick={() => window.location.reload()}
             >
               Retry
             </Button>
+            <Button 
+              variant="ghost" 
+              className="w-full text-zinc-400 text-xs font-medium"
+              onClick={() => auth.signOut()}
+            >
+              Sign Out
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            className="w-full text-zinc-400 text-xs font-medium"
-            onClick={() => auth.signOut()}
-          >
-            Sign Out
-          </Button>
         </Card>
       </div>
     );
@@ -202,7 +228,7 @@ function AppContent() {
       <div className="lg:pl-72 flex flex-col h-screen">
         <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} />
 
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto">
           {renderContent()}
         </main>
       </div>

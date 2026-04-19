@@ -230,17 +230,37 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
           </div>
 
           {/* Navigation */}
-          <ScrollArea className="flex-1 px-4">
+          <div className="flex-1 px-4 overflow-y-auto overscroll-contain transition-all duration-300 hide-scrollbar scroll-smooth">
             <div className="space-y-6 py-4">
               <div>
                 <p className="px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-4">Main Menu</p>
                 <nav className="space-y-1">
                   {menuItems.map((item) => {
-                    const isLocked = isStandardSession && !STANDARD_ALLOWED.includes(item.id) && !grantedOverrides.includes(item.id);
+                    const isExecutive = posSession?.payGrade === "EXECUTIVE";
+                    const isSupervisor = posSession?.payGrade === "SUPERVISOR";
+                    
+                    const isLocked = (() => {
+                      if (isExecutive) return false;
+                      if (grantedOverrides.includes(item.id)) return false;
+                      
+                      // System is Executive ONLY
+                      if (item.id === "settings") return true;
+                      
+                      // Supervisor gets everything else
+                      if (isSupervisor) return false;
+                      
+                      // Standard is limited to core modules
+                      if (isStandardSession) return !STANDARD_ALLOWED.includes(item.id);
+                      
+                      return false;
+                    })();
+
+                    const requiredGrade = item.id === "settings" ? "EXECUTIVE" : "SUPERVISOR";
+
                     return (
                       <button
                         key={item.id}
-                        title={isLocked ? `${item.label} — Requires SUPERVISOR grade or above` : undefined}
+                        title={isLocked ? `${item.label} — Requires ${requiredGrade} grade or above` : undefined}
                         onClick={() => {
                           if (isLocked) {
                             setAccessPrompt({ itemLabel: item.label, targetTab: item.id });
@@ -269,7 +289,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                           <div className="relative">
                             <Lock className="w-3 h-3 text-zinc-700" />
                             <div className="absolute right-6 top-1/2 -translate-y-1/2 w-max max-w-[160px] px-2.5 py-1.5 bg-zinc-950 text-white text-[10px] font-bold rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-50 border border-zinc-800 scale-90 group-hover:scale-100 origin-right">
-                              Requires SUPERVISOR+
+                              Requires {requiredGrade}+
                               <div className="absolute right-[-4px] top-1/2 -translate-y-1/2 w-2 h-2 bg-zinc-950 border-r border-t border-zinc-800 rotate-45" />
                             </div>
                           </div>
@@ -353,7 +373,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
               </div>
 
             </div>
-          </ScrollArea>
+          </div>
 
           {/* Supervisor Override Dialog */}
           <Dialog open={!!accessPrompt} onOpenChange={(open) => { if (!open) { setAccessPrompt(null); setOverridePin(""); setOverrideError(""); } }}>
@@ -362,11 +382,13 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                 <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-amber-200 flex items-center justify-center text-amber-600 mb-4">
                   <Lock className="w-6 h-6" />
                 </div>
-                <DialogTitle className="text-xl font-bold text-zinc-900">Supervisor Required</DialogTitle>
+                <DialogTitle className="text-xl font-bold text-zinc-900">
+                  {accessPrompt?.targetTab === "settings" ? "Executive Access Required" : "Supervisor Required"}
+                </DialogTitle>
                 <DialogDescription className="text-sm text-zinc-500 mt-1">
-                  <strong className="text-zinc-700">{accessPrompt?.itemLabel}</strong> requires SUPERVISOR or EXECUTIVE grade access.
+                  <strong className="text-zinc-700">{accessPrompt?.itemLabel}</strong> requires {accessPrompt?.targetTab === "settings" ? "EXECUTIVE" : "SUPERVISOR or EXECUTIVE"} grade access.
                   <br /><br />
-                  Enter a supervisor PIN to override and continue.
+                  Enter an authorized PIN to override and continue.
                 </DialogDescription>
               </div>
               <div className="p-6 space-y-5">
