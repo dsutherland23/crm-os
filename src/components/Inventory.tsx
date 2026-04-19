@@ -160,15 +160,40 @@ export default function Inventory() {
 
   // ── NEURAL LENS BINDING ──────────────────────────────────────
   useEffect(() => {
+    let playTimeout: NodeJS.Timeout;
     if (cameraStream && videoRef.current && hasCameraAccess) {
       const video = videoRef.current;
       video.srcObject = cameraStream;
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(err => console.warn("Lens auto-play deferred:", err));
+      
+      const attemptPlay = () => {
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(err => {
+            console.warn("Lens auto-play deferred, retrying...", err);
+            playTimeout = setTimeout(attemptPlay, 1000);
+          });
+        }
+      };
+      
+      attemptPlay();
+    }
+    return () => clearTimeout(playTimeout);
+  }, [cameraStream, hasCameraAccess, isCameraOpen]);
+
+  // ── FLASHLIGHT / TORCH ENGINE ────────────────────────────────
+  useEffect(() => {
+    if (cameraStream && cameraMode === 'environment') {
+      const track = cameraStream.getVideoTracks()[0];
+      if (track) {
+        const capabilities = track.getCapabilities() as any;
+        if (capabilities.torch) {
+          track.applyConstraints({
+            advanced: [{ torch: flashlight }]
+          } as any).catch(err => console.warn("Torch failed:", err));
+        }
       }
     }
-  }, [cameraStream, hasCameraAccess, isCameraOpen]);
+  }, [flashlight, cameraStream, cameraMode]);
 
   // ── NEURAL LENS ENGINE (2026) ──────────────────────────────────
   useEffect(() => {
@@ -516,14 +541,25 @@ export default function Inventory() {
     
     if (product) {
       // Response Engine: product_found
+      if (navigator.vibrate) navigator.vibrate(50); // Haptic Feedback
       toast.success(`Found product: ${product.name}`);
       setSearchTerm(data);
-      setIsScannerOpen(false); // Close scanner on successful find
+      setIsScannerOpen(false); 
+      // If editing, we might want to stay here, but usually, we jump to search
     } else {
       // Response Engine: product_not_found
-      toast.info(`New ${type} detected: ${data}. Opening create product modal.`);
-      setIsScannerOpen(false); // Close scanner before opening registration sheet
-      openProductSheet(null, { barcode: data });
+      setIsScannerOpen(false); 
+
+      // IF SHEET IS ALREADY OPEN: Just populate the barcode field
+      if (isProductSheetOpen) {
+        if (navigator.vibrate) navigator.vibrate(70); // Distinct Haptic for New Product
+        setProductForm(prev => ({ ...prev, barcode: data }));
+        toast.success(`Populated Barcode: ${data}`);
+      } else {
+        // IF SHEET IS CLOSED: Open it with the barcode pre-filled
+        toast.info(`New ${type} detected: ${data}. Opening create product modal.`);
+        openProductSheet(null, { barcode: data });
+      }
     }
   };
 
@@ -1915,13 +1951,23 @@ export default function Inventory() {
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2 relative">
-                    <label className="text-xs font-bold text-zinc-500">Barcode</label>
-                    <Input 
-                      className="rounded-xl h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20" 
-                      value={productForm.barcode}
-                      onChange={(e) => setProductForm({...productForm, barcode: e.target.value})}
-                      placeholder="Scan or type..."
-                    />
+                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-tighter">Barcode</label>
+                    <div className="relative group">
+                      <Input 
+                        className="rounded-xl h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20 pr-12 transition-all" 
+                        value={productForm.barcode}
+                        onChange={(e) => setProductForm({...productForm, barcode: e.target.value})}
+                        placeholder="Scan or type..."
+                      />
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg h-10 w-10 text-blue-600 hover:bg-blue-50 transition-colors"
+                        onClick={() => setIsScannerOpen(true)}
+                      >
+                        <ScanLine className="w-4 h-4 animate-pulse group-hover:scale-110 transition-transform" />
+                      </Button>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500">SKU Code</label>
@@ -2360,14 +2406,32 @@ export default function Inventory() {
               </div>
             </div>
 
-            {/* Initialization Loader */}
+            {/* Initialization Loader & Manual Override */}
             {(!hasCameraAccess || isInitializing) && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 text-zinc-500 bg-black z-50">
                 <div className="relative">
                   <div className="absolute inset-0 blur-3xl bg-blue-600/20 rounded-full animate-pulse" />
                   <RefreshCw className="w-12 h-12 animate-spin relative z-10 text-blue-500/60" />
                 </div>
-                <p className="text-[9px] font-black uppercase tracking-[0.6em] text-zinc-500 animate-pulse">Initializing Neural Link</p>
+                <div className="flex flex-col items-center gap-4">
+                  <p className="text-[9px] font-black uppercase tracking-[0.6em] text-zinc-500 animate-pulse">
+                    {isInitializing ? "Initializing Neural Link" : "Lens Hardware Locked"}
+                  </p>
+                  {!isInitializing && (
+                    <Button 
+                      variant="outline" 
+                      className="rounded-full border-blue-500/30 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 px-8 font-bold text-[10px] uppercase tracking-widest h-9"
+                      onClick={() => {
+                        setIsInitializing(true);
+                        // Force re-trigger of effect
+                        setIsCameraOpen(false);
+                        setTimeout(() => setIsCameraOpen(true), 100);
+                      }}
+                    >
+                      Initialize Lens
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -2405,7 +2469,8 @@ export default function Inventory() {
                   if (!videoRef.current || !canvasRef.current || isCapturing) return;
                   setIsCapturing(true);
                   
-                  // Tacit Feedback
+                  // Tacit & Physical Haptic Feedback
+                  if (navigator.vibrate) navigator.vibrate([10, 30, 10]); // Multi-burst haptic
                   new Audio("https://assets.mixkit.co/active_storage/sfx/702/702-preview.mp3").play().catch(() => {});
 
                   const canvas = canvasRef.current;
@@ -2421,13 +2486,18 @@ export default function Inventory() {
                     try {
                       const { getStorage, ref, uploadBytes, getDownloadURL } = await import("@/lib/firebase");
                       const storageRef = ref(getStorage(), `products/neural_asset_${Date.now()}.jpg`);
-                      await uploadBytes(storageRef, blob);
+                      
+                      // Perform upload with specific metadata
+                      const metadata = { contentType: 'image/jpeg' };
+                      await uploadBytes(storageRef, blob, metadata);
+                      
                       const url = await getDownloadURL(storageRef);
                       setProductForm(prev => ({ ...prev, image_url: url }));
-                      toast.success("Asset Secured", { id: tid });
+                      toast.success("Asset Secured in Cloud", { id: tid });
                       setIsCameraOpen(false);
-                    } catch (err) {
-                      toast.error("Upload Failure", { id: tid });
+                    } catch (err: any) {
+                      console.error("Storage Error:", err);
+                      toast.error(`Upload Failed: ${err.message || 'Unknown Error'}`, { id: tid });
                     } finally {
                       setIsCapturing(false);
                     }

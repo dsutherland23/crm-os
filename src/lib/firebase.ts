@@ -57,17 +57,13 @@ export const deleteDoc = (ref: any) =>
 export const setDoc = (ref: any, data: any, options?: any) =>
   isMock() ? demoFs.mockUpdateDoc(ref, data) : fs.setDoc(ref, data, options);
 
-// Storage Stubs for Demo Mode
-export const getStorage = () => ({});
-export const ref = (storage: any, path: string) => ({ path });
-export const uploadBytes = async (ref: any, file: Blob | Uint8Array | ArrayBuffer) => {
-  if (isMock()) return { ref };
-  throw new Error("Real storage not configured in this turn");
-};
-export const getDownloadURL = async (ref: any) => {
-  if (isMock()) return `https://firebasestorage.googleapis.com/v0/b/mock/o/${encodeURIComponent(ref.path)}?alt=media`;
-  return "";
-};
+import * as storageFs from 'firebase/storage';
+
+// ── STORAGE ENGINE ──────────────────────────────────────────
+export const getStorage = () => storageFs.getStorage(app);
+export const ref = (storage: any, path: string) => storageFs.ref(storage, path);
+export const uploadBytes = (ref: any, data: any) => storageFs.uploadBytes(ref, data);
+export const getDownloadURL = (ref: any) => storageFs.getDownloadURL(ref);
 
 async function testConnection() {
   try {
