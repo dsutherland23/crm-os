@@ -164,6 +164,9 @@ export default function Inventory() {
       query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
         setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => { console.error("products:", err); setLoading(false); }
     );
 
     const unsubInventory = onSnapshot(
