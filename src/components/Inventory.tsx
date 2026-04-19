@@ -2239,14 +2239,14 @@ export default function Inventory() {
         }, 300);
       }
     }}>
-      <DialogContent className="max-w-2xl w-full p-0 overflow-hidden rounded-[3rem] border-none bg-black">
+      <DialogContent showCloseButton={false} className="max-w-2xl w-full p-0 overflow-hidden rounded-[3rem] border-none bg-black top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
         <div className="relative aspect-square w-full bg-zinc-950 flex items-center justify-center overflow-hidden">
           {hasCameraAccess ? (
             <video 
               ref={videoRef} 
               autoPlay 
               playsInline 
-              className="w-full h-full object-cover mirror"
+              className="w-full h-full object-cover"
             />
           ) : (
             <div className="flex flex-col items-center gap-4 text-zinc-500">

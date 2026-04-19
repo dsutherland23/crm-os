@@ -934,7 +934,7 @@ export default function CRM() {
 
   const AddCustomerDialog = (
     <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
-      <DialogContent className="rounded-3xl border-zinc-200 w-[95vw] max-w-5xl sm:max-w-4xl md:max-w-4xl lg:max-w-5xl max-h-[96vh] sm:max-h-[90vh] p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-[2%] sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
+      <DialogContent showCloseButton={false} className="rounded-3xl border-zinc-200 w-[95vw] max-w-5xl sm:max-w-4xl md:max-w-4xl lg:max-w-5xl max-h-[96vh] sm:max-h-[90vh] p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
         <DialogHeader className="px-6 py-4 sm:px-8 sm:py-6 border-b border-zinc-100 flex flex-row items-center justify-between sticky top-0 bg-white z-10 w-full relative flex-none">
           <div className="flex items-center gap-3">
             <UserPlus className="w-6 h-6 text-zinc-900" />
@@ -2181,7 +2181,7 @@ export default function CRM() {
 
           {/* Create Invoice Dialog */}
           <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
-            <DialogContent className="p-0 border-none bg-zinc-50 rounded-[2.5rem] sm:rounded-3xl w-full sm:max-w-[500px] h-[100dvh] sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+            <DialogContent showCloseButton={false} className="p-0 border-none bg-zinc-50 rounded-[2.5rem] sm:rounded-3xl w-full sm:max-w-[500px] h-[100dvh] sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col shadow-2xl top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
               <div className="bg-white px-6 py-4 border-b border-zinc-100 flex items-center justify-between flex-none">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-emerald-50 rounded-xl">
