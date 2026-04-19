@@ -33,7 +33,7 @@ import {
   TrendingUp, KeyRound, Ban, AlertOctagon, Menu, X, Pencil,
   UserCog, Send, MoreVertical, Check, Globe, Megaphone, Plus,
   ExternalLink, ArrowUpRight, Server, Command, Trash2, LifeBuoy, MessageSquare,
-  Sparkles, Star, ChevronRight,
+  Sparkles, Star,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
