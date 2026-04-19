@@ -65,7 +65,7 @@ interface Props {
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-const SHARE_URL = "https://orivo.app";
+const SHARE_URL = "https://orivocrm.pro";
 
 const SYSTEM_SERVICES = [
   { name: "Authentication", status: "operational", latency: "12ms" },
@@ -362,7 +362,7 @@ const PRIVACY_CONTENT = (
     <p><strong className="text-zinc-900">3. Data Isolation & Security</strong><br/>Every record is scoped to your unique <code className="bg-zinc-100 px-1 py-0.5 rounded text-xs font-mono">enterprise_id</code>. Firestore security rules enforce strict read/write isolation — no other tenant can access your data under any circumstances.</p>
     <p><strong className="text-zinc-900">4. Data Retention</strong><br/>Your data is retained for the lifetime of your account plus 90 days after deletion to support recovery requests. You may request immediate deletion by contacting our team.</p>
     <p><strong className="text-zinc-900">5. Your Rights</strong><br/>You have the right to access, correct, export, and delete your personal data at any time. Submit a request via the Contact Support form and we will respond within 48 hours.</p>
-    <p><strong className="text-zinc-900">6. Contact</strong><br/>For privacy inquiries: <a href="mailto:privacy@orivo.app" className="text-blue-600 underline">privacy@orivo.app</a></p>
+    <p><strong className="text-zinc-900">6. Contact</strong><br/>For privacy inquiries: <a href="mailto:privacy@orivocrm.pro" className="text-blue-600 underline">privacy@orivocrm.pro</a></p>
   </>
 );
 
@@ -599,8 +599,8 @@ function ContactSection() {
     <div className="space-y-6">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { icon: Mail, label: "Email Us", value: "support@orivo.app", href: "mailto:support@orivo.app" },
-          { icon: Phone, label: "Call Us", value: "+1 (888) 674-8600", href: "tel:+18886748600" },
+          { icon: Mail, label: "Email Us", value: "support@orivocrm.pro", href: "mailto:support@orivocrm.pro" },
+          { icon: Phone, label: "Call Us", value: "+1 (876) 255-4848", href: "tel:+18762554848" },
           { icon: Clock, label: "Response Time", value: "< 24 hours", href: null },
         ].map((c) => (
           <div key={c.label} className="flex items-center gap-3 p-4 bg-zinc-50 border border-zinc-200 rounded-2xl">

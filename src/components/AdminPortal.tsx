@@ -32,13 +32,15 @@ import {
   Download, ChevronDown, ChevronRight, Terminal, Database, UserX,
   TrendingUp, KeyRound, Ban, AlertOctagon, Menu, X, Pencil,
   UserCog, Send, MoreVertical, Check, Globe, Megaphone, Plus,
-  ExternalLink, ArrowUpRight, Server, Command, Trash2,
+  ExternalLink, ArrowUpRight, Server, Command, Trash2, LifeBuoy, MessageSquare,
+  Sparkles, Star, ChevronRight,
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 // ══════════════════════════════════════════════════════════════════════
 // TYPES
 // ══════════════════════════════════════════════════════════════════════
-type AdminTab = "dashboard" | "users" | "tenants" | "analytics" | "security" | "audit" | "config" | "admins";
+type AdminTab = "dashboard" | "users" | "tenants" | "analytics" | "security" | "audit" | "config" | "admins" | "support";
 
 interface AdminRecord {
   email: string;
@@ -91,6 +93,28 @@ interface AdminUserRecord {
   granted_by?: string;
 }
 
+interface FeedbackItem {
+  id: string;
+  type: "idea" | "bug" | "praise" | "other";
+  subject: string;
+  message: string;
+  rating: number;
+  user_email: string;
+  enterprise_id: string;
+  createdAt: any;
+}
+
+interface SupportTicket {
+  id: string;
+  category: string;
+  subject: string;
+  message: string;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  user_email: string;
+  enterprise_id: string;
+  createdAt: any;
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // NAV
 // ══════════════════════════════════════════════════════════════════════
@@ -101,6 +125,7 @@ const NAV: { id: AdminTab; label: string; icon: React.ElementType; superOnly?: b
   { id: "analytics",  label: "Analytics",     icon: BarChart3   },
   { id: "security",   label: "Security",      icon: ShieldAlert },
   { id: "audit",      label: "Audit Logs",    icon: FileText    },
+  { id: "support",    label: "Support Center",icon: LifeBuoy    },
   { id: "config",     label: "Config",        icon: Sliders     },
   { id: "admins",     label: "Admins",        icon: UserCog, superOnly: true },
 ];
@@ -393,6 +418,7 @@ function AdminShell({ user, record }: { user: User; record: AdminRecord }) {
           {tab === "audit"      && <AuditPane />}
           {tab === "config"     && <ConfigPane user={user} isSuperAdmin={isSuperAdmin} />}
           {tab === "admins"     && <AdminsPane user={user} />}
+          {tab === "support"    && <SupportPane />}
         </main>
       </div>
     </div>
@@ -1571,6 +1597,193 @@ function AdminsPane({ user }: { user: User }) {
           </Button>
         </div>
       </Modal>
+    </Wrap>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 9. SUPPORT CENTER (Support & Feedback Management)
+// ══════════════════════════════════════════════════════════════════════
+function SupportPane() {
+  const [subTab, setSubTab] = useState<"tickets" | "feedback">("tickets");
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [feedback, setFeedback] = useState<FeedbackItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+
+  useEffect(() => {
+    const qTickets = query(collection(db, "support_tickets"), orderBy("createdAt", "desc"), limit(50));
+    const qFeedback = query(collection(db, "feedback"), orderBy("createdAt", "desc"), limit(50));
+
+    const unsubT = onSnapshot(qTickets, (snap) => {
+      setTickets(snap.docs.map(d => ({ id: d.id, ...d.data() } as SupportTicket)));
+      setLoading(false);
+    });
+    const unsubF = onSnapshot(qFeedback, (snap) => {
+      setFeedback(snap.docs.map(d => ({ id: d.id, ...d.data() } as FeedbackItem)));
+    });
+
+    return () => { unsubT(); unsubF(); };
+  }, []);
+
+  const updateTicketStatus = async (id: string, status: string) => {
+    try {
+      await updateDoc(doc(db, "support_tickets", id), { status });
+      toast.success("Ticket updated.");
+      if (selectedTicket?.id === id) setSelectedTicket(prev => prev ? { ...prev, status: status as any } : null);
+    } catch (e) { toast.error("Failed to update status."); }
+  };
+
+  return (
+    <Wrap>
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/[0.05] pb-6">
+        <PageTitle title="Support Center" sub="Manage user tickets and feedback submissions." />
+        <div className="flex p-1 bg-zinc-900 border border-white/[0.05] rounded-xl shrink-0">
+          {[
+            { id: "tickets", label: "Support Tickets", icon: LifeBuoy },
+            { id: "feedback", label: "User Feedback", icon: MessageSquare },
+          ].map(t => (
+            <button key={t.id} onClick={() => setSubTab(t.id as any)}
+              className={cn("flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-black transition-all",
+                subTab === t.id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "text-zinc-600 hover:text-white"
+              )}>
+              <t.icon className="w-3.5 h-3.5" />
+              {t.label}
+              {t.id === "tickets" && tickets.filter(ti => ti.status === "OPEN").length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse ml-1" />
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {subTab === "tickets" ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="space-y-3">
+            <p className="text-[10px] font-black text-zinc-600 uppercase tracking-[0.2em] mb-4">Recent Tickets</p>
+            {tickets.map(t => (
+              <button key={t.id} onClick={() => setSelectedTicket(t)}
+                className={cn("w-full text-left p-4 rounded-2xl border transition-all group",
+                  selectedTicket?.id === t.id ? "bg-blue-600/10 border-blue-500/30" : "bg-zinc-900 border-white/[0.05] hover:border-zinc-700"
+                )}>
+                <div className="flex items-center justify-between gap-4 mb-2">
+                  <Badge className={cn("text-[9px] font-black uppercase tracking-widest",
+                    t.status === "OPEN" ? "bg-rose-500/20 text-rose-400" :
+                    t.status === "RESOLVED" ? "bg-emerald-500/20 text-emerald-400" : "bg-zinc-800 text-zinc-500"
+                  )}>{t.status}</Badge>
+                  <span className="text-[10px] text-zinc-600">
+                    {t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString() : 'Just now'}
+                  </span>
+                </div>
+                <p className="text-white text-sm font-bold truncate group-hover:text-blue-400 transition-colors">{t.subject}</p>
+                <div className="flex items-center gap-2 mt-2">
+                  <div className="w-4 h-4 rounded-full bg-zinc-800 flex items-center justify-center text-[8px] text-zinc-500 font-bold shrink-0">
+                    {t.user_email?.[0]?.toUpperCase()}
+                  </div>
+                  <p className="text-[10px] text-zinc-500 truncate">{t.user_email}</p>
+                </div>
+              </button>
+            ))}
+            {tickets.length === 0 && !loading && (
+              <div className="py-20 text-center border-2 border-dashed border-white/[0.03] rounded-3xl">
+                <LifeBuoy className="w-10 h-10 text-zinc-800 mx-auto mb-3" />
+                <p className="text-zinc-600 text-xs font-bold">No tickets yet.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="lg:sticky lg:top-6 space-y-6">
+            {selectedTicket ? (
+              <div className="bg-zinc-900 border border-white/[0.05] rounded-3xl overflow-hidden shadow-2xl">
+                <div className="p-6 border-b border-white/[0.05] flex items-center justify-between">
+                  <div>
+                    <Badge className="bg-blue-500/20 text-blue-400 text-[10px] uppercase font-black tracking-widest mb-1">
+                      {selectedTicket.category}
+                    </Badge>
+                    <h3 className="text-white font-black text-xl">{selectedTicket.subject}</h3>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => updateTicketStatus(selectedTicket.id, "RESOLVED")}
+                      className="border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 h-8 text-[10px] font-black">
+                      RESOLVE
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setSelectedTicket(null)}
+                      className="border-white/10 text-zinc-400 hover:text-white h-8 w-8 p-0">
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="p-6 space-y-6">
+                  <div className="p-4 bg-black/40 rounded-2xl border border-white/[0.03]">
+                    <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{selectedTicket.message}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-zinc-800/50 p-4 rounded-2xl border border-white/[0.03]">
+                      <p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest mb-1">Requester</p>
+                      <p className="text-white text-xs font-bold truncate">{selectedTicket.user_email}</p>
+                    </div>
+                    <div className="bg-zinc-800/50 p-4 rounded-2xl border border-white/[0.03]">
+                      <p className="text-[10px] font-black text-zinc-600 uppercase tracking-widest mb-1">Enterprise ID</p>
+                      <p className="text-blue-400 text-xs font-mono font-bold truncate">{selectedTicket.enterprise_id}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="h-[400px] flex flex-col items-center justify-center bg-zinc-900 border border-dashed border-white/[0.05] rounded-3xl text-zinc-700">
+                <div className="w-16 h-16 bg-white/[0.02] rounded-full flex items-center justify-center mb-4">
+                  <ChevronRight className="w-6 h-6" />
+                </div>
+                <p className="text-xs font-bold uppercase tracking-widest">Select a ticket to view details</p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {feedback.map(f => (
+            <div key={f.id} className="bg-zinc-900 border border-white/[0.05] p-5 rounded-3xl space-y-4 hover:border-zinc-700 transition-colors group">
+              <div className="flex items-center justify-between">
+                <div className={cn("p-2 rounded-xl border shrink-0",
+                  f.type === "bug" ? "bg-rose-500/10 border-rose-500/20 text-rose-400" :
+                  f.type === "idea" ? "bg-blue-500/10 border-blue-500/20 text-blue-400" :
+                  f.type === "praise" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" :
+                  "bg-zinc-800 border-zinc-700 text-zinc-400"
+                )}>
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="flex gap-0.5">
+                  {[1, 2, 3, 4, 5].map(s => (
+                    <Star key={s} className={cn("w-3 h-3", s <= f.rating ? "fill-amber-400 text-amber-400" : "text-zinc-800")} />
+                  ))}
+                </div>
+              </div>
+              <div>
+                <h4 className="text-white font-bold text-sm mb-1 group-hover:text-blue-400 transition-colors">{f.subject || "No Subject"}</h4>
+                <p className="text-zinc-500 text-xs leading-relaxed line-clamp-3">{f.message}</p>
+              </div>
+              <div className="pt-4 border-t border-white/[0.03] space-y-2">
+                <div className="flex items-center justify-between text-[9px] font-bold">
+                  <span className="text-zinc-600 uppercase tracking-widest">USER</span>
+                  <span className="text-zinc-400">{f.user_email}</span>
+                </div>
+                <div className="flex items-center justify-between text-[9px] font-bold">
+                  <span className="text-zinc-600 uppercase tracking-widest">DATE</span>
+                  <span className="text-zinc-400">
+                    {f.createdAt?.toDate ? f.createdAt.toDate().toLocaleDateString() : 'Recently'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+          {feedback.length === 0 && (
+            <div className="col-span-full py-24 text-center border-2 border-dashed border-white/[0.03] rounded-3xl">
+              <MessageSquare className="w-10 h-10 text-zinc-800 mx-auto mb-3" />
+              <p className="text-zinc-600 text-xs font-bold">No feedback received yet.</p>
+            </div>
+          )}
+        </div>
+      )}
     </Wrap>
   );
 }
