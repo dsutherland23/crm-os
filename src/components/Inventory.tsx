@@ -149,6 +149,14 @@ export default function Inventory() {
   const [hasCameraAccess, setHasCameraAccess] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
 
+  // Sync camera stream to video element whenever it's ready
+  useEffect(() => {
+    if (cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+      videoRef.current.play().catch(console.error);
+    }
+  }, [cameraStream, hasCameraAccess]);
+
   useEffect(() => {
     if (!enterpriseId) return;
 
@@ -156,9 +164,6 @@ export default function Inventory() {
       query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
         setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-        setLoading(false);
-      },
-      (err) => { console.error("products:", err); setLoading(false); }
     );
 
     const unsubInventory = onSnapshot(
@@ -207,7 +212,7 @@ export default function Inventory() {
     return () => window.removeEventListener("app:action", handleAction);
   }, []);
 
-  const handlePurchaseOrder = async () => {
+    const handlePurchaseOrder = async () => {
     if (!newPO.supplierId || newPO.items.some(i => !i.productId || i.qty <= 0)) {
       toast.error("Please select a supplier and add valid products.");
       return;
@@ -2194,21 +2199,41 @@ export default function Inventory() {
           cameraStream.getTracks().forEach(track => track.stop());
           setCameraStream(null);
         }
+        setHasCameraAccess(false);
         setIsCameraOpen(false);
       } else {
-        navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'environment', width: { ideal: 1024 }, height: { ideal: 1024 } } 
-        })
-        .then(stream => {
-          setCameraStream(stream);
-          if (videoRef.current) videoRef.current.srcObject = stream;
-          setHasCameraAccess(true);
-        })
-        .catch(err => {
-          console.error(err);
-          toast.error("Could not access camera");
-          setIsCameraOpen(false);
-        });
+        setIsCameraOpen(true);
+        // Delay slightly to ensure Dialog animation is finished and DOM is ready
+        setTimeout(() => {
+          const constraints = { 
+            video: { 
+              facingMode: 'environment', 
+              width: { ideal: 2048 }, 
+              height: { ideal: 2048 },
+              aspectRatio: 1
+            } 
+          };
+          
+          navigator.mediaDevices.getUserMedia(constraints)
+          .then(stream => {
+            setCameraStream(stream);
+            setHasCameraAccess(true);
+          })
+          .catch(err => {
+            console.warn("Environment camera failed, trying fallback:", err);
+            // Fallback for devices without environment camera or permission issues
+            navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => {
+              setCameraStream(stream);
+              setHasCameraAccess(true);
+            })
+            .catch(fallbackErr => {
+              console.error("Critical camera failure:", fallbackErr);
+              toast.error("Lens initialization failed. Please check camera permissions.");
+              setIsCameraOpen(false);
+            });
+          });
+        }, 300);
       }
     }}>
       <DialogContent className="max-w-2xl w-full p-0 overflow-hidden rounded-[3rem] border-none bg-black">

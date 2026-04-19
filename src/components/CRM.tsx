@@ -934,8 +934,8 @@ export default function CRM() {
 
   const AddCustomerDialog = (
     <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
-      <DialogContent className="rounded-3xl border-zinc-200 w-[95vw] max-w-5xl sm:max-w-4xl md:max-w-4xl lg:max-w-5xl max-h-[96vh] p-0 shadow-2xl flex flex-col bg-white overflow-hidden">
-        <DialogHeader className="px-8 py-6 border-b border-zinc-100 flex flex-row items-center justify-between sticky top-0 bg-white z-10 w-full relative">
+      <DialogContent className="rounded-3xl border-zinc-200 w-[95vw] max-w-5xl sm:max-w-4xl md:max-w-4xl lg:max-w-5xl max-h-[96vh] sm:max-h-[90vh] p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-[2%] sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
+        <DialogHeader className="px-6 py-4 sm:px-8 sm:py-6 border-b border-zinc-100 flex flex-row items-center justify-between sticky top-0 bg-white z-10 w-full relative flex-none">
           <div className="flex items-center gap-3">
             <UserPlus className="w-6 h-6 text-zinc-900" />
             <DialogTitle className="text-xl font-bold text-zinc-900">Add New Customer</DialogTitle>
@@ -945,8 +945,8 @@ export default function CRM() {
           </Button>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto min-h-0 bg-white">
-          <div className="p-8 space-y-8">
+        <div className="flex-1 overflow-y-auto min-h-0 bg-zinc-50/10">
+          <div className="p-6 sm:p-8 space-y-6 sm:space-y-8">
             
             {/* Customer Number & Type */}
             <div className="space-y-6">
@@ -1159,7 +1159,7 @@ export default function CRM() {
           </div>
         </div>
 
-        <DialogFooter className="px-8 py-5 bg-white border-t border-zinc-100 flex flex-row gap-4 flex-none">
+        <DialogFooter className="px-6 py-4 sm:px-8 sm:py-5 bg-white border-t border-zinc-100 flex flex-row gap-3 sm:gap-4 flex-none">
           <Button 
             className="flex-1 rounded-xl bg-[#2C2D33] text-white hover:bg-[#1E1F24] h-12 font-medium" 
             onClick={handleCreateCustomer}
@@ -2181,29 +2181,40 @@ export default function CRM() {
 
           {/* Create Invoice Dialog */}
           <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
-            <DialogContent className="rounded-3xl border-zinc-200 w-[95vw] sm:max-w-[500px] max-h-[96vh] p-0 overflow-hidden flex flex-col">
-              <DialogHeader className="p-4 md:p-6 border-b border-zinc-100 flex-none px-6 sm:px-8">
-                <DialogTitle className="text-xl md:text-2xl font-bold">Create Invoice</DialogTitle>
-                <DialogDescription className="text-xs">Generate a new billable document for {selectedCustomer.name}.</DialogDescription>
-              </DialogHeader>
-              <div className="flex-1 overflow-y-auto px-6 sm:px-8 py-4 sm:py-6 space-y-4 sm:space-y-6">
+            <DialogContent className="p-0 border-none bg-zinc-50 rounded-[2.5rem] sm:rounded-3xl w-full sm:max-w-[500px] h-[100dvh] sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col shadow-2xl">
+              <div className="bg-white px-6 py-4 border-b border-zinc-100 flex items-center justify-between flex-none">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-50 rounded-xl">
+                    <FileText className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-lg font-bold text-zinc-900 leading-none">Draft Invoice</DialogTitle>
+                    <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-1">{selectedCustomer.name}</p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setIsInvoiceDialogOpen(false)} className="rounded-full text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100">
+                  <XIcon className="w-5 h-5" />
+                </Button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 scrollbar-hide">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Invoice Number</Label>
+                    <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Reference #</label>
                     <Input 
                       placeholder="INV-001" 
                       value={invoiceData.invoiceNumber}
                       onChange={(e) => setInvoiceData({...invoiceData, invoiceNumber: e.target.value})}
-                      className="rounded-xl h-11 sm:h-14 font-bold text-sm"
+                      className="rounded-2xl h-12 bg-white border-zinc-200 focus:ring-4 focus:ring-emerald-500/10 transition-all font-mono text-sm"
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-zinc-500">Status</Label>
+                    <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Ledger Status</label>
                     <Select value={invoiceData.status} onValueChange={(v) => setInvoiceData({...invoiceData, status: v})}>
-                      <SelectTrigger className="rounded-xl h-11 sm:h-14 text-sm">
-                        <SelectValue placeholder="Select status" />
+                      <SelectTrigger className="rounded-2xl h-12 bg-white border-zinc-200 text-sm font-medium">
+                        <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="rounded-xl">
+                      <SelectContent className="rounded-2xl">
                         <SelectItem value="DRAFT">Draft</SelectItem>
                         <SelectItem value="UNPAID">Unpaid</SelectItem>
                         <SelectItem value="PAID">Paid</SelectItem>
@@ -2212,10 +2223,11 @@ export default function CRM() {
                     </Select>
                   </div>
                 </div>
+
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Invoice Amount ($)</Label>
-                  <div className="relative">
-                    <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                  <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Billable Amount ($)</label>
+                  <div className="relative group">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-zinc-400 group-focus-within:text-emerald-600 transition-colors">$</div>
                     <Input 
                       type="number"
                       step="0.01"
@@ -2223,40 +2235,50 @@ export default function CRM() {
                       placeholder="0.00" 
                       value={invoiceData.amount}
                       onChange={(e) => setInvoiceData({...invoiceData, amount: e.target.value})}
-                      className="rounded-xl h-11 sm:h-14 pl-10 text-base sm:text-lg font-bold"
+                      className="rounded-2xl h-16 pl-10 text-xl font-bold bg-white border-zinc-200 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all"
                     />
                   </div>
                 </div>
+
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Description</Label>
+                  <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Document Objective</label>
                   <Textarea 
-                    placeholder="Enter details..." 
+                    placeholder="Enter billable items or service description..." 
                     value={invoiceData.description}
                     onChange={(e) => setInvoiceData({...invoiceData, description: e.target.value})}
-                    className="rounded-xl min-h-[80px] sm:min-h-[100px] text-sm resize-none"
+                    className="rounded-2xl min-h-[120px] p-4 bg-white border-zinc-200 focus:ring-4 focus:ring-emerald-500/10 text-sm resize-none"
                   />
                 </div>
+
                 <div className="space-y-2">
-                  <Label className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Due Date</Label>
+                  <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Maturity Date</label>
                   <Input 
                     type="date"
                     min={new Date().toISOString().split('T')[0]}
                     value={invoiceData.dueDate}
                     onChange={(e) => setInvoiceData({...invoiceData, dueDate: e.target.value})}
-                    className="rounded-xl h-11 sm:h-12 text-sm"
+                    className="rounded-2xl h-12 bg-white border-zinc-200 font-medium"
                   />
                 </div>
               </div>
-              <DialogFooter className="p-4 sm:p-8 border-t border-zinc-100 flex-none px-6 sm:px-8">
+
+              <div className="p-6 bg-white/80 backdrop-blur-xl border-t border-zinc-100 flex-none px-8">
                 <Button 
-                  className="w-full rounded-xl bg-emerald-600 text-white h-12 sm:h-14 font-bold shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 text-xs sm:text-sm"
+                  className="w-full rounded-2xl bg-emerald-600 text-white h-14 font-bold shadow-2xl shadow-emerald-600/30 hover:bg-emerald-700 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-3"
                   onClick={handleCreateInvoice}
                   disabled={isSubmittingInvoice}
                 >
-                  {isSubmittingInvoice ? <Loader2 className="w-5 h-5 animate-spin" /> : <FileText className="w-5 h-5 mr-2" />}
-                  Generate & Send Invoice
+                  {isSubmittingInvoice ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <>
+                      <FileText className="w-5 h-5" />
+                      <span>Generate & Secure Invoice</span>
+                    </>
+                  )}
                 </Button>
-              </DialogFooter>
+                <p className="text-[9px] text-zinc-400 font-medium text-center mt-3 uppercase tracking-widest">Sent via Automated Finance Engine</p>
+              </div>
             </DialogContent>
           </Dialog>
 
