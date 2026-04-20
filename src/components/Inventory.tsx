@@ -92,7 +92,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
 
-import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, where, orderBy, addDoc, updateDoc, doc, serverTimestamp, deleteDoc } from "@/lib/firebase";
+import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, where, orderBy, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, getStorage, ref, uploadBytes, getDownloadURL } from "@/lib/firebase";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AreaChart, Area, LineChart, Line, BarChart, Bar, Legend, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
@@ -123,7 +123,20 @@ export default function Inventory() {
   const [isBatchDeletingMovements, setIsBatchDeletingMovements] = useState(false);
   const [isBatchDeletingSuppliers, setIsBatchDeletingSuppliers] = useState(false);
   
-  const initialProductState = { name: "", barcode: "", sku: "", category: "", price: 0, cost: 0, markup: 0, minStock: 10, image_url: "" };
+  const initialProductState = {
+    name: "",
+    category: "",
+    sku: "",
+    barcode: "",
+    cost: 0,
+    price: 0,
+    markup: 30,
+    minStock: 5,
+    image_url: "",
+    initialStock: 0,
+    description: "",
+    status: "ACTIVE"
+  };
   const [productForm, setProductForm] = useState(initialProductState);
   
   const [newSupplier, setNewSupplier] = useState({ name: "", contact: "", email: "", phone: "", status: "ACTIVE" });
@@ -155,6 +168,8 @@ export default function Inventory() {
   const [hasCameraAccess, setHasCameraAccess] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
+  const [isFlashActive, setIsFlashActive] = useState(false);
   const [cameraMode, setCameraMode] = useState<'environment' | 'user'>('environment');
   const [flashlight, setFlashlight] = useState(false);
 
@@ -571,7 +586,10 @@ export default function Inventory() {
         cost: cost,
         markup: markup,
         minStock: product.min_stock || product.min_stock_level || 10,
-        image_url: product.image_url || ""
+        image_url: product.image_url || "",
+        initialStock: 0,
+        description: product.description || "",
+        status: product.status || "ACTIVE"
       });
     } else {
       setEditingProductId(null);
@@ -825,7 +843,7 @@ export default function Inventory() {
         await addDoc(collection(db, "inventory"), {
           product_id: docRef.id,
           branch_id: activeBranch === "all" ? (branches[0]?.id || "main") : activeBranch,
-          stock: 0,
+          stock: productForm.initialStock || 0,
           enterprise_id: enterpriseId
         });
         toast.success("Product created successfully!");
@@ -1372,12 +1390,16 @@ export default function Inventory() {
                       </TableCell>
                       <TableCell className="py-4">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-zinc-100 rounded-xl flex items-center justify-center text-zinc-400">
-                            <Box className="w-5 h-5" />
+                          <div className="w-12 h-12 rounded-xl border border-zinc-100 bg-zinc-50 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
+                            {item.image_url ? (
+                              <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <Box className="w-5 h-5 text-zinc-300" />
+                            )}
                           </div>
                           <div>
-                            <p className="font-bold text-zinc-900">{item.name}</p>
-                            <p className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">{item.sku}</p>
+                            <p className="font-bold text-zinc-900 leading-tight">{item.name}</p>
+                            <p className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider mt-1">{item.sku}</p>
                           </div>
                         </div>
                       </TableCell>
@@ -1876,17 +1898,48 @@ export default function Inventory() {
                           const file = e.target.files?.[0];
                           if (!file) return;
                           
-                          const tid = toast.loading("Uploading...");
+                          const tid = toast.loading("Optimizing & Uploading...");
                           try {
-                            const { getStorage, ref, uploadBytes, getDownloadURL } = await import("@/lib/firebase");
-                            const storage = getStorage();
-                            const storageRef = ref(storage, `products/${Date.now()}_${file.name}`);
-                            await uploadBytes(storageRef, file);
+                            // High-speed compression
+                            const img = new Image();
+                            const reader = new FileReader();
+
+                            const blob: Blob = await new Promise((resolve, reject) => {
+                              reader.onload = (ev) => {
+                                img.src = ev.target?.result as string;
+                                img.onload = () => {
+                                  const canvas = document.createElement("canvas");
+                                  const MAX_SIZE = 640;
+                                  let width = img.width;
+                                  let height = img.height;
+                                  if (width > height) {
+                                    if (width > MAX_SIZE) {
+                                      height *= MAX_SIZE / width;
+                                      width = MAX_SIZE;
+                                    }
+                                  } else {
+                                    if (height > MAX_SIZE) {
+                                      width *= MAX_SIZE / height;
+                                      height = MAX_SIZE;
+                                    }
+                                  }
+                                  canvas.width = width;
+                                  canvas.height = height;
+                                  const ctx = canvas.getContext("2d");
+                                  ctx?.drawImage(img, 0, 0, width, height);
+                                  canvas.toBlob((b) => b ? resolve(b) : reject("Err"), "image/jpeg", 0.7);
+                                };
+                              };
+                              reader.readAsDataURL(file);
+                            });
+
+                            const storageRef = ref(getStorage(), `products/manual_${Date.now()}.jpg`);
+                            await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
                             const url = await getDownloadURL(storageRef);
                             setProductForm(prev => ({ ...prev, image_url: url }));
-                            toast.success("Uploaded", { id: tid });
+                            toast.success("Image optimized and synced", { id: tid });
                           } catch (err) {
-                            toast.error("Failed", { id: tid });
+                            toast.error("Process failed", { id: tid });
                           }
                         }}
                       />
@@ -1963,12 +2016,32 @@ export default function Inventory() {
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500">SKU Code</label>
-                    <Input 
-                      className="rounded-xl h-11 sm:h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20" 
-                      value={productForm.sku}
-                      onChange={(e) => setProductForm({...productForm, sku: e.target.value})}
-                      placeholder="e.g. FUR-01"
-                    />
+                    <div className="relative group">
+                      <Input 
+                        className="rounded-xl h-11 sm:h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20 pr-10" 
+                        value={productForm.sku}
+                        onChange={(e) => setProductForm({...productForm, sku: e.target.value})}
+                        placeholder="e.g. FUR-01"
+                      />
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-indigo-500 hover:bg-indigo-50 rounded-lg"
+                        onClick={() => {
+                          if (!productForm.name) {
+                            toast.error("Enter a product name first");
+                            return;
+                          }
+                          const prefix = (productForm.category || "GEN").substring(0, 3).toUpperCase();
+                          const mid = productForm.name.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 3);
+                          const random = Math.floor(100 + Math.random() * 900);
+                          setProductForm({...productForm, sku: `${prefix}-${mid}-${random}`});
+                          toast.success("SKU Generated");
+                        }}
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1977,9 +2050,37 @@ export default function Inventory() {
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-emerald-600 mb-4 border-b border-zinc-200/50 pb-2">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Pricing & Rules</span>
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Pricing & Inventory</span>
                 </div>
                 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                   <div className="space-y-2">
+                    <label className="text-xs font-bold text-blue-600">Initial Stock Quantity <span className="text-blue-400 opacity-50 text-[10px]">(Global)</span></label>
+                    <div className="relative">
+                      <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
+                      <Input 
+                        type="number"
+                        min="0"
+                        className="rounded-xl h-12 bg-blue-50/30 border-blue-100 font-bold focus:ring-2 focus:ring-blue-500/20 pl-11" 
+                        value={productForm.initialStock || ""}
+                        onChange={(e) => setProductForm({...productForm, initialStock: parseInt(e.target.value) || 0})}
+                        placeholder="e.g. 100"
+                        disabled={!!editingProductId} // Direct stock management usually handled via Movements for existing products
+                      />
+                    </div>
+                  </div>
+                   <div className="space-y-2">
+                    <label className="text-xs font-bold text-zinc-500">Stock Alert Threshold</label>
+                    <Input 
+                      type="number"
+                      min="1"
+                      className="rounded-xl h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-amber-500/20" 
+                      value={productForm.minStock || ""}
+                      onChange={(e) => setProductForm({...productForm, minStock: parseInt(e.target.value) || 0})}
+                    />
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-zinc-500">Cost Price</label>
@@ -2327,6 +2428,41 @@ export default function Inventory() {
               muted 
               className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
             />
+            
+             <AnimatePresence>
+              {isFlashActive && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 bg-white z-[60] pointer-events-none"
+                  transition={{ duration: 0.1 }}
+                />
+              )}
+            </AnimatePresence>
+
+            {/* Smart Context HUD */}
+            <div className="absolute bottom-6 left-6 right-6 flex flex-col gap-4 z-50">
+               <motion.div 
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                className="p-4 bg-black/40 backdrop-blur-3xl rounded-3xl border border-white/10 flex items-center justify-between"
+               >
+                  <div className="flex items-center gap-4">
+                     <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                        <Package className="w-6 h-6 text-zinc-400" />
+                     </div>
+                     <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-0.5">Active Subject</p>
+                        <h3 className="text-sm font-bold text-white truncate max-w-[150px] sm:max-w-xs">{productForm.name || "Untitled Product"}</h3>
+                     </div>
+                  </div>
+                  <div className="text-right">
+                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-0.5">Retail Index</p>
+                     <p className="text-sm font-black text-emerald-400">${productForm.price || "0.00"}</p>
+                  </div>
+               </motion.div>
+            </div>
 
             {/* Status Feedback */}
             {(!hasCameraAccess || isInitializing) && (
@@ -2380,16 +2516,32 @@ export default function Inventory() {
                   <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Stable</span>
                </div>
                <div className="w-px h-2.5 bg-white/10" />
+            </div>
             {/* Primary Actions */}
             <div className="w-full flex items-center justify-between max-w-sm">
                {/* Gallery Preview */}
-               <div className="flex flex-col items-center gap-2">
-                  <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 overflow-hidden shadow-2xl ring-1 ring-white/5">
-                    {productForm.image_url ? (
-                      <img src={productForm.image_url} className="w-full h-full object-cover" />
-                    ) : <ImageIcon className="w-4 h-4 text-white/10" />}
-                  </div>
-                  <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">Assets</span>
+               <div className="flex items-center gap-4">
+                <div className="flex -space-x-3 overflow-hidden">
+                  {capturedImages.slice(0, 3).map((img, i) => (
+                    <motion.div
+                      key={img}
+                      initial={{ scale: 0, x: -10 }}
+                      animate={{ scale: 1, x: 0 }}
+                      className="w-10 h-10 rounded-lg border border-white/20 bg-zinc-900 overflow-hidden ring-2 ring-black"
+                    >
+                      <img src={img} className="w-full h-full object-cover opacity-80" />
+                    </motion.div>
+                  ))}
+                  {capturedImages.length === 0 && (
+                    <div className="w-10 h-10 rounded-lg border border-white/5 bg-white/5 flex items-center justify-center">
+                      <ImageIcon className="w-4 h-4 text-white/10" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-[7px] font-bold text-zinc-500 uppercase tracking-widest">Captured</span>
+                  <span className="text-xs font-black text-white">{capturedImages.length}</span>
+                </div>
                </div>
 
                {/* Shutter Button */}
@@ -2404,41 +2556,72 @@ export default function Inventory() {
 
                   const canvas = canvasRef.current;
                   const video = videoRef.current;
-                  canvas.width = video.videoWidth;
-                  canvas.height = video.videoHeight;
-                  const ctx = canvas.getContext('2d');
-                  ctx?.drawImage(video, 0, 0);
+
+                  // High-speed mode: 640px optimized for thumbnails
+                  const MAX_RES = 640;
+                  let width = video.videoWidth;
+                  let height = video.videoHeight;
+
+                  if (width > height) {
+                    if (width > MAX_RES) {
+                      height *= MAX_RES / width;
+                      width = MAX_RES;
+                    }
+                  } else {
+                    if (height > MAX_RES) {
+                      width *= MAX_RES / height;
+                      height = MAX_RES;
+                    }
+                  }
+
+                  canvas.width = width;
+                  canvas.height = height;
+                  const ctx = canvas.getContext('2d', { alpha: false });
+                  if (ctx) {
+                    ctx.drawImage(video, 0, 0, width, height);
+                  }
 
                   canvas.toBlob(async (blob) => {
                     if (!blob) return;
                     
-                    const tid = toast.loading("Saving image...");
+                    // Visual feedback
+                    setIsFlashActive(true);
+                    setTimeout(() => setIsFlashActive(false), 100);
+
+                    // Immediate local feedback
+                    const localUrl = URL.createObjectURL(blob);
+                    setCapturedImages(prev => [localUrl, ...prev]);
+                    setIsCapturing(false);
+
+                    // Background Sync (Fire and Forget)
                     try {
-                      const { getStorage, ref, uploadBytes, getDownloadURL } = await import("@/lib/firebase");
-                      const storageRef = ref(getStorage(), `products/product_${Date.now()}.jpg`);
+                      const storageRef = ref(getStorage(), `products/burst_${Date.now()}.jpg`);
                       await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
                       const url = await getDownloadURL(storageRef);
                       setProductForm(prev => ({ ...prev, image_url: url }));
-                      toast.success("Saved successfully", { id: tid });
-                      setIsCameraOpen(false);
+                      toast.success("Image synced in background");
                     } catch (err: any) {
-                      toast.error(`Error: ${err.message}`, { id: tid });
-                    } finally {
-                      setIsCapturing(false);
+                      toast.error(`Background sync failed: ${err.message}`);
                     }
-                  }, 'image/jpeg', 0.85);
+                  }, 'image/jpeg', 0.6);
                 }}
                >
                  <div className="absolute inset-2 sm:inset-3 rounded-full border-2 border-white opacity-20 group-hover:opacity-100 transition-opacity" />
                  <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-white shadow-[0_0_30px_rgba(255,255,255,0.3)] ring-4 ring-black/20" />
                </Button>
 
-               {/* Mode Switcher */}
-               <div className="flex flex-col items-center gap-2">
-                  <div className="w-12 h-12 rounded-full border border-white/10 bg-white/5 flex items-center justify-center shadow-2xl">
-                     <Maximize2 className="w-4 h-4 text-white/30" />
-                  </div>
-                  <span className="text-[7px] font-black uppercase tracking-widest text-zinc-600">Focus</span>
+               {/* Finalize Action */}
+               <div className="flex flex-col items-center gap-3">
+                  <Button 
+                    className="w-12 h-12 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-2xl flex items-center justify-center p-0 transition-all active:scale-90 hover:scale-110"
+                    onClick={async () => {
+                      await handleSaveProduct();
+                      setIsCameraOpen(false);
+                    }}
+                  >
+                     <Check className="w-6 h-6" />
+                  </Button>
+                  <span className="text-[7px] font-black uppercase tracking-widest text-emerald-500">Finalize</span>
                </div>
             </div>
           </div>

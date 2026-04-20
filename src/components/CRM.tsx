@@ -94,7 +94,7 @@ import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
 import { motion, AnimatePresence } from "motion/react";
 
-import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, where, addDoc, serverTimestamp, deleteDoc } from "@/lib/firebase";
+import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, where, addDoc, serverTimestamp, deleteDoc, getStorage, ref, uploadBytes, getDownloadURL } from "@/lib/firebase";
 
 export default function CRM() {
   const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId } = useModules();
@@ -171,48 +171,63 @@ export default function CRM() {
   const [isSubmittingCustomer, setIsSubmittingCustomer] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error("Photo exceeds 10MB limit");
-        return;
-      }
+    if (!file) return;
 
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Photo exceeds 10MB limit");
+      return;
+    }
+
+    const tid = toast.loading("Optimizing profile photo...");
+    try {
+      // Resize image before upload to avoid large files
+      const img = new Image();
       const reader = new FileReader();
-      reader.onloadend = () => {
-        const img = new Image();
-        img.src = reader.result as string;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 400;
-          const MAX_HEIGHT = 400;
-          let width = img.width;
-          let height = img.height;
 
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
-          }
+      const blob: Blob = await new Promise((resolve, reject) => {
+        reader.onload = (event) => {
+          img.src = event.target?.result as string;
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            const MAX_SIZE = 640;
+            let width = img.width;
+            let height = img.height;
 
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-          setCustomerFormData({ ...customerFormData, photo_url: compressedDataUrl });
-          toast.success("Photo optimized and attached");
+            if (width > height) {
+              if (width > MAX_SIZE) {
+                height *= MAX_SIZE / width;
+                width = MAX_SIZE;
+              }
+            } else {
+              if (height > MAX_SIZE) {
+                width *= MAX_SIZE / height;
+                height = MAX_SIZE;
+              }
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            ctx?.drawImage(img, 0, 0, width, height);
+            canvas.toBlob((b) => b ? resolve(b) : reject("Blob conversion failed"), "image/jpeg", 0.8);
+          };
+          img.onerror = reject;
         };
-      };
-      reader.readAsDataURL(file);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const storageRef = ref(getStorage(), `customers/profiles/photo_${Date.now()}.jpg`);
+      await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+      const url = await getDownloadURL(storageRef);
+      
+      setCustomerFormData({ ...customerFormData, photo_url: url });
+      toast.success("Photo synchronized", { id: tid });
+    } catch (error: any) {
+      console.error(error);
+      toast.error("Process failed: " + error.message, { id: tid });
     }
   };
 
@@ -543,8 +558,6 @@ export default function CRM() {
     const toastId = toast.loading(`Uploading "${file.name}"...`);
 
     try {
-      const { getStorage, ref, uploadBytes, getDownloadURL, addDoc, collection, serverTimestamp } = await import("@/lib/firebase");
-      
       const storage = getStorage();
       const storageRef = ref(storage, `customers/${selectedCustomer.id}/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
