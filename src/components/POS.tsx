@@ -1044,8 +1044,9 @@ export default function POS() {
 
       {/* Cart Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 right-0 w-full sm:w-[420px] border-l border-zinc-200 bg-white flex flex-col shadow-2xl z-40 transition-transform duration-500 lg:relative lg:w-[420px] lg:translate-x-0 lg:shadow-xl",
-        isCartOpenOnMobile ? "translate-x-0" : "translate-x-full"
+        "fixed inset-y-0 right-0 w-full sm:w-[420px] border-l border-zinc-200 bg-white flex flex-col shadow-2xl z-40 transition-transform duration-500",
+        "md:translate-x-0 md:relative md:w-[400px] md:shadow-xl md:z-auto",
+        isCartOpenOnMobile ? "translate-x-0 shadow-2xl" : "translate-x-full md:translate-x-0"
       )}>
         <div className="p-6 lg:p-8 border-b border-zinc-100 space-y-4">
           <div className="flex items-center justify-between">
@@ -1055,7 +1056,7 @@ export default function POS() {
             </div>
             <div className="flex items-center gap-2">
               <Badge className="bg-blue-600 text-white border-none px-2 py-0.5 rounded-lg">{cart.length} items</Badge>
-              <Button variant="ghost" size="icon" className="lg:hidden" onClick={() => setIsCartOpenOnMobile(false)}>
+              <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsCartOpenOnMobile(false)}>
                 <X className="w-5 h-5" />
               </Button>
             </div>
@@ -1514,10 +1515,10 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
-      {/* Mobile Cart Toggle */}
+      {/* Mobile Cart Toggle - Moved up to avoid AI Copilot overlap */}
       <Button 
         className={cn(
-          "fixed bottom-6 right-6 w-14 h-14 rounded-full shadow-2xl z-30 lg:hidden bg-blue-600 text-white hover:bg-blue-700",
+          "fixed bottom-24 right-6 w-14 h-14 rounded-full shadow-2xl z-30 md:hidden bg-blue-600 text-white hover:bg-blue-700 hover:scale-110 active:scale-95 transition-all duration-300",
           isCartOpenOnMobile && "hidden"
         )}
         onClick={() => setIsCartOpenOnMobile(true)}
@@ -1525,7 +1526,7 @@ export default function POS() {
         <div className="relative">
           <ShoppingCart className="w-6 h-6" />
           {cart.length > 0 && (
-            <span className="absolute -top-2 -right-2 w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-blue-600">
+            <span className="absolute -top-2 -right-2 w-5 h-5 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white animate-in zoom-in">
               {cart.reduce((acc, curr) => acc + curr.quantity, 0)}
             </span>
           )}

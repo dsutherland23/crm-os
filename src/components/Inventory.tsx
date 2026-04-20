@@ -1,601 +1,386 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, 
-  Plus, 
-  Filter, 
-  ArrowUpDown, 
-  AlertTriangle, 
-  Package, 
-  TrendingUp, 
-  TrendingDown,
-  Sparkles,
-  History,
-  MoreHorizontal,
-  Box,
-  Layers,
-  BarChart3,
-  Warehouse,
-  MapPin,
-  ArrowRightLeft,
-  Truck,
-  FileText,
-  ChevronRight,
-  Download,
-  CheckCircle2,
-  Clock,
-  AlertCircle,
-  Zap,
-  ZapOff,
-  Maximize2,
-  ScanLine,
-  Info,
-  Percent,
-  Camera,
-  Image as ImageIcon,
-  Trash2,
-  Check,
-  X as XIcon,
-  RefreshCw,
-  Loader2
-} from "lucide-react";
-import BarcodeScanner from "./BarcodeScanner";
-import { Input } from "@/components/ui/input";
+  Plus, Search, Filter, Download, MoreHorizontal, Package, 
+  AlertTriangle, ArrowRightLeft, TrendingUp, Layers, Box, BarChart3,
+  ChevronRight, ArrowRight, CheckCircle2, AlertCircle, Truck, Clock, RefreshCw, Sparkles,
+  Camera, Image as ImageIcon, Scan, ScanLine, Check, Info, MoreVertical, X as XIcon, Zap, ZapOff, Maximize2, Zap as Flashlight, Loader2, Trash2, Users
+} from 'lucide-react';
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow 
 } from "@/components/ui/table";
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuTrigger 
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
+import {
+  Tabs, TabsContent, TabsList, TabsTrigger
 } from "@/components/ui/tabs";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogTrigger, 
-  DialogFooter,
-  DialogDescription 
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger
 } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetFooter,
-} from "@/components/ui/sheet";
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Legend
+} from 'recharts';
+import { 
+  db, 
+  collection, 
+  addDoc, 
+  getDocs, 
+  query, 
+  where, 
+  updateDoc, 
+  doc, 
+  deleteDoc, 
+  writeBatch,
+  getStorage,
+  ref,
+  uploadBytes,
+  getDownloadURL
+} from '@/lib/firebase';
+import { toast } from 'sonner';
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import BarcodeScanner from './BarcodeScanner';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useModules } from "@/context/ModuleContext";
 
-import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, where, orderBy, addDoc, updateDoc, doc, serverTimestamp, deleteDoc, getStorage, ref, uploadBytes, getDownloadURL } from "@/lib/firebase";
-
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { AreaChart, Area, LineChart, Line, BarChart, Bar, Legend, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer } from "recharts";
-import { motion, AnimatePresence } from "motion/react";
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+  }).format(amount);
+};
 
 export default function Inventory() {
-  const { activeBranch, formatCurrency, enterpriseId } = useModules();
-  const [activeTab, setActiveTab] = useState("stock");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [isTransferring, setIsTransferring] = useState(false);
-  const [transferData, setTransferData] = useState({ product: "", from: "main", to: "north", qty: 1 });
+  const { activeBranch, setActiveBranch, enterpriseId, formatCurrency } = useModules();
+  const [activeTab, setActiveTab] = useState('stock');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [products, setProducts] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
-  const [branches, setBranches] = useState<any[]>([]);
   const [movements, setMovements] = useState<any[]>([]);
-  const [suppliers, setSuppliers] = useState<any[]>([]);
-  const [isPurchaseOrderOpen, setIsPurchaseOrderOpen] = useState(false);
-  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
-  const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  
   const [isProductSheetOpen, setIsProductSheetOpen] = useState(false);
-  const [editingProductId, setEditingProductId] = useState<string | null>(null);
-  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
-  const [selectedMovements, setSelectedMovements] = useState<string[]>([]);
-  const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [isUpdateStockOpen, setIsUpdateStockOpen] = useState(false);
+  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
+  const [isPurchaseOrderOpen, setIsPurchaseOrderOpen] = useState(false);
   const [isBatchDeleting, setIsBatchDeleting] = useState(false);
   const [isBatchDeletingMovements, setIsBatchDeletingMovements] = useState(false);
   const [isBatchDeletingSuppliers, setIsBatchDeletingSuppliers] = useState(false);
-  
-  const initialProductState = {
-    name: "",
-    category: "",
-    sku: "",
-    barcode: "",
-    cost: 0,
-    price: 0,
-    markup: 30,
-    minStock: 5,
-    image_url: "",
-    initialStock: 0,
-    description: "",
-    status: "ACTIVE"
-  };
-  const [productForm, setProductForm] = useState(initialProductState);
-  
-  const [newSupplier, setNewSupplier] = useState({ name: "", contact: "", email: "", phone: "", status: "ACTIVE" });
-  const [newPO, setNewPO] = useState({ 
-    supplierId: "", 
-    expectedDate: "", 
-    notes: "",
-    reference: `PO-${Math.floor(1000 + Math.random() * 9000)}`,
-    items: [{ productId: "", qty: 1, unitCost: 0 }] 
-  });
-  const [loading, setLoading] = useState(true);
-  const [isSavingProduct, setIsSavingProduct] = useState(false);
-  const [isSavingSupplier, setIsSavingSupplier] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(false);
+
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+  const [selectedMovements, setSelectedMovements] = useState<string[]>([]);
+  const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState<any>(null);
 
-  // Actions State
-  const [isUpdateStockOpen, setIsUpdateStockOpen] = useState(false);
-  const [isAnalyticsOpen, setIsAnalyticsOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
-  const [updateStockData, setUpdateStockData] = useState({ qty: 0, reason: "RESTOCK", branch_id: activeBranch !== "all" ? activeBranch : "" });
-  const [productAnalytics, setProductAnalytics] = useState<any[]>([]);
-  const [supplierMetrics, setSupplierMetrics] = useState<any[]>([]);
-  const [productInsights, setProductInsights] = useState<any>({});
-  
+  const [productForm, setProductForm] = useState({
+    name: '',
+    sku: '',
+    price: 0,
+    cost: 0,
+    markup: 20,
+    category: '',
+    barcode: '',
+    image_url: '',
+    minStock: 10,
+    maxStock: 100,
+    leadTime: 5,
+    autoReorder: false,
+    supplier_id: '',
+    description: '',
+    initialStock: 0,
+    adjustmentReason: 'RESTOCK'
+  });
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [isSavingProduct, setIsSavingProduct] = useState(false);
+
+  const [updateStockData, setUpdateStockData] = useState({
+    qty: 0,
+    reason: 'RESTOCK',
+    branch_id: ''
+  });
+
+  const [transferData, setTransferData] = useState({
+    product_id: '',
+    from_branch_id: '',
+    to_branch_id: '',
+    qty: 0,
+    reason: 'INTERNAL_TRANSFER'
+  });
+
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [isSavingSupplier, setIsSavingSupplier] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [newSupplier, setNewSupplier] = useState({
+    name: '',
+    contact: '',
+    email: '',
+    phone: '',
+    status: 'ACTIVE'
+  });
+
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [isFlashActive, setIsFlashActive] = useState(false);
+  const [hasCameraAccess, setHasCameraAccess] = useState(false);
+  const [cameraMode, setCameraMode] = useState<'user' | 'environment'>('environment');
+  const [flashlight, setFlashlight] = useState(false);
+  const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [hasCameraAccess, setHasCameraAccess] = useState(false);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [capturedImages, setCapturedImages] = useState<string[]>([]);
-  const [isFlashActive, setIsFlashActive] = useState(false);
-  const [cameraMode, setCameraMode] = useState<'environment' | 'user'>('environment');
-  const [flashlight, setFlashlight] = useState(false);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  // ── NEURAL LENS BINDING ──────────────────────────────────────
   useEffect(() => {
-    let playTimeout: NodeJS.Timeout;
-    if (cameraStream && videoRef.current && hasCameraAccess) {
-      const video = videoRef.current;
-      video.srcObject = cameraStream;
-      
-      const attemptPlay = () => {
-        const playPromise = video.play();
-        if (playPromise !== undefined) {
-          playPromise.catch(err => {
-            console.warn("Lens auto-play deferred, retrying...", err);
-            playTimeout = setTimeout(attemptPlay, 1000);
-          });
-        }
-      };
-      
-      attemptPlay();
+    if (isCameraOpen) {
+      startCamera();
+    } else {
+      stopCamera();
     }
-    return () => clearTimeout(playTimeout);
-  }, [cameraStream, hasCameraAccess, isCameraOpen]);
-
-  // ── FLASHLIGHT / TORCH ENGINE ────────────────────────────────
-  useEffect(() => {
-    if (cameraStream && cameraMode === 'environment') {
-      const track = cameraStream.getVideoTracks()[0];
-      if (track) {
-        const capabilities = track.getCapabilities() as any;
-        if (capabilities.torch) {
-          track.applyConstraints({
-            advanced: [{ torch: flashlight }]
-          } as any).catch(err => console.warn("Torch failed:", err));
-        }
-      }
-    }
-  }, [flashlight, cameraStream, cameraMode]);
-
-  // ── NEURAL LENS ENGINE (2026) ──────────────────────────────────
-  useEffect(() => {
-    const startCamera = async () => {
-      if (!isCameraOpen) return;
-      
-      // Cleanup previous streams
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(t => t.stop());
-      }
-
-      setIsInitializing(true);
-      setHasCameraAccess(false);
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: cameraMode }
-        });
-        
-        if (isCameraOpen) {
-          setCameraStream(stream);
-          setHasCameraAccess(true);
-        } else {
-          stream.getTracks().forEach(t => t.stop());
-        }
-      } catch (err) {
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          if (isCameraOpen) {
-            setCameraStream(stream);
-            setHasCameraAccess(true);
-          }
-        } catch (innerErr) {
-          console.error("Camera Access Failed:", innerErr);
-        }
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-
-    startCamera();
-    return () => {
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(t => t.stop());
-      }
-    };
   }, [isCameraOpen, cameraMode]);
 
-  useEffect(() => {
-    if (!enterpriseId) return;
-
-    const unsubProducts = onSnapshot(
-      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => {
-        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-        setLoading(false);
-      },
-      (err) => { console.error("products:", err); setLoading(false); }
-    );
-
-    const unsubInventory = onSnapshot(
-      query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("inventory:", err)
-    );
-
-    const unsubBranches = onSnapshot(
-      query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => setBranches(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("branches:", err)
-    );
-
-    const unsubMovements = onSnapshot(
-      query(collection(db, "inventory_movements"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc")),
-      (snapshot) => setMovements(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("movements:", err)
-    );
-
-    const unsubSuppliers = onSnapshot(
-      query(collection(db, "suppliers"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => setSuppliers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("suppliers:", err)
-    );
-
-    return () => {
-      unsubProducts();
-      unsubInventory();
-      unsubBranches();
-      unsubMovements();
-      unsubSuppliers();
-    };
-  }, [enterpriseId]);
-
-  useEffect(() => {
-    const handleAction = (e: any) => {
-      if (e.detail === "ADD_PRODUCT") {
-        setIsProductSheetOpen(true);
-      } else if (e.detail === "TRANSFER_STOCK") {
-        setActiveTab("movements");
-        setIsTransferDialogOpen(true);
-      }
-    };
-    window.addEventListener("app:action", handleAction);
-    return () => window.removeEventListener("app:action", handleAction);
-  }, []);
-
-    const handlePurchaseOrder = async () => {
-    if (!newPO.supplierId || newPO.items.some(i => !i.productId || i.qty <= 0)) {
-      toast.error("Please select a supplier and add valid products.");
-      return;
-    }
-    if (!newPO.expectedDate) {
-      toast.error("Please select an expected delivery date.");
-      return;
-    }
+  const startCamera = async () => {
+    setIsInitializing(true);
+    setHasCameraAccess(false);
+    stopCamera();
 
     try {
-      const supplierObj = suppliers.find(s => s.id === newPO.supplierId);
-      
-      // Create a movement for each item
-      const promises = newPO.items.map(item => {
-        const productObj = products.find(p => p.id === item.productId);
-        return addDoc(collection(db, "inventory_movements"), {
-          type: "PURCHASE",
-          product: productObj?.name || "Unknown SKU",
-          productId: item.productId,
-          from: supplierObj?.name || "Unknown Supplier",
-          to: activeBranch !== "all" ? activeBranch : (branches[0]?.id || "main"),
-          qty: item.qty,
-          unitCost: item.unitCost,
-          date: new Date().toISOString().split('T')[0],
-          status: "PENDING",
-          reference: newPO.reference,
-          notes: newPO.notes,
-          timestamp: serverTimestamp(),
-          expectedDate: newPO.expectedDate,
-          enterprise_id: enterpriseId
-        });
-      });
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode: cameraMode,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        },
+        audio: false
+      };
 
-      await Promise.all(promises);
-      
-      setIsPurchaseOrderOpen(false);
-      setNewPO({ 
-        supplierId: "", 
-        expectedDate: "", 
-        notes: "",
-        reference: `PO-${Math.floor(1000 + Math.random() * 9000)}`,
-        items: [{ productId: "", qty: 1, unitCost: 0 }] 
-      });
-      toast.success("Professional Purchase Order created successfully.");
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        setHasCameraAccess(true);
+      }
+    } catch (err) {
+      console.error("Camera error:", err);
+      toast.error("Lens hardware unavailable");
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [activeBranch]);
+
+  const fetchData = async () => {
+    if (!enterpriseId) return;
+    try {
+      setLoading(true);
+      const [pSnap, iSnap, mSnap, bSnap, sSnap] = await Promise.all([
+        getDocs(query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId))),
+        getDocs(query(collection(db, 'inventory'), where('enterprise_id', '==', enterpriseId))),
+        getDocs(query(collection(db, 'inventory_movements'), where('enterprise_id', '==', enterpriseId))),
+        getDocs(query(collection(db, 'branches'), where('enterprise_id', '==', enterpriseId))),
+        getDocs(query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId)))
+      ]);
+
+      setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setInventory(iSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setMovements(mSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => {
+        const dateA = a.date ? new Date(a.date).getTime() : 0;
+        const dateB = b.date ? new Date(b.date).getTime() : 0;
+        return dateB - dateA;
+      }));
+      setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setSuppliers(sSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (error) {
-      console.error("Error creating PO:", error);
-      toast.error("Failed to create purchase order.");
+      console.error('Error fetching inventory:', error);
+      toast.error('Logistics error: Could not sync assets');
+    } finally {
+      setLoading(false);
     }
   };
-
-  const addPOItem = () => {
-    setNewPO(prev => ({
-      ...prev,
-      items: [...prev.items, { productId: "", qty: 1, unitCost: 0 }]
-    }));
-  };
-
-  const removePOItem = (index: number) => {
-    if (newPO.items.length <= 1) return;
-    setNewPO(prev => ({
-      ...prev,
-      items: prev.items.filter((_, i) => i !== index)
-    }));
-  };
-
-  const updatePOItem = (index: number, field: string, value: any) => {
-    const updatedItems = [...newPO.items];
-    updatedItems[index] = { ...updatedItems[index], [field]: value };
-    
-    // Auto-fill unit cost if product is selected
-    if (field === "productId") {
-      const prod = products.find(p => p.id === value);
-      if (prod) updatedItems[index].unitCost = prod.cost || prod.wholesale_price || 0;
-    }
-    
-    setNewPO(prev => ({ ...prev, items: updatedItems }));
-  };
-
-  const poSubtotal = newPO.items.reduce((sum, i) => sum + (i.qty * i.unitCost), 0);
 
   const getProductStock = (productId: string, branchId: string) => {
-    if (branchId === "all") {
+    if (branchId === 'all') {
       return inventory
         .filter(i => i.product_id === productId)
-        .reduce((acc, curr) => acc + curr.stock, 0);
+        .reduce((sum, item) => sum + (item.quantity || 0), 0);
     }
     const item = inventory.find(i => i.product_id === productId && i.branch_id === branchId);
-    return item ? item.stock : 0;
+    return item ? item.quantity : 0;
   };
 
   const totalSKUs = products.length;
-  const lowStockItems = products.filter(p => getProductStock(p.id, activeBranch) < (p.min_stock || 10)).length;
-  const inventoryValue = products.reduce((acc, p) => acc + (getProductStock(p.id, activeBranch) * (p.cost || p.retail_price || p.price || 0)), 0);
-  const inTransit = movements.filter(m => {
-    if (activeBranch !== "all" && m.to !== activeBranch && m.from !== activeBranch && m.to !== branches.find(b=>b.id===activeBranch)?.name) return false;
-    return m.status === "IN_TRANSIT" || m.status === "PENDING";
+  const lowStockItems = products.filter(p => {
+    const total = getProductStock(p.id, 'all');
+    return total <= (p.min_stock_level || 10);
   }).length;
+  const inTransit = movements.filter(m => m.status === 'IN_TRANSIT').length;
+  const inventoryValue = products.reduce((sum, p) => {
+    const total = getProductStock(p.id, 'all');
+    return sum + (total * (p.cost || 0));
+  }, 0);
 
-  const handleTransfer = async () => {
-    if (!transferData.product || !transferData.from || !transferData.to || transferData.qty <= 0) {
-      toast.error("Please fill in all fields with valid quantity.");
-      return;
-    }
-    if (transferData.from === transferData.to) {
-      toast.error("Source and destination branches must be different.");
-      return;
-    }
-    if (isTransferring) return; // idempotency guard
-    setIsTransferring(true);
-    try {
-      const productObj = products.find(p => p.id === transferData.product);
-      const fromBranchObj = branches.find(b => b.id === transferData.from);
-      const toBranchObj = branches.find(b => b.id === transferData.to);
+  const categories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
 
-      // Verify source stock before creating the movement
-      const sourceStock = getProductStock(transferData.product, transferData.from);
-      if (sourceStock < transferData.qty) {
-        toast.error(`Insufficient stock. Only ${sourceStock} units available at ${fromBranchObj?.name || transferData.from}.`);
-        setIsTransferring(false);
-        return;
-      }
-
-      await addDoc(collection(db, "inventory_movements"), {
-        type: "TRANSFER",
-        product: productObj?.name || transferData.product,
-        productId: transferData.product,
-        from: fromBranchObj?.name || transferData.from,
-        to: toBranchObj?.name || transferData.to,
-        qty: transferData.qty,
-        date: new Date().toISOString().split('T')[0],
-        status: "PENDING",
-        timestamp: serverTimestamp(),
-        enterprise_id: enterpriseId
-      });
-      toast.success("Stock transfer initiated successfully");
-      setIsTransferDialogOpen(false);
-      setTransferData({ product: "", from: "main", to: "north", qty: 1 });
-    } catch (error: any) {
-      toast.error("Transfer failed: " + error.message);
-    } finally {
-      setIsTransferring(false);
-    }
-  };
-
-  const handleAddSupplier = async () => {
-    if (!newSupplier.name || !newSupplier.contact || !newSupplier.email) {
-      toast.error("Please fill in supplier name, contact, and email.");
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newSupplier.email)) {
-      toast.error("Please enter a valid email address.");
-      return;
-    }
-    if (isSavingSupplier) return;
-    setIsSavingSupplier(true);
-    try {
-      await addDoc(collection(db, "suppliers"), { ...newSupplier, enterprise_id: enterpriseId, createdAt: serverTimestamp() });
-      setIsSupplierDialogOpen(false);
-      setNewSupplier({ name: "", contact: "", email: "", phone: "", status: "ACTIVE" });
-      toast.success("Supplier added successfully!");
-    } catch (error: any) {
-      toast.error("Failed to add supplier: " + error.message);
-    } finally {
-      setIsSavingSupplier(false);
-    }
-  };
-
-  const handleUpdateMovementStatus = async (movement: any, newStatus: string) => {
-    try {
-      if (newStatus === "COMPLETED") {
-        const product = products.find(p => p.name === movement.product || p.id === movement.product);
-        if (!product) {
-          toast.error("Linked product not found. Cannot finalize inventory deduction.");
-          return;
-        }
-
-        const toBranch = branches.find(b => b.name === movement.to || b.id === movement.to);
-        const fromBranch = branches.find(b => b.name === movement.from || b.id === movement.from);
-
-        if (movement.type === "TRANSFER") {
-          if (!toBranch || !fromBranch) {
-             toast.error("Source or destination branch not found.");
-             return;
-          }
-          // Remove from source branch
-          const fromInventoryItem = inventory.find(i => i.product_id === product.id && i.branch_id === fromBranch.id);
-          if (fromInventoryItem) {
-             if (fromInventoryItem.stock < movement.qty) {
-                toast.error(`Insufficient stock in ${fromBranch.name} to complete transfer.`);
-                return;
-             }
-             await updateDoc(doc(db, "inventory", fromInventoryItem.id), { stock: fromInventoryItem.stock - movement.qty });
-          } else {
-             toast.error(`Product not found in ${fromBranch.name}'s inventory.`);
-             return;
-          }
-
-          // Add to dest branch
-          const toInventoryItem = inventory.find(i => i.product_id === product.id && i.branch_id === toBranch.id);
-          if (toInventoryItem) {
-            await updateDoc(doc(db, "inventory", toInventoryItem.id), { stock: toInventoryItem.stock + movement.qty });
-          } else {
-             await addDoc(collection(db, "inventory"), { product_id: product.id, branch_id: toBranch.id, stock: movement.qty, enterprise_id: enterpriseId });
-          }
-        } else if (movement.type === "PURCHASE") {
-           // Purchase order only goes to the destination branch
-           if (!toBranch) {
-              toast.error("Destination branch not found.");
-              return;
-           }
-           const toInventoryItem = inventory.find(i => i.product_id === product.id && i.branch_id === toBranch.id);
-           if (toInventoryItem) {
-             await updateDoc(doc(db, "inventory", toInventoryItem.id), { stock: toInventoryItem.stock + movement.qty });
-           } else {
-              await addDoc(collection(db, "inventory"), { product_id: product.id, branch_id: toBranch.id, stock: movement.qty });
-           }
-        }
-      }
-
-      await updateDoc(doc(db, "inventory_movements", movement.id), { status: newStatus });
-      toast.success(`Movement status updated to ${newStatus}`);
-    } catch (error: any) {
-      toast.error(`Failed to update status: ${error.message}`);
-    }
-  };
-
-  const handleScanResult = (data: string, type: 'barcode' | 'qr') => {
-    // Lookup Engine
-    const product = products.find(p => p.barcode === data || p.sku === data || p.id === data);
-    
-    if (product) {
-      // Response Engine: product_found
-      if (navigator.vibrate) navigator.vibrate(50); // Haptic Feedback
-      toast.success(`Found product: ${product.name}`);
-      setSearchTerm(data);
-      setIsScannerOpen(false); 
-      // If editing, we might want to stay here, but usually, we jump to search
-    } else {
-      // Response Engine: product_not_found
-      setIsScannerOpen(false); 
-
-      // IF SHEET IS ALREADY OPEN: Just populate the barcode field
-      if (isProductSheetOpen) {
-        if (navigator.vibrate) navigator.vibrate(70); // Distinct Haptic for New Product
-        setProductForm(prev => ({ ...prev, barcode: data }));
-        toast.success(`Populated Barcode: ${data}`);
-      } else {
-        // IF SHEET IS CLOSED: Open it with the barcode pre-filled
-        toast.info(`New ${type} detected: ${data}. Opening create product modal.`);
-        openProductSheet(null, { barcode: data });
-      }
-    }
-  };
-
-  const openProductSheet = (product: any = null, overrides: any = {}) => {
+  const openProductSheet = (product: any = null) => {
     if (product) {
       setEditingProductId(product.id);
-      const price = product.retail_price || product.price || 0;
-      const cost = product.cost || product.wholesale_price || 0;
-      const markup = product.markup || ((cost > 0) ? Math.round(((price - cost) / cost) * 100) : 0);
-      
       setProductForm({
-        name: product.name || "",
-        barcode: product.barcode || "",
-        sku: product.sku || "",
-        category: product.category || "",
-        price: price,
-        cost: cost,
-        markup: markup,
-        minStock: product.min_stock || product.min_stock_level || 10,
-        image_url: product.image_url || "",
-        initialStock: 0,
-        description: product.description || "",
-        status: product.status || "ACTIVE"
+        name: product.name || '',
+        sku: product.sku || '',
+        price: product.retail_price || product.price || 0,
+        cost: product.cost || 0,
+        markup: product.markup || 20,
+        category: product.category || '',
+        barcode: product.barcode || '',
+        image_url: product.image_url || '',
+        minStock: product.min_stock_level || 10,
+        maxStock: product.max_stock_level || 100,
+        leadTime: product.lead_time_days || 5,
+        autoReorder: product.auto_reorder || false,
+        supplier_id: product.supplier_id || '',
+        description: product.description || '',
+        initialStock: getProductStock(product.id, 'all'),
+        adjustmentReason: 'RESTOCK'
       });
     } else {
       setEditingProductId(null);
-      setProductForm({ ...initialProductState, ...overrides });
+      setProductForm({
+        name: '',
+        sku: '',
+        price: 0,
+        cost: 0,
+        markup: 20,
+        category: '',
+        barcode: '',
+        image_url: '',
+        minStock: 10,
+        maxStock: 100,
+        leadTime: 5,
+        autoReorder: false,
+        supplier_id: '',
+        description: '',
+        initialStock: 0,
+        adjustmentReason: 'RESTOCK'
+      });
     }
     setIsProductSheetOpen(true);
+  };
+
+  const handleSaveProduct = async () => {
+    if (!productForm.name || !productForm.sku) {
+      toast.error('Identity required (Name & SKU)');
+      return;
+    }
+
+    setIsSavingProduct(true);
+    console.log("DEPLOYMENT PRE-FLIGHT:", {
+      uid: auth.currentUser?.uid,
+      enterpriseId: enterpriseId,
+      isDeveloperMode: enterpriseId === 'master-all'
+    });
+
+    if (!enterpriseId) {
+      toast.error('Identity Error: No authorized enterprise context found. Re-authenticate.');
+      setIsSavingProduct(false);
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+      const productData = {
+        name: productForm.name || '',
+        sku: productForm.sku || '',
+        price: Number(productForm.price) || 0,
+        retail_price: Number(productForm.price) || 0,
+        cost: Number(productForm.cost) || 0,
+        markup: Number(productForm.markup) || 0,
+        category: productForm.category || '',
+        barcode: productForm.barcode || '',
+        image_url: productForm.image_url || '',
+        min_stock_level: Number(productForm.minStock) || 0,
+        max_stock_level: Number(productForm.maxStock) || 0,
+        lead_time_days: Number(productForm.leadTime) || 0,
+        auto_reorder: Boolean(productForm.autoReorder),
+        description: productForm.description || '',
+        supplier_id: productForm.supplier_id || '',
+        enterprise_id: enterpriseId,
+        updated_at: new Date().toISOString()
+      };
+
+      if (editingProductId) {
+        const productRef = doc(db, 'products', editingProductId);
+        batch.update(productRef, productData);
+        await batch.commit();
+        toast.success('Product asset lifecycle updated');
+      } else {
+        const productRef = doc(collection(db, 'products'));
+        batch.set(productRef, {
+          ...productData,
+          created_at: new Date().toISOString()
+        });
+        
+        const initialStockQty = Number(productForm.initialStock) || 0;
+        if (initialStockQty > 0 && activeBranch !== 'all') {
+          const invRef = doc(collection(db, 'inventory'));
+          batch.set(invRef, {
+            product_id: productRef.id,
+            branch_id: activeBranch,
+            quantity: initialStockQty,
+            enterprise_id: enterpriseId,
+            updated_at: new Date().toISOString()
+          });
+          
+          const movRef = doc(collection(db, 'inventory_movements'));
+          batch.set(movRef, {
+            product_id: productRef.id,
+            product: productForm.name,
+            qty: initialStockQty,
+            type: 'INITIAL',
+            from: 'MANUFACTURER',
+            to: branches.find(b => b.id === activeBranch)?.name || 'MAIN',
+            date: new Date().toISOString(),
+            status: 'COMPLETED',
+            enterprise_id: enterpriseId
+          });
+        }
+        
+        await batch.commit();
+        toast.success('New product asset deployed');
+      }
+      
+      setIsProductSheetOpen(false);
+      fetchData();
+    } catch (error: any) {
+      console.error('CRITICAL: Strategic deployment failed:', error);
+      const isPermissionError = error?.code === 'permission-denied';
+      toast.error(isPermissionError 
+        ? `Access Denied: Enterprise "${enterpriseId}" authorization rejected.`
+        : 'Strategic deployment failed. Verify network connectivity.');
+    } finally {
+      setIsSavingProduct(false);
+    }
   };
 
   const handleDeleteProduct = (product: any) => {
@@ -605,30 +390,38 @@ export default function Inventory() {
   const confirmDeleteProduct = async () => {
     if (!deleteConfirmProduct) return;
     try {
-      await deleteDoc(doc(db, "products", deleteConfirmProduct.id));
-      toast.success(`${deleteConfirmProduct.name} deleted successfully.`);
-      setSelectedProducts(prev => prev.filter(id => id !== deleteConfirmProduct.id));
+      await deleteDoc(doc(db, 'products', deleteConfirmProduct.id));
+      const q = query(collection(db, 'inventory'), where('product_id', '==', deleteConfirmProduct.id));
+      const snapshots = await getDocs(q);
+      const batch = writeBatch(db);
+      snapshots.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      
+      toast.success('Asset decommissioned successfully');
       setDeleteConfirmProduct(null);
+      fetchData();
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `products/${deleteConfirmProduct.id}`);
+      toast.error('Purge failed');
     }
   };
 
   const handleBatchDelete = async () => {
     if (selectedProducts.length === 0) return;
-    if (isBatchDeleting) return;
-    
-    const confirm = window.confirm(`Are you sure you want to delete ${selectedProducts.length} items?`);
-    if (!confirm) return;
-
     setIsBatchDeleting(true);
     try {
-      const batchPromises = selectedProducts.map(id => deleteDoc(doc(db, "products", id)));
-      await Promise.all(batchPromises);
-      toast.success(`Deleted ${selectedProducts.length} items successfully.`);
+      const batch = writeBatch(db);
+      for (const id of selectedProducts) {
+        batch.delete(doc(db, 'products', id));
+        const q = query(collection(db, 'inventory'), where('product_id', '==', id));
+        const snapshots = await getDocs(q);
+        snapshots.forEach(d => batch.delete(d.ref));
+      }
+      await batch.commit();
+      toast.success(`${selectedProducts.length} assets purged`);
       setSelectedProducts([]);
-    } catch (error: any) {
-      toast.error("Failed to delete some items: " + error.message);
+      fetchData();
+    } catch (error) {
+      toast.error('Batch decommission failed');
     } finally {
       setIsBatchDeleting(false);
     }
@@ -636,48 +429,177 @@ export default function Inventory() {
 
   const handleBatchDeleteMovements = async () => {
     if (selectedMovements.length === 0) return;
-    if (isBatchDeletingMovements) return;
-    
-    const confirm = window.confirm(`Are you sure you want to delete ${selectedMovements.length} logistics records?`);
-    if (!confirm) return;
-
     setIsBatchDeletingMovements(true);
     try {
-      const batchPromises = selectedMovements.map(id => deleteDoc(doc(db, "inventory_movements", id)));
-      await Promise.all(batchPromises);
-      toast.success(`Deleted ${selectedMovements.length} records successfully.`);
+      const batch = writeBatch(db);
+      selectedMovements.forEach(id => batch.delete(doc(db, 'inventory_movements', id)));
+      await batch.commit();
+      toast.success(`${selectedMovements.length} logs purged`);
       setSelectedMovements([]);
-    } catch (error: any) {
-      toast.error("Failed to delete some records: " + error.message);
+      fetchData();
+    } catch (error) {
+       toast.error('Log purge failed');
     } finally {
       setIsBatchDeletingMovements(false);
     }
   };
 
   const handleBatchDeleteSuppliers = async () => {
-    if (selectedSuppliers.length === 0) return;
-    if (isBatchDeletingSuppliers) return;
-    
-    const confirm = window.confirm(`Are you sure you want to delete ${selectedSuppliers.length} suppliers?`);
-    if (!confirm) return;
+     if (selectedSuppliers.length === 0) return;
+     setIsBatchDeletingSuppliers(true);
+     try {
+       const batch = writeBatch(db);
+       selectedSuppliers.forEach(id => batch.delete(doc(db, 'suppliers', id)));
+       await batch.commit();
+       toast.success(`${selectedSuppliers.length} partners removed`);
+       setSelectedSuppliers([]);
+       fetchData();
+     } catch (error) {
+        toast.error('Partner removal failed');
+     } finally {
+       setIsBatchDeletingSuppliers(false);
+     }
+  };
 
-    setIsBatchDeletingSuppliers(true);
+  const handleOpenUpdateStock = (product: any) => {
+    setSelectedProduct(product);
+    setUpdateStockData({
+      qty: 0,
+      reason: 'RESTOCK',
+      branch_id: activeBranch === 'all' ? branches[0]?.id || '' : activeBranch
+    });
+    setIsUpdateStockOpen(true);
+  };
+
+  const submitUpdateStock = async () => {
+    if (!selectedProduct || !updateStockData.branch_id || updateStockData.qty <= 0) {
+      toast.error('Protocol violation: Missing quantity or branch');
+      return;
+    }
+
     try {
-      const batchPromises = selectedSuppliers.map(id => deleteDoc(doc(db, "suppliers", id)));
-      await Promise.all(batchPromises);
-      toast.success(`Deleted ${selectedSuppliers.length} suppliers successfully.`);
-      setSelectedSuppliers([]);
-    } catch (error: any) {
-      toast.error("Failed to delete some suppliers: " + error.message);
-    } finally {
-      setIsBatchDeletingSuppliers(false);
+      const q = query(
+        collection(db, 'inventory'), 
+        where('product_id', '==', selectedProduct.id),
+        where('branch_id', '==', updateStockData.branch_id)
+      );
+      const snapshot = await getDocs(q);
+      
+      const multiplier = (updateStockData.reason === 'DAMAGED' || updateStockData.reason === 'SHRINKAGE') ? -1 : 1;
+      const adjustQty = updateStockData.qty * multiplier;
+
+      if (snapshot.empty) {
+        await addDoc(collection(db, 'inventory'), {
+          product_id: selectedProduct.id,
+          branch_id: updateStockData.branch_id,
+          quantity: Math.max(0, adjustQty),
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        const invDoc = snapshot.docs[0];
+        await updateDoc(invDoc.ref, {
+          quantity: Math.max(0, (invDoc.data().quantity || 0) + adjustQty),
+          updated_at: new Date().toISOString()
+        });
+      }
+
+      await addDoc(collection(db, 'inventory_movements'), {
+        product_id: selectedProduct.id,
+        product: selectedProduct.name,
+        qty: adjustQty,
+        type: updateStockData.reason,
+        from: multiplier > 0 ? 'SUPPLIER' : branches.find(b=>b.id===updateStockData.branch_id)?.name || 'LOCAL',
+        to: multiplier > 0 ? branches.find(b=>b.id===updateStockData.branch_id)?.name || 'LOCAL' : 'WASTE',
+        date: new Date().toISOString(),
+        status: 'COMPLETED'
+      });
+
+      toast.success('Stock calibration synchronized');
+      setIsUpdateStockOpen(false);
+      fetchData();
+    } catch (error) {
+      toast.error('Synchronization failure');
     }
   };
 
-  const categories = useMemo(() => {
-    const cats = new Set(products.map(p => p.category).filter(Boolean));
-    return Array.from(cats);
-  }, [products]);
+  const handleUpdateMovementStatus = async (movement: any, newStatus: string) => {
+    try {
+      await updateDoc(doc(db, 'inventory_movements', movement.id), {
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      });
+      toast.success(`Logistal state: ${newStatus}`);
+      fetchData();
+    } catch (error) {
+      toast.error('State transition failed');
+    }
+  };
+
+  const handleOpenAnalytics = (product: any) => {
+    setSelectedProduct(product);
+    setIsAnalyticsOpen(true);
+  };
+
+  const handleScanResult = (result: string) => {
+    const foundProduct = products.find(p => p.sku === result || p.barcode === result);
+    if (foundProduct) {
+      openProductSheet(foundProduct);
+      toast.success('Asset identified');
+    } else {
+      setProductForm(prev => ({ ...prev, barcode: result }));
+      toast.info('New SKU detected. Ready for initialization.');
+    }
+    setIsScannerOpen(false);
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 1. Immediate local preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+       setProductForm(prev => ({ ...prev, image_url: reader.result as string }));
+    };
+    reader.readAsDataURL(file);
+
+    // 2. Async Cloud Sync
+    setIsUploadingImage(true);
+    try {
+      const storageRef = ref(getStorage(), `products/${Date.now()}_${file.name.replace(/\s+/g, '_')}`);
+      const uploadResult = await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(uploadResult.ref);
+      setProductForm(prev => ({ ...prev, image_url: url }));
+      toast.success('Asset visual synchronized');
+    } catch (error) {
+      console.error("Visual Sync Error:", error);
+      toast.error('Cloud synchronization failed');
+    } finally {
+      setIsUploadingImage(false);
+    }
+  };
+
+  const handleAddSupplier = async () => {
+    if (!newSupplier.name) {
+      toast.error('Partner name required');
+      return;
+    }
+    setIsSavingSupplier(true);
+    try {
+      await addDoc(collection(db, 'suppliers'), {
+        ...newSupplier,
+        created_at: new Date().toISOString()
+      });
+      toast.success('Strategic partner onboarded');
+      setNewSupplier({ name: '', contact: '', email: '', phone: '', status: 'ACTIVE' });
+      setIsSupplierDialogOpen(false);
+      fetchData();
+    } catch (error) {
+      toast.error('Onboarding failure');
+    } finally {
+      setIsSavingSupplier(false);
+    }
+  };
 
   const toggleSelectProduct = (id: string) => {
     setSelectedProducts(prev => 
@@ -693,1488 +615,1054 @@ export default function Inventory() {
     }
   };
 
-  const handleOpenUpdateStock = (product: any) => {
-    setSelectedProduct(product);
-    setUpdateStockData({ qty: 1, reason: "RESTOCK", branch_id: activeBranch !== "all" ? activeBranch : (branches[0]?.id || "main") });
-    setIsUpdateStockOpen(true);
-  };
+  const productAnalytics = [
+    { date: '04/06', sales: 12, stock: 85 },
+    { date: '04/07', sales: 18, stock: 67 },
+    { date: '04/08', sales: 15, stock: 52 },
+    { date: '04/09', sales: 22, stock: 30 },
+    { date: '04/10', sales: 8,  stock: 122 },
+    { date: '04/11', sales: 25, stock: 97 },
+    { date: '04/12', sales: 30, stock: 67 },
+    { date: '04/13', sales: 12, stock: 55 },
+    { date: '04/14', sales: 40, stock: 15 },
+    { date: '04/15', sales: 35, stock: 105 },
+    { date: '04/16', sales: 20, stock: 85 },
+    { date: '04/17', sales: 15, stock: 70 },
+    { date: '04/18', sales: 22, stock: 48 },
+    { date: 'Today', sales: 18, stock: 30 },
+  ];
 
-  const submitUpdateStock = async () => {
-    if (!selectedProduct || updateStockData.qty <= 0 || !updateStockData.branch_id) {
-      toast.error("Please provide valid quantity and branch.");
-      return;
-    }
-    try {
-      // Find the inventory doc
-      const invItem = inventory.find(i => i.product_id === selectedProduct.id && i.branch_id === updateStockData.branch_id);
+  const supplierMetrics = [
+    { name: 'Global Direct', leadTime: 4, deliveryRate: 98, qualityScore: 99 },
+    { name: 'Local Logistics', leadTime: 2, deliveryRate: 92, qualityScore: 85 },
+    { name: 'FastTrack Inc', leadTime: 1, deliveryRate: 85, qualityScore: 90 },
+  ];
 
-      if (invItem) {
-        let newStock = invItem.stock;
-        if (updateStockData.reason === "RESTOCK" || updateStockData.reason === "RETURN") newStock += updateStockData.qty;
-        else newStock = Math.max(0, newStock - updateStockData.qty);
-        
-        await updateDoc(doc(db, "inventory", invItem.id), { stock: newStock });
-      } else {
-        // If not exist, add new inventory doc
-        let newStock = 0;
-        if (updateStockData.reason === "RESTOCK" || updateStockData.reason === "RETURN") newStock = updateStockData.qty;
-        await addDoc(collection(db, "inventory"), {
-          product_id: selectedProduct.id,
-          branch_id: updateStockData.branch_id,
-          stock: newStock,
-          enterprise_id: enterpriseId
-        });
-      }
-
-      await addDoc(collection(db, "inventory_movements"), {
-        type: updateStockData.reason,
-        product: selectedProduct.name,
-        productId: selectedProduct.id,
-        to: updateStockData.branch_id,
-        qty: updateStockData.qty,
-        date: new Date().toISOString().split('T')[0],
-        status: "COMPLETED",
-        timestamp: serverTimestamp(),
-        enterprise_id: enterpriseId
-      });
-
-      toast.success("Stock updated successfully.");
-      setIsUpdateStockOpen(false);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, "inventory");
-    }
-  };
-
-  const handleOpenAnalytics = (product: any) => {
-    setSelectedProduct(product);
-    
-    // Generate some mock history for analytics based on product price for demo purposes
-    const history = [];
-    let currentStock = getProductStock(product.id, "all");
-    if (currentStock === 0) currentStock = 50; // default for mock
-    let totalSales = 0;
-    for (let i = 14; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        currentStock += Math.floor(Math.random() * 10) - 4; // random fluctuation
-        if (currentStock < 0) currentStock = 10;
-        const dailySales = Math.floor(Math.random() * 15);
-        totalSales += dailySales;
-        history.push({
-            date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-            stock: currentStock,
-            sales: dailySales
-        });
-    }
-    
-    // Generate mock supplier performance
-    const suppliersData = [
-      { name: "Supplier A", leadTime: Math.floor(Math.random() * 5) + 2, qualityScore: Math.floor(Math.random() * 20) + 80, deliveryRate: Math.floor(Math.random() * 10) + 90 },
-      { name: "Supplier B", leadTime: Math.floor(Math.random() * 8) + 4, qualityScore: Math.floor(Math.random() * 15) + 75, deliveryRate: Math.floor(Math.random() * 15) + 85 }
-    ];
-
-    // Generate smart insights
-    const velocity = (totalSales / 14).toFixed(1);
-    const reorderDays = Math.floor(currentStock / (Number(velocity) || 1));
-    const insightText = reorderDays < 7 
-      ? "Critical: Restock immediately. High sales velocity is outpacing current stock levels."
-      : reorderDays > 30
-      ? "Warning: Overstocked. Consider reducing next PO frequency or running a promotion to clear excess capital tie-up."
-      : "Optimal: Stock levels are securely balanced with current 14-day sales velocity.";
-
-    setProductInsights({
-      velocity,
-      reorderDays,
-      insightText,
-      trend: totalSales > 70 ? 'up' : 'down'
-    });
-    setSupplierMetrics(suppliersData);
-    setProductAnalytics(history);
-    setIsAnalyticsOpen(true);
-  };
-
-  const handleSaveProduct = async () => {
-    if (!productForm.name.trim()) {
-      toast.error("Please fill in the product name.");
-      return;
-    }
-    if (productForm.price < 0) {
-      toast.error("Retail price cannot be negative.");
-      return;
-    }
-    if (isSavingProduct) return; // idempotency guard
-    setIsSavingProduct(true);
-    try {
-      if (editingProductId) {
-        await updateDoc(doc(db, "products", editingProductId), {
-          name: productForm.name,
-          barcode: productForm.barcode,
-          sku: productForm.sku,
-          category: productForm.category,
-          price: productForm.price,
-          retail_price: productForm.price,
-          cost: productForm.cost,
-          wholesale_price: productForm.cost,
-          markup: productForm.markup,
-          min_stock: productForm.minStock,
-          min_stock_level: productForm.minStock,
-          image_url: productForm.image_url
-        });
-        toast.success("Product updated successfully!");
-      } else {
-        const docRef = await addDoc(collection(db, "products"), {
-          name: productForm.name,
-          barcode: productForm.barcode,
-          sku: productForm.sku,
-          category: productForm.category,
-          price: productForm.price,
-          retail_price: productForm.price,
-          cost: productForm.cost,
-          wholesale_price: productForm.cost,
-          markup: productForm.markup,
-          min_stock: productForm.minStock,
-          min_stock_level: productForm.minStock,
-          image_url: productForm.image_url,
-          status: "ACTIVE",
-          createdAt: serverTimestamp(),
-          enterprise_id: enterpriseId
-        });
-        // Add initial inventory
-        await addDoc(collection(db, "inventory"), {
-          product_id: docRef.id,
-          branch_id: activeBranch === "all" ? (branches[0]?.id || "main") : activeBranch,
-          stock: productForm.initialStock || 0,
-          enterprise_id: enterpriseId
-        });
-        toast.success("Product created successfully!");
-      }
-      setIsProductSheetOpen(false);
-      setProductForm(initialProductState);
-    } catch (error: any) {
-      toast.error(`Failed to ${editingProductId ? 'update' : 'create'} product: ${error.message}`);
-    } finally {
-      setIsSavingProduct(false);
-    }
+  const productInsights = {
+    velocity: 4.2,
+    reorderDays: 7,
+    expectedStockOut: '04/27',
+    optimumOrderQty: 150,
+    insightText: "Demand velocity is trending 12% higher than seasonal baseline. Predicted stock-out in 7 days. Autonomous order trigger recommended today."
   };
 
   return (
     <>
-    <ScrollArea className="h-full">
-      <div className="responsive-container">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-        <div className="space-y-1 max-w-full">
-          <div className="flex items-center gap-2 text-blue-600 mb-2">
-            <Warehouse className="w-5 h-5 shrink-0" />
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] truncate">Inventory Intelligence</span>
-          </div>
-          <h1 className="text-2xl md:text-4xl font-bold tracking-tight text-zinc-900 font-display break-words">Stock Management</h1>
-          <p className="text-zinc-500 text-sm md:text-base leading-snug">Global inventory control, automated replenishment, and logistics tracking.</p>
-        </div>
-        <div className="responsive-action-bar">
-          <Button 
-            className="w-full sm:w-auto rounded-xl bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-600/20 h-10 md:h-11 px-6 font-bold text-xs"
-            onClick={() => openProductSheet()}
-          >
-            <Plus className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2" />
-            Add Product
-          </Button>
-          <Button 
-            variant="outline" 
-            className="w-full sm:w-auto rounded-xl border-zinc-200 h-10 md:h-11 px-4 font-bold text-xs"
-            onClick={() => setIsScannerOpen(true)}
-          >
-            <ScanLine className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-blue-500" />
-            Scan Barcode
-          </Button>
-          <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
-            <DialogTrigger
-              render={
-                <Button variant="outline" className="w-full sm:w-auto rounded-xl border-zinc-200 h-10 md:h-11 px-6 font-bold text-xs">
-                  <ArrowRightLeft className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
-                  Transfer Stock
-                </Button>
-              }
-            />
-            <DialogContent className="rounded-3xl border-zinc-200 max-w-2xl w-[95vw]">
-              <DialogHeader className="p-6 md:p-8 bg-zinc-50 border-b border-zinc-100">
-                <DialogTitle className="text-2xl font-bold font-display tracking-tight text-zinc-900">Internal Stock Transfer</DialogTitle>
-                <DialogDescription className="text-zinc-500">Move inventory between branches or warehouses with audit-ready documentation.</DialogDescription>
-              </DialogHeader>
-              <div className="p-6 md:p-8 space-y-6">
-                <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 flex gap-4 items-start mb-2">
-                  <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600">
-                    <Info className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h5 className="text-xs font-bold text-blue-900 uppercase tracking-widest leading-none mb-1">Logistics Note</h5>
-                    <p className="text-[10px] text-blue-700 leading-relaxed">Ensure destination branch has sufficient shelving capacity before executing transfer.</p>
-                  </div>
+    <ScrollArea className="h-full bg-white">
+      <div className="responsive-container pb-20">
+      {isProductSheetOpen ? (
+        <div className="bg-white min-h-screen animate-in fade-in slide-in-from-right-4 duration-500 -mx-4 md:-mx-8">
+          {/* A. PERFORMANCE HEADER */}
+          <div className="bg-white border-b border-zinc-100 flex-none sticky top-0 z-20 shadow-sm">
+            <div className="max-w-5xl mx-auto p-6 md:p-8 flex flex-col sm:flex-row gap-6 items-start sm:items-center">
+              <button 
+                onClick={() => setIsProductSheetOpen(false)}
+                className="group flex items-center gap-2 text-zinc-400 hover:text-zinc-900 transition-colors mr-4"
+              >
+                <div className="w-8 h-8 rounded-lg bg-zinc-50 border border-zinc-200 flex items-center justify-center group-hover:bg-zinc-900 group-hover:text-white transition-all">
+                  <ArrowRightLeft className="w-4 h-4 rotate-180" />
                 </div>
+                <span className="text-[10px] font-black uppercase tracking-widest">Back to Stock</span>
+              </button>
 
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-[0.1em]">Product to Relocate</label>
-                    <Select onValueChange={(v) => setTransferData({...transferData, product: v})}>
-                      <SelectTrigger className="rounded-xl h-12 bg-white border-zinc-200 shadow-sm focus:ring-2 focus:ring-blue-500/20">
-                        <SelectValue placeholder="Select Product" />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-xl">
-                        {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.sku})</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase tracking-[0.1em]">Source Branch</label>
-                      <Select defaultValue="main" onValueChange={(v) => setTransferData({...transferData, from: v})}>
-                        <SelectTrigger className="rounded-xl h-12 bg-white border-zinc-200 shadow-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl">
-                          {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+              <div 
+                className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-zinc-50 border border-zinc-100 flex items-center justify-center overflow-hidden shrink-0 shadow-inner group relative cursor-pointer"
+                onClick={() => document.getElementById('product-image-upload')?.click()}
+              >
+                {productForm.image_url ? (
+                  <img src={productForm.image_url} alt="Product" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                ) : (
+                  <ImageIcon className="w-8 h-8 text-zinc-300" />
+                )}
+                
+                <div className={cn(
+                  "absolute inset-0 bg-black/40 flex items-center justify-center transition-all",
+                  isUploadingImage ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                )}>
+                  {isUploadingImage ? (
+                    <div className="flex flex-col items-center gap-1">
+                      <RefreshCw className="w-5 h-5 text-white animate-spin" />
+                      <span className="text-[8px] font-black text-white uppercase tracking-tighter">Syncing</span>
                     </div>
-                    <div className="space-y-2 text-center flex flex-col justify-center">
-                       <ArrowRightLeft className="w-5 h-5 mx-auto text-zinc-300" />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase tracking-[0.1em]">Target Destination</label>
-                      <Select defaultValue="north" onValueChange={(v) => setTransferData({...transferData, to: v})}>
-                        <SelectTrigger className="rounded-xl h-12 bg-white border-zinc-200 shadow-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl">
-                          {branches.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-[0.1em]">Transfer Quantity</label>
-                    <div className="relative">
-                       <Input 
-                        type="number" 
-                        min="1"
-                        className="rounded-xl h-12 bg-white border-zinc-200 shadow-sm pl-4 pr-12 focus:ring-2 focus:ring-blue-500/20 font-bold" 
-                        value={transferData.qty} 
-                        onChange={(e) => setTransferData({...transferData, qty: parseInt(e.target.value) || 0})}
-                      />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-black text-zinc-400">UNITS</span>
-                    </div>
-                  </div>
+                  ) : (
+                    <Camera className="w-5 h-5 text-white scale-90 group-hover:scale-110 transition-transform" />
+                  )}
                 </div>
-              </div>
-              <DialogFooter className="p-6 md:p-8 bg-white border-t border-zinc-100">
-                <Button 
-                  className="w-full rounded-2xl bg-zinc-900 text-white h-14 font-black uppercase tracking-widest text-xs shadow-xl shadow-zinc-900/10 hover:scale-[1.02] active:scale-95 transition-all" 
-                  onClick={handleTransfer}
-                  disabled={isTransferring}
-                >
-                  {isTransferring ? "Processing Transfer..." : "Execute Global Transfer"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={isPurchaseOrderOpen} onOpenChange={setIsPurchaseOrderOpen}>
-            <DialogTrigger
-              render={
-                <Button variant="outline" className="w-full sm:w-auto rounded-xl border-zinc-200 h-10 md:h-11 px-6 font-bold text-xs">
-                  <FileText className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2 text-zinc-400" />
-                  Purchase Order
-                </Button>
-              }
-            />
-            <DialogContent showCloseButton={false} className="w-full sm:w-[95vw] lg:w-[1100px] h-[100dvh] sm:h-[90vh] overflow-hidden flex flex-col p-0 border-none bg-zinc-50 rounded-none sm:rounded-[2.5rem] shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
-              <DialogHeader className="p-5 sm:p-8 lg:p-12 bg-zinc-900 text-white relative flex-none">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-8">
-                  <div className="space-y-1 md:space-y-2 max-w-2xl">
-                    <div className="flex items-center gap-2 text-emerald-400 mb-1 md:mb-2">
-                      <div className="w-6 h-6 md:w-8 md:h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                        <Plus className="w-3 h-3 md:w-4 md:h-4" />
-                      </div>
-                      <span className="text-[9px] md:text-[11px] font-black uppercase tracking-[0.3em]">Supply Chain Ops</span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <DialogTitle className="font-display tracking-tight text-xl md:text-3xl lg:text-5xl font-black leading-tight">Issue order</DialogTitle>
-                      <Badge className="bg-emerald-500/10 text-emerald-400 border-none font-mono text-[10px] md:text-xs">Ref: {newPO.reference}</Badge>
-                      <Button variant="ghost" size="icon" onClick={() => setIsPurchaseOrderOpen(false)} className="md:hidden ml-auto text-white/50 hover:text-white">
-                        <XIcon className="w-5 h-5" />
-                      </Button>
-                    </div>
-                    <DialogDescription className="text-zinc-500 font-medium text-[10px] md:text-base hidden sm:block">Provision inventory acquisition with professional SKU configuration.</DialogDescription>
-                  </div>
-                  <div className="hidden md:block bg-white/10 backdrop-blur-xl rounded-2xl p-6 border border-white/10 min-w-[220px] shadow-inner text-right">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-2">Tracking Pointer</p>
-                    <p className="text-2xl font-mono font-black text-white">{newPO.reference}</p>
-                  </div>
-                </div>
-              </DialogHeader>
-
-              <div className="flex-1 overflow-y-auto px-8 lg:px-12 py-10">
-                <div className="grid grid-cols-1 xl:grid-cols-12 gap-12">
-                  {/* Left Column: Vendor & Date */}
-                  <div className="xl:col-span-4 space-y-10">
-                    <div className="space-y-6 p-6 md:p-8 bg-white rounded-3xl border border-zinc-200 shadow-sm">
-                      <div className="flex items-center gap-2 text-zinc-900 border-b border-zinc-100 pb-4">
-                        <Truck className="w-4 h-4 text-emerald-500" />
-                        <span className="text-[10px] md:text-[11px] font-black uppercase tracking-widest text-zinc-400">General Allocation</span>
-                      </div>
-                      
-                      <div className="space-y-5">
-                        <div className="space-y-2">
-                          <label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest">Supplier Entity</label>
-                          <Select value={newPO.supplierId} onValueChange={(v) => setNewPO({...newPO, supplierId: v})}>
-                            <SelectTrigger className="rounded-xl md:rounded-2xl h-11 md:h-14 bg-white border border-zinc-200 shadow-sm text-zinc-900 font-bold px-4 md:px-6 focus:ring-4 focus:ring-emerald-500/10 transition-all">
-                              <SelectValue placeholder="Select Supplier" />
-                            </SelectTrigger>
-                            <SelectContent className="rounded-2xl border-none shadow-2xl p-2">
-                              {suppliers.map(s => <SelectItem key={s.id} value={s.id} className="rounded-xl py-3 px-4 focus:bg-emerald-50 text-zinc-900 font-medium">{s.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest">Expected Delivery</label>
-                          <div className="relative group">
-                            <Clock className="absolute left-4 md:left-6 top-1/2 -translate-y-1/2 w-4 h-4 md:w-5 md:h-5 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
-                            <Input 
-                              type="date" 
-                              className="rounded-xl md:rounded-2xl h-11 md:h-14 bg-white border border-zinc-200 shadow-sm pl-11 md:pl-14 pr-4 md:pr-6 focus:ring-4 focus:ring-emerald-500/10 transition-all font-bold text-xs md:text-sm" 
-                              value={newPO.expectedDate} 
-                              onChange={(e) => setNewPO({...newPO, expectedDate: e.target.value})}
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <label className="text-[9px] md:text-[10px] font-black text-zinc-400 uppercase tracking-widest">Internal Notes</label>
-                          <textarea 
-                            className="w-full rounded-xl md:rounded-2xl min-h-[100px] md:min-h-[140px] bg-white border border-zinc-200 shadow-sm p-4 md:p-6 focus:ring-4 focus:ring-emerald-500/10 transition-all font-medium text-xs md:text-sm text-zinc-600 resize-none"
-                            placeholder="Delivery notes..."
-                            value={newPO.notes}
-                            onChange={(e) => setNewPO({...newPO, notes: e.target.value})}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Right Column: Line Items */}
-                  <div className="xl:col-span-8 space-y-8">
-                    <div className="flex items-center justify-between border-b border-zinc-200 pb-4">
-                      <div className="flex items-center gap-2 text-zinc-900">
-                        <Package className="w-4 h-4 text-emerald-500" />
-                        <span className="text-[11px] font-black uppercase tracking-widest leading-none">Line Item Configuration</span>
-                      </div>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={addPOItem}
-                        className="h-9 rounded-xl text-emerald-600 hover:bg-emerald-50 font-black text-[10px] uppercase tracking-widest px-4"
-                      >
-                        <Plus className="w-3.5 h-3.5 mr-2" /> Add Selection
-                      </Button>
-                    </div>
-
-                    <div className="space-y-4">
-                        {newPO.items.map((item, idx) => (
-                          <div key={idx} className="bg-white rounded-3xl p-8 border border-zinc-200 flex flex-col md:flex-row gap-8 relative group/item shadow-sm hover:shadow-md transition-shadow">
-                            <div className="flex-1 space-y-3">
-                              <label className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.2em]">Product Selection</label>
-                              <Select value={item.productId} onValueChange={(v) => updatePOItem(idx, "productId", v)}>
-                                <SelectTrigger className="rounded-xl h-14 bg-zinc-50 border-zinc-100 font-bold px-6">
-                                  <SelectValue placeholder="SKU Search..." />
-                                </SelectTrigger>
-                                <SelectContent className="rounded-xl">
-                                  {products.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.sku})</SelectItem>)}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-6 md:w-auto">
-                              <div className="space-y-3">
-                                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.2em]">Quantity</label>
-                                <Input 
-                                  type="number" 
-                                  className="rounded-xl h-14 bg-zinc-50 border-zinc-100 text-center font-black w-full md:w-28" 
-                                  value={item.qty} 
-                                  onChange={(e) => updatePOItem(idx, "qty", parseInt(e.target.value) || 0)}
-                                />
-                              </div>
-                              <div className="space-y-3">
-                                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.2em]">Unit Cost</label>
-                                <div className="relative">
-                                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
-                                  <Input 
-                                    type="number" 
-                                    className="rounded-xl h-14 bg-zinc-50 border-zinc-100 pl-10 font-black text-zinc-900 w-full md:w-36" 
-                                    value={item.unitCost} 
-                                    onChange={(e) => updatePOItem(idx, "unitCost", parseFloat(e.target.value) || 0)}
-                                  />
-                                </div>
-                              </div>
-                              <div className="space-y-3 hidden md:block">
-                                <label className="text-[9px] font-black text-zinc-400 uppercase tracking-[0.2em] text-right block">Subtotal</label>
-                                <div className="h-14 flex items-center justify-end font-black text-zinc-900 text-lg">
-                                  {formatCurrency(item.qty * item.unitCost)}
-                                </div>
-                              </div>
-                            </div>
-                            {newPO.items.length > 1 && (
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
-                                className="absolute -top-3 -right-3 w-10 h-10 rounded-full bg-white border border-zinc-200 text-rose-500 opacity-0 group-hover/item:opacity-100 transition-opacity shadow-lg hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200"
-                                onClick={() => removePOItem(idx)}
-                              >
-                                <Plus className="w-5 h-5 rotate-45" />
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                    </div>
-
-                    {/* Totals Summary */}
-                    <div className="bg-zinc-900 text-white rounded-[2.5rem] p-10 lg:p-12 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-8 border border-white/5">
-                      <div className="flex gap-10">
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Subtotal</p>
-                          <p className="text-xl font-bold">{formatCurrency(poSubtotal)}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Tax</p>
-                          <p className="text-xl font-bold">$0.00</p>
-                        </div>
-                      </div>
-                      <div className="text-center md:text-right space-y-1">
-                        <p className="text-xs font-black uppercase tracking-[0.3em] text-emerald-400">Grand Total Amount</p>
-                        <p className="text-5xl lg:text-6xl font-black font-display tracking-tight text-white">{formatCurrency(poSubtotal)}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter className="p-5 md:p-8 bg-zinc-50 border-t border-zinc-200 flex-none flex flex-col md:flex-row gap-4 items-center md:justify-between px-6 sm:px-12 sticky bottom-0 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-                <Button variant="ghost" className="rounded-xl h-10 md:h-14 px-4 md:px-8 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition-all text-xs order-2 md:order-1" onClick={() => setIsPurchaseOrderOpen(false)}>
-                  Discard Order Draft
-                </Button>
-                <Button 
-                  className="rounded-xl md:rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 h-12 md:h-16 px-6 md:px-14 font-bold transition-all flex-[2] md:flex-none flex items-center justify-center gap-3 shadow-xl shadow-zinc-900/10 order-1 md:order-2 w-full md:w-auto" 
-                  onClick={handlePurchaseOrder}
-                >
-                  <FileText className="w-5 h-5 text-emerald-400" />
-                  Issue Purchase Order
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="card-modern border-blue-100 bg-blue-50/30">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="p-3 bg-white rounded-2xl shadow-sm text-blue-600">
-              <Box className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Total SKUs</p>
-              <p className="text-xl text-zinc-900 font-bold">{totalSKUs.toLocaleString()}</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="card-modern border-rose-100 bg-rose-50/30">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="p-3 bg-white rounded-2xl shadow-sm text-rose-600">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-rose-600 uppercase tracking-widest mb-0.5">Low Stock</p>
-              <p className="text-xl text-zinc-900 font-bold">{lowStockItems} Items</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="card-modern border-emerald-100 bg-emerald-50/30">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="p-3 bg-white rounded-2xl shadow-sm text-emerald-600">
-              <Truck className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-0.5">In Transit / Pending</p>
-              <p className="text-xl text-zinc-900 font-bold">{inTransit} Shipments</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="card-modern border-zinc-100 bg-zinc-50/50">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="p-3 bg-white rounded-2xl shadow-sm text-zinc-600">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-0.5">Inventory Value</p>
-              <p className="text-xl text-zinc-900 font-bold">{formatCurrency(inventoryValue)}</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
-          <TabsList className="bg-zinc-100 p-1 rounded-xl w-max flex gap-1">
-            <TabsTrigger value="stock" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Stock Levels</TabsTrigger>
-            <TabsTrigger value="movements" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Movements</TabsTrigger>
-            <TabsTrigger value="suppliers" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Suppliers</TabsTrigger>
-          </TabsList>
-        </div>
-
-        <TabsContent value="stock" className="space-y-6">
-          <Card className="card-modern overflow-hidden">
-            <div className="p-6 border-b border-zinc-100 bg-zinc-50/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="relative w-full md:w-96 group">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
-                <Input 
-                  placeholder="Search by SKU, name or category..." 
-                  className="pl-10 rounded-xl border-zinc-200 bg-white focus:ring-2 focus:ring-blue-500/20 transition-all h-11"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                
+                <input 
+                  id="product-image-upload" 
+                  type="file" 
+                  className="hidden" 
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  onClick={(e) => e.stopPropagation()}
                 />
               </div>
-              <div className="flex items-center gap-3">
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-[180px] rounded-xl h-11 bg-white border-zinc-200">
-                    <Filter className="w-4 h-4 mr-2 text-zinc-400" />
-                    <SelectValue placeholder="All Categories" />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {categories.map(cat => (
-                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl border-zinc-200 text-zinc-600 h-11 font-bold text-xs"
-                  onClick={() => {
-                    const rows = [
-                      ["Name", "SKU", "Category", "Branch Stock", "Total Stock", "Price", "Status"],
-                      ...products
-                        .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
-                        .map(p => [
-                          p.name,
-                          p.sku || "",
-                          p.category || "",
-                          getProductStock(p.id, activeBranch),
-                          getProductStock(p.id, "all"),
-                          p.retail_price || p.price || 0,
-                          getProductStock(p.id, "all") === 0 ? "Out of Stock" : getProductStock(p.id, "all") <= (p.min_stock || 10) ? "Low Stock" : "In Stock"
-                        ])
-                    ];
-                    const csv = rows.map(r => r.map(String).join(",")).join("\n");
-                    const blob = new Blob([csv], { type: "text/csv" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `inventory-${new Date().toISOString().split('T')[0]}.csv`;
-                    a.click();
-                    URL.revokeObjectURL(url);
-                    toast.success("CSV exported!");
-                  }}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Export CSV
-                </Button>
-              </div>
-            </div>
-
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
-                  <TableHead className="w-[50px] py-4">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                      checked={products.length > 0 && selectedProducts.length === products.filter(p => {
-                        const matchesSearch = !searchTerm || (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) || (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase());
-                        const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
-                        return matchesSearch && matchesCat;
-                      }).length}
-                      onChange={() => {
-                        const filtered = products.filter(p => {
-                          const matchesSearch = !searchTerm || (p.name || "").toLowerCase().includes(searchTerm.toLowerCase()) || (p.sku || "").toLowerCase().includes(searchTerm.toLowerCase());
-                          const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
-                          return matchesSearch && matchesCat;
-                        });
-                        toggleSelectAll(filtered);
-                      }}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <h2 className="text-2xl sm:text-3xl font-black text-zinc-900 tracking-tight truncate">
+                    {productForm.name || "Unnamed Product"}
+                  </h2>
+                  <Badge variant="outline" className={cn(
+                    "text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full",
+                    (getProductStock(editingProductId || "", "all") / 4.2) < 7 ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-emerald-50 text-emerald-600 border-emerald-100"
+                  )}>
+                    {editingProductId ? "Update Live Assets" : "Initialization"}
+                  </Badge>
+                </div>
+                <p className="text-xs font-mono text-zinc-400 font-bold uppercase tracking-widest">{productForm.sku || "NO-SKU"}</p>
+                <div className="mt-4 flex flex-col gap-2 shadow-inner bg-zinc-50/50 p-3 rounded-2xl border border-zinc-100/50">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Stock Saturation</span>
+                    <span className="text-[10px] font-black text-zinc-900">{Math.round((getProductStock(editingProductId || "", "all") / (productForm.maxStock || 100)) * 100)}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-zinc-100 rounded-full overflow-hidden">
+                    <div 
+                      className={cn(
+                        "h-full rounded-full transition-all duration-1000 ease-out",
+                        (getProductStock(editingProductId || "", "all") / (productForm.maxStock || 100)) < 0.2 ? "bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]" : "bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.3)]"
+                      )}
+                      style={{ width: `${Math.min(100, (getProductStock(editingProductId || "", "all") / (productForm.maxStock || 100)) * 100)}%` }}
                     />
-                  </TableHead>
-                  <TableHead className="w-[300px] font-bold text-zinc-900 py-4">Product</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Branch Stock</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Total Stock</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Price</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Status</TableHead>
-                  <TableHead className="text-right font-bold text-zinc-900 py-4">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  Array.from({ length: 6 }).map((_, i) => (
-                    <TableRow key={i}>
-                      <TableCell><div className="h-10 w-48 bg-zinc-100 rounded-lg animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-12 bg-zinc-100 rounded animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-20 bg-zinc-100 rounded animate-pulse" /></TableCell>
-                      <TableCell><div className="h-4 w-16 bg-zinc-100 rounded animate-pulse" /></TableCell>
-                      <TableCell><div className="h-6 w-20 bg-zinc-100 rounded-full animate-pulse" /></TableCell>
-                      <TableCell />
-                    </TableRow>
-                  ))
-                ) : products
-                  .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
-                  .filter(p => {
-                    const name = (p.name || "").toLowerCase();
-                    const sku = (p.sku || "").toLowerCase();
-                    const category = (p.category || "").toLowerCase();
-                    const term = searchTerm.toLowerCase();
-                    const matchesSearch = !term || name.includes(term) || sku.includes(term) || category.includes(term);
-                    const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
-                    return matchesSearch && matchesCat;
-                  })
-                  .length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="py-16 text-center">
-                        <div className="flex flex-col items-center gap-3 text-zinc-400">
-                          <Package className="w-10 h-10 opacity-30" />
-                          <p className="text-sm font-bold">
-                            {searchTerm ? `No products match "${searchTerm}"` : "No products in inventory yet"}
-                          </p>
-                          {!searchTerm && (
-                            <Button variant="outline" size="sm" className="rounded-lg" onClick={() => openProductSheet()}>
-                              <Plus className="w-4 h-4 mr-2" /> Add First Product
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : products
-                  .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
-                  .filter(p => {
-                    const name = (p.name || "").toLowerCase();
-                    const sku = (p.sku || "").toLowerCase();
-                    const category = (p.category || "").toLowerCase();
-                    const term = searchTerm.toLowerCase();
-                    const matchesSearch = !term || name.includes(term) || sku.includes(term) || category.includes(term);
-                    const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
-                    return matchesSearch && matchesCat;
-                  })
-                  .map((item) => {
-                  const branchStock = getProductStock(item.id, activeBranch);
-                  const totalStock = getProductStock(item.id, "all");
-                  const status = totalStock === 0 ? "Out of Stock" : totalStock <= (item.min_stock_level || 10) ? "Low Stock" : "In Stock";
-
-                  return (
-                    <TableRow key={item.id} className={cn("hover:bg-zinc-50/30 transition-colors border-b border-zinc-50", selectedProducts.includes(item.id) && "bg-blue-50/50")}>
-                      <TableCell className="py-4">
-                        <input 
-                          type="checkbox" 
-                          className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                          checked={selectedProducts.includes(item.id)}
-                          onChange={() => toggleSelectProduct(item.id)}
-                        />
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-xl border border-zinc-100 bg-zinc-50 overflow-hidden flex items-center justify-center shrink-0 shadow-sm">
-                            {item.image_url ? (
-                              <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
-                            ) : (
-                              <Box className="w-5 h-5 text-zinc-300" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="font-bold text-zinc-900 leading-tight">{item.name}</p>
-                            <p className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider mt-1">{item.sku}</p>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-bold text-zinc-900">{branchStock}</span>
-                          <span className="text-[10px] text-zinc-400 font-medium">{activeBranch === "all" ? "Global" : "at current branch"}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between w-32">
-                            <span className="text-sm font-bold text-zinc-900">{totalStock}</span>
-                            <span className="text-[10px] text-zinc-400 font-medium">Global</span>
-                          </div>
-                          <div className="w-32 h-1.5 bg-zinc-100 rounded-full overflow-hidden">
-                            <div 
-                              className={cn(
-                                "h-full rounded-full transition-all duration-500",
-                                totalStock === 0 ? "bg-zinc-300" : 
-                                totalStock <= (item.min_stock_level || 10) ? "bg-rose-500" : "bg-blue-500"
-                              )}
-                              style={{ width: `${Math.min(100, (totalStock / ((item.min_stock_level || 10) * 5)) * 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4 font-bold text-zinc-900">{formatCurrency(item.retail_price || item.price)}</TableCell>
-                      <TableCell className="py-4">
-                        <Badge className={cn(
-                          "text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full",
-                          status === "In Stock" ? "bg-emerald-50 text-emerald-600 border-emerald-100" : 
-                          status === "Low Stock" ? "bg-amber-50 text-amber-600 border-amber-100" : 
-                          "bg-rose-50 text-rose-600 border-rose-100"
-                        )}>
-                          {status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right py-4">
-                        <DropdownMenu>
-                        <DropdownMenuTrigger
-                          render={
-                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-zinc-100">
-                              <MoreHorizontal className="w-4 h-4" />
-                            </Button>
-                          }
-                        />
-                          <DropdownMenuContent align="end" className="w-48 rounded-xl border-zinc-200">
-                            <DropdownMenuItem 
-                              className="flex items-center gap-2 py-2 cursor-pointer"
-                              onClick={() => openProductSheet(item)}
-                            >
-                              <Box className="w-4 h-4" /> Edit Product
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              className="flex items-center gap-2 py-2 cursor-pointer"
-                              onClick={() => handleOpenUpdateStock(item)}
-                            >
-                              <Layers className="w-4 h-4" /> Update Stock
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              className="flex items-center gap-2 py-2 cursor-pointer"
-                              onClick={() => handleOpenAnalytics(item)}
-                            >
-                              <BarChart3 className="w-4 h-4" /> View Analytics
-                            </DropdownMenuItem>
-                            <DropdownMenuItem 
-                              className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600"
-                              onClick={() => handleDeleteProduct(item)}
-                            >
-                              Delete Product
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </Card>
-
-          {selectedProducts.length > 0 && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-zinc-900 text-white rounded-2xl px-6 py-4 shadow-2xl flex items-center gap-6 border border-zinc-800">
-                <div className="flex items-center gap-2">
-                  <span className="bg-blue-600 text-white w-6 h-6 rounded-full text-[10px] flex items-center justify-center font-bold">
-                    {selectedProducts.length}
-                  </span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Items Selected</span>
-                </div>
-                <div className="w-px h-6 bg-zinc-800" />
-                <div className="flex items-center gap-3">
-                  <Button 
-                    variant="ghost" 
-                    className="h-10 text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 font-bold text-xs rounded-xl"
-                    disabled={isBatchDeleting}
-                    onClick={handleBatchDelete}
-                  >
-                    {isBatchDeleting ? "Deleting..." : "Delete Permanently"}
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    className="h-10 text-zinc-400 hover:text-white hover:bg-zinc-800 font-bold text-xs rounded-xl"
-                    onClick={() => setSelectedProducts([])}
-                  >
-                    Clear Selection
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="movements" className="space-y-4">
-          <Card className="card-modern overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
-                  <TableHead className="w-[50px] py-4">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                      checked={movements.length > 0 && selectedMovements.length === movements.filter(m => {
-                        if (activeBranch !== "all" && m.to !== activeBranch && m.from !== activeBranch && m.to !== branches.find(b=>b.id===activeBranch)?.name) return false;
-                        return true;
-                      }).length}
-                      onChange={() => {
-                        const filtered = movements.filter(m => {
-                          if (activeBranch !== "all" && m.to !== activeBranch && m.from !== activeBranch && m.to !== branches.find(b=>b.id===activeBranch)?.name) return false;
-                          return true;
-                        });
-                        if (selectedMovements.length === filtered.length) {
-                          setSelectedMovements([]);
-                        } else {
-                          setSelectedMovements(filtered.map(m => m.id));
-                        }
-                      }}
-                    />
-                  </TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">ID</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Type</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Product</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Route</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Quantity</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Date</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {movements.filter(m => {
-                  if (activeBranch !== "all" && m.to !== activeBranch && m.from !== activeBranch && m.to !== branches.find(b=>b.id===activeBranch)?.name) return false;
-                  return true;
-                }).map((m) => (
-                  <TableRow key={m.id} className={cn("hover:bg-zinc-50/30 transition-colors border-b border-zinc-50", selectedMovements.includes(m.id) && "bg-blue-50/50")}>
-                    <TableCell className="py-4">
-                      <input 
-                        type="checkbox" 
-                        className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                        checked={selectedMovements.includes(m.id)}
-                        onChange={() => {
-                          setSelectedMovements(prev => 
-                            prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
-                          );
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell className="py-4 font-mono text-[10px] font-bold text-zinc-400">{m.id.substring(0,8)}...</TableCell>
-                    <TableCell className="py-4">
-                      <Badge variant="outline" className={cn(
-                        "text-[10px] font-bold uppercase",
-                        m.type === "TRANSFER" ? "text-blue-600 border-blue-100 bg-blue-50" :
-                        m.type === "PURCHASE" ? "text-emerald-600 border-emerald-100 bg-emerald-50" :
-                        "text-amber-600 border-amber-100 bg-amber-50"
-                      )}>
-                        {m.type}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-4 font-bold text-zinc-900">{m.product}</TableCell>
-                    <TableCell className="py-4">
-                      <div className="flex items-center gap-2 text-xs text-zinc-500">
-                        <span className="font-bold text-zinc-700">{m.from}</span>
-                        <ChevronRight className="w-3 h-3" />
-                        <span className="font-bold text-zinc-700">{m.to}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-4 font-bold text-zinc-900">{m.qty > 0 ? `+${m.qty}` : m.qty}</TableCell>
-                    <TableCell className="py-4 text-xs text-zinc-500">{m.date}</TableCell>
-                    <TableCell className="py-4">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger className="focus:outline-none">
-                          <div className={cn(
-                            "flex items-center gap-1.5 px-3 py-1.5 rounded-full border cursor-pointer hover:opacity-80 transition-opacity",
-                            m.status === "COMPLETED" ? "bg-emerald-50 border-emerald-100" :
-                            m.status === "CANCELLED" ? "bg-rose-50 border-rose-100" :
-                            m.status === "IN_TRANSIT" ? "bg-blue-50 border-blue-100" :
-                            "bg-amber-50 border-amber-100"
-                          )}>
-                            {m.status === "COMPLETED" ? (
-                              <CheckCircle2 className="w-3 h-3 text-emerald-500" />
-                            ) : m.status === "CANCELLED" ? (
-                              <AlertCircle className="w-3 h-3 text-rose-500" />
-                            ) : m.status === "IN_TRANSIT" ? (
-                              <Truck className="w-3 h-3 text-blue-500" />
-                            ) : (
-                              <Clock className="w-3 h-3 text-amber-500" />
-                            )}
-                            <span className={cn(
-                              "text-[10px] font-bold uppercase tracking-wider",
-                              m.status === "COMPLETED" ? "text-emerald-600" : 
-                              m.status === "CANCELLED" ? "text-rose-600" :
-                              m.status === "IN_TRANSIT" ? "text-blue-600" :
-                              "text-amber-600"
-                            )}>
-                              {m.status}
-                            </span>
-                            <ChevronRight className="w-3 h-3 text-zinc-400 rotate-90 ml-1" />
-                          </div>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="rounded-xl border-zinc-200">
-                          <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "COMPLETED")}>Set Completed</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "IN_TRANSIT")}>Set In Transit</DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "PENDING")}>Set Pending</DropdownMenuItem>
-                          <DropdownMenuItem className="text-rose-600" onClick={() => handleUpdateMovementStatus(m, "CANCELLED")}>Cancel Movement</DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Card>
-
-          {selectedMovements.length > 0 && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-zinc-900 text-white rounded-2xl px-6 py-4 shadow-2xl flex items-center gap-6 border border-zinc-800">
-                <div className="flex items-center gap-2">
-                  <span className="bg-blue-600 text-white w-6 h-6 rounded-full text-[10px] flex items-center justify-center font-bold">
-                    {selectedMovements.length}
-                  </span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Records Selected</span>
-                </div>
-                <div className="w-px h-6 bg-zinc-800" />
-                <div className="flex items-center gap-3">
-                  <Button 
-                    variant="ghost" 
-                    className="h-10 text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 font-bold text-xs rounded-xl"
-                    disabled={isBatchDeletingMovements}
-                    onClick={handleBatchDeleteMovements}
-                  >
-                    {isBatchDeletingMovements ? "Deleting..." : "Delete Logs"}
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    className="h-10 text-zinc-400 hover:text-white hover:bg-zinc-800 font-bold text-xs rounded-xl"
-                    onClick={() => setSelectedMovements([])}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="suppliers" className="space-y-4">
-          <div className="flex items-center justify-end">
-            <Dialog open={isSupplierDialogOpen} onOpenChange={setIsSupplierDialogOpen}>
-              <DialogTrigger
-                render={
-                  <Button className="rounded-xl bg-zinc-900 text-white h-11 px-6 font-bold text-xs">
-                    <Plus className="w-4 h-4 mr-2" /> Add Supplier
-                  </Button>
-                }
-              />
-              <DialogContent className="rounded-3xl border-zinc-200">
-                <DialogHeader>
-                  <DialogTitle className="text-2xl font-bold font-display tracking-tight">Add New Supplier</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 py-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Supplier Name</label>
-                    <Input 
-                      className="rounded-xl h-11" 
-                      value={newSupplier.name}
-                      onChange={(e) => setNewSupplier({...newSupplier, name: e.target.value})}
-                      placeholder="e.g. Acme Corp"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500 uppercase">Contact Person</label>
-                    <Input 
-                      className="rounded-xl h-11" 
-                      value={newSupplier.contact}
-                      onChange={(e) => setNewSupplier({...newSupplier, contact: e.target.value})}
-                      placeholder="e.g. John Doe"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Email Address</label>
-                      <Input 
-                        className="rounded-xl h-11" 
-                        value={newSupplier.email}
-                        onChange={(e) => setNewSupplier({...newSupplier, email: e.target.value})}
-                        placeholder="e.g. john@acme.com"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-zinc-500 uppercase">Phone Number</label>
-                      <Input 
-                        className="rounded-xl h-11" 
-                        value={newSupplier.phone}
-                        onChange={(e) => setNewSupplier({...newSupplier, phone: e.target.value})}
-                        placeholder="e.g. +1 555 123 4567"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button 
-                    className="w-full rounded-xl bg-zinc-900 text-white h-12 font-bold" 
-                    onClick={handleAddSupplier}
-                    disabled={isSavingSupplier}
-                  >
-                    {isSavingSupplier ? "Saving..." : "Save Supplier"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          </div>
-          <Card className="card-modern overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
-                  <TableHead className="w-[50px] py-4">
-                    <input 
-                      type="checkbox" 
-                      className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                      checked={suppliers.length > 0 && selectedSuppliers.length === suppliers.length}
-                      onChange={() => {
-                        if (selectedSuppliers.length === suppliers.length) {
-                          setSelectedSuppliers([]);
-                        } else {
-                          setSelectedSuppliers(suppliers.map(s => s.id));
-                        }
-                      }}
-                    />
-                  </TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Supplier Name</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Contact</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Email</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Phone</TableHead>
-                  <TableHead className="font-bold text-zinc-900 py-4">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {suppliers.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center py-8 text-zinc-500">No suppliers found.</TableCell>
-                  </TableRow>
-                ) : (
-                  suppliers.map((s) => (
-                    <TableRow key={s.id} className={cn("hover:bg-zinc-50/30 transition-colors border-b border-zinc-50", selectedSuppliers.includes(s.id) && "bg-blue-50/50")}>
-                      <TableCell className="py-4">
-                        <input 
-                          type="checkbox" 
-                          className="rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
-                          checked={selectedSuppliers.includes(s.id)}
-                          onChange={() => {
-                            setSelectedSuppliers(prev => 
-                              prev.includes(s.id) ? prev.filter(id => id !== s.id) : [...prev, s.id]
-                            );
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell className="py-4 font-bold text-zinc-900">{s.name}</TableCell>
-                      <TableCell className="py-4 text-zinc-600">{s.contact}</TableCell>
-                      <TableCell className="py-4 text-zinc-600">{s.email}</TableCell>
-                      <TableCell className="py-4 text-zinc-600">{s.phone}</TableCell>
-                      <TableCell className="py-4">
-                        <Badge variant="outline" className={cn(
-                          "text-[10px] font-bold uppercase",
-                          s.status === "ACTIVE" ? "text-emerald-600 border-emerald-100 bg-emerald-50" : "text-zinc-600 border-zinc-200 bg-zinc-50"
-                        )}>
-                          {s.status || "ACTIVE"}
-                        </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </Card>
-
-          {selectedSuppliers.length > 0 && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-              <div className="bg-zinc-900 text-white rounded-2xl px-6 py-4 shadow-2xl flex items-center gap-6 border border-zinc-800">
-                <div className="flex items-center gap-2">
-                  <span className="bg-blue-600 text-white w-6 h-6 rounded-full text-[10px] flex items-center justify-center font-bold">
-                    {selectedSuppliers.length}
-                  </span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Suppliers Selected</span>
-                </div>
-                <div className="w-px h-6 bg-zinc-800" />
-                <div className="flex items-center gap-3">
-                  <Button 
-                    variant="ghost" 
-                    className="h-10 text-rose-500 hover:text-rose-400 hover:bg-rose-500/10 font-bold text-xs rounded-xl"
-                    disabled={isBatchDeletingSuppliers}
-                    onClick={handleBatchDeleteSuppliers}
-                  >
-                    {isBatchDeletingSuppliers ? "Deleting..." : "Delete Suppliers"}
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    className="h-10 text-zinc-400 hover:text-white hover:bg-zinc-800 font-bold text-xs rounded-xl"
-                    onClick={() => setSelectedSuppliers([])}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      <Sheet open={isProductSheetOpen} onOpenChange={setIsProductSheetOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-xl border-none sm:border-l border-zinc-200 bg-zinc-50 flex flex-col p-0 shadow-2xl h-[100dvh] transition-transform duration-500">
-          <SheetHeader className="p-5 sm:p-8 bg-white border-b border-zinc-100 flex-none relative">
-            <div className="flex items-center justify-between pr-8">
-              <div>
-                <SheetTitle className="font-display tracking-tight text-xl sm:text-2xl text-zinc-900">
-                  {editingProductId ? "Edit Product" : "New Product"}
-                </SheetTitle>
-                <SheetDescription className="text-[10px] sm:text-sm text-zinc-500">
-                  {editingProductId ? "Modify product details." : "Add to catalog directory."}
-                </SheetDescription>
-              </div>
-            </div>
-          </SheetHeader>
-          
-          <div className="flex-1 overflow-y-auto no-scrollbar touch-pan-y">
-            <div className="p-5 md:p-8 space-y-6 md:space-y-8">
-              {/* Product Image Section */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-zinc-900 mb-4 border-b border-zinc-200/50 pb-2">
-                  <Camera className="w-4 h-4 text-zinc-400" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Product Photography</span>
-                </div>
-                
-                <div className="flex flex-col items-center justify-center gap-4">
-                  <div className="relative w-full aspect-square max-w-[160px] sm:max-w-[200px] rounded-[2rem] sm:rounded-[2.5rem] overflow-hidden bg-white border-2 border-zinc-100 shadow-inner flex items-center justify-center group">
-                    {productForm.image_url ? (
-                      <>
-                        <img src={productForm.image_url} alt="Product" className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                          <Button 
-                            variant="destructive" 
-                            size="icon" 
-                            className="rounded-full w-10 h-10"
-                            onClick={() => setProductForm({...productForm, image_url: ""})}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex flex-col items-center text-center p-6">
-                        <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-zinc-50 flex items-center justify-center mb-3">
-                          <ImageIcon className="w-5 h-5 sm:w-6 sm:h-6 text-zinc-300" />
-                        </div>
-                        <p className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-relaxed">
-                          No Asset<br/>Selected
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex gap-2 w-full max-w-[280px] sm:max-w-[300px]">
-                    <Button 
-                      onClick={() => setIsCameraOpen(true)}
-                      className="flex-1 rounded-2xl h-11 sm:h-12 bg-zinc-900 text-white hover:bg-zinc-800 font-bold gap-2 text-xs"
-                    >
-                      <Camera className="w-4 h-4" />
-                      Camera
-                    </Button>
-                    <div className="relative flex-1">
-                      <input 
-                        type="file" 
-                        id="product-image-upload" 
-                        className="hidden" 
-                        accept="image/*"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          
-                          const tid = toast.loading("Optimizing & Uploading...");
-                          try {
-                            // High-speed compression
-                            const img = new Image();
-                            const reader = new FileReader();
-
-                            const blob: Blob = await new Promise((resolve, reject) => {
-                              reader.onload = (ev) => {
-                                img.src = ev.target?.result as string;
-                                img.onload = () => {
-                                  const canvas = document.createElement("canvas");
-                                  const MAX_SIZE = 640;
-                                  let width = img.width;
-                                  let height = img.height;
-                                  if (width > height) {
-                                    if (width > MAX_SIZE) {
-                                      height *= MAX_SIZE / width;
-                                      width = MAX_SIZE;
-                                    }
-                                  } else {
-                                    if (height > MAX_SIZE) {
-                                      width *= MAX_SIZE / height;
-                                      height = MAX_SIZE;
-                                    }
-                                  }
-                                  canvas.width = width;
-                                  canvas.height = height;
-                                  const ctx = canvas.getContext("2d");
-                                  ctx?.drawImage(img, 0, 0, width, height);
-                                  canvas.toBlob((b) => b ? resolve(b) : reject("Err"), "image/jpeg", 0.7);
-                                };
-                              };
-                              reader.readAsDataURL(file);
-                            });
-
-                            const storageRef = ref(getStorage(), `products/manual_${Date.now()}.jpg`);
-                            await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
-                            const url = await getDownloadURL(storageRef);
-                            setProductForm(prev => ({ ...prev, image_url: url }));
-                            toast.success("Image optimized and synced", { id: tid });
-                          } catch (err) {
-                            toast.error("Process failed", { id: tid });
-                          }
-                        }}
-                      />
-                      <Button 
-                        variant="outline"
-                        className="w-full rounded-2xl h-11 sm:h-12 border-zinc-200 text-zinc-900 font-bold gap-2 text-xs"
-                        asChild
-                      >
-                        <label htmlFor="product-image-upload" className="cursor-pointer">
-                          <Plus className="w-4 h-4" />
-                          Upload
-                        </label>
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* General Info */}
-
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-blue-600 mb-4 border-b border-zinc-200/50 pb-2">
-                  <Box className="w-4 h-4" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Basic Information</span>
-                </div>
-                
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500">Product Name <span className="text-rose-500">*</span></label>
-                  <Input 
-                    className="rounded-xl h-11 sm:h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-blue-500/20 text-sm" 
-                    value={productForm.name}
-                    onChange={(e) => setProductForm({...productForm, name: e.target.value})}
-                    placeholder="e.g. Ergonomic Office Chair"
-                  />
-                </div>
-                
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-zinc-500">Category</label>
-                  <Input 
-                    className="rounded-xl h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-blue-500/20" 
-                    value={productForm.category}
-                    onChange={(e) => setProductForm({...productForm, category: e.target.value})}
-                    placeholder="e.g. Furniture"
-                  />
-                </div>
-              </div>
-
-              {/* Identifiers */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-indigo-600 mb-4 border-b border-zinc-200/50 pb-2">
-                  <ScanLine className="w-4 h-4 text-indigo-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Identifiers</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2 relative">
-                    <label className="text-xs font-bold text-zinc-500 uppercase tracking-tighter">Barcode</label>
-                    <div className="relative group">
-                      <Input 
-                        className="rounded-xl h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20 pr-12 transition-all" 
-                        value={productForm.barcode}
-                        onChange={(e) => setProductForm({...productForm, barcode: e.target.value})}
-                        placeholder="Scan or type..."
-                      />
-                      <Button 
-                        size="icon" 
-                        variant="ghost" 
-                        className="absolute right-1 top-1/2 -translate-y-1/2 rounded-lg h-10 w-10 text-blue-600 hover:bg-blue-50 transition-colors"
-                        onClick={() => setIsScannerOpen(true)}
-                      >
-                        <ScanLine className="w-4 h-4 animate-pulse group-hover:scale-110 transition-transform" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500">SKU Code</label>
-                    <div className="relative group">
-                      <Input 
-                        className="rounded-xl h-11 sm:h-12 bg-white border-zinc-200 font-mono text-xs focus:ring-2 focus:ring-indigo-500/20 pr-10" 
-                        value={productForm.sku}
-                        onChange={(e) => setProductForm({...productForm, sku: e.target.value})}
-                        placeholder="e.g. FUR-01"
-                      />
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-indigo-500 hover:bg-indigo-50 rounded-lg"
-                        onClick={() => {
-                          if (!productForm.name) {
-                            toast.error("Enter a product name first");
-                            return;
-                          }
-                          const prefix = (productForm.category || "GEN").substring(0, 3).toUpperCase();
-                          const mid = productForm.name.split(' ').map(w => w[0]).join('').toUpperCase().substring(0, 3);
-                          const random = Math.floor(100 + Math.random() * 900);
-                          setProductForm({...productForm, sku: `${prefix}-${mid}-${random}`});
-                          toast.success("SKU Generated");
-                        }}
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
                   </div>
                 </div>
               </div>
               
-              {/* Pricing & Stock */}
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-emerald-600 mb-4 border-b border-zinc-200/50 pb-2">
-                  <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Pricing & Inventory</span>
+              <div className="hidden xl:flex items-center gap-4 border-l border-zinc-100 pl-8">
+                <div className="bg-zinc-50/50 rounded-2xl p-4 border border-zinc-100 flex flex-col gap-1 shadow-sm transition-all hover:bg-white hover:shadow-md cursor-default group">
+                   <div className="flex items-center gap-2 text-blue-500 group-hover:text-blue-600 transition-colors">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-black uppercase tracking-widest leading-none">Runway</span>
+                   </div>
+                   <p className="text-xl font-black text-zinc-900">{Math.floor(getProductStock(editingProductId || "", "all") / 4.2) || 0} <span className="text-[10px] font-bold text-zinc-400 uppercase">days</span></p>
                 </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-blue-600">Initial Stock Quantity <span className="text-blue-400 opacity-50 text-[10px]">(Global)</span></label>
-                    <div className="relative">
-                      <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-blue-400" />
-                      <Input 
-                        type="number"
-                        min="0"
-                        className="rounded-xl h-12 bg-blue-50/30 border-blue-100 font-bold focus:ring-2 focus:ring-blue-500/20 pl-11" 
-                        value={productForm.initialStock || ""}
-                        onChange={(e) => setProductForm({...productForm, initialStock: parseInt(e.target.value) || 0})}
-                        placeholder="e.g. 100"
-                        disabled={!!editingProductId} // Direct stock management usually handled via Movements for existing products
-                      />
-                    </div>
-                  </div>
-                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500">Stock Alert Threshold</label>
-                    <Input 
-                      type="number"
-                      min="1"
-                      className="rounded-xl h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-amber-500/20" 
-                      value={productForm.minStock || ""}
-                      onChange={(e) => setProductForm({...productForm, minStock: parseInt(e.target.value) || 0})}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500">Cost Price</label>
-                    <Input 
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      className="rounded-xl h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-emerald-500/20" 
-                      value={productForm.cost || ""}
-                      onChange={(e) => {
-                        const newCost = parseFloat(e.target.value) || 0;
-                        setProductForm(prev => ({
-                          ...prev,
-                          cost: newCost,
-                          price: parseFloat((newCost + (newCost * (prev.markup / 100))).toFixed(2))
-                        }));
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-zinc-500">Markup (%)</label>
-                    <div className="relative">
-                      <Input 
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        className="rounded-xl h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-emerald-500/20" 
-                        value={productForm.markup || ""}
-                        onChange={(e) => {
-                          const newMarkup = parseFloat(e.target.value) || 0;
-                          setProductForm(prev => ({
-                            ...prev,
-                            markup: newMarkup,
-                            price: parseFloat((prev.cost + (prev.cost * (newMarkup / 100))).toFixed(2))
-                          }));
-                        }}
-                      />
-                      <Percent className="w-4 h-4 text-zinc-400 absolute right-4 top-1/2 -translate-y-1/2" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-emerald-600">Retail Price</label>
-                    <div className="relative">
-                      <div className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-zinc-400">$</div>
-                      <Input 
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="rounded-xl h-12 bg-emerald-50/50 border-emerald-200 text-emerald-700 font-bold focus:ring-2 focus:ring-emerald-500/20 pl-8" 
-                        value={productForm.price || ""}
-                        onChange={(e) => {
-                          const newPrice = parseFloat(e.target.value) || 0;
-                          setProductForm(prev => ({
-                            ...prev,
-                            price: newPrice,
-                            markup: prev.cost > 0 ? parseFloat((((newPrice - prev.cost) / prev.cost) * 100).toFixed(1)) : 0
-                          }));
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="space-y-2 pt-2">
-                  <label className="text-xs font-bold text-zinc-500">Low Stock Alert Threshold</label>
-                  <Input 
-                    type="number"
-                    min="1"
-                    className="rounded-xl h-12 bg-white border-zinc-200 focus:ring-2 focus:ring-amber-500/20" 
-                    value={productForm.minStock || ""}
-                    onChange={(e) => setProductForm({...productForm, minStock: parseInt(e.target.value) || 0})}
-                  />
-                  <p className="text-[10px] text-zinc-500 mt-1">Triggers low stock alerts in Copilot and Dashboard.</p>
+                <div className="bg-zinc-50/50 rounded-2xl p-4 border border-zinc-100 flex flex-col gap-1 shadow-sm transition-all hover:bg-white hover:shadow-md cursor-default group">
+                   <div className="flex items-center gap-2 text-emerald-500 group-hover:text-emerald-600 transition-colors">
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span className="text-[10px] font-black uppercase tracking-widest leading-none">Status</span>
+                   </div>
+                   <p className={cn(
+                     "text-xl font-black",
+                     (getProductStock(editingProductId || "", "all") / 4.2) < 7 ? "text-rose-500" : "text-emerald-500"
+                   )}>
+                     {(getProductStock(editingProductId || "", "all") / 4.2) < 7 ? "Urgent" : "Healthy"}
+                   </p>
                 </div>
               </div>
             </div>
           </div>
-          
-          <div className="p-5 sm:p-6 bg-white border-t border-zinc-100 flex-none sticky bottom-0">
-            <Button 
-              className="w-full rounded-2xl bg-zinc-900 text-white h-12 md:h-14 font-bold text-sm shadow-xl shadow-zinc-900/10 hover:bg-zinc-800 transition-all" 
-              onClick={handleSaveProduct}
-              disabled={isSavingProduct}
-            >
-              {isSavingProduct ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Processing...
+
+          {/* B. CONTROL PANEL CONTENT */}
+          <div className="max-w-5xl mx-auto p-8 pt-16 space-y-12 pb-32">
+            {/* SECTION 1: PRODUCT IDENTITY */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 text-zinc-900 border-b border-zinc-200/50 pb-3 group w-full text-left">
+                <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100 text-blue-600 transition-all group-hover:bg-blue-600 group-hover:text-white">
+                  <Box className="w-4 h-4" />
                 </div>
-              ) : editingProductId ? "Save Changes" : "Create Product"}
-            </Button>
+                <span className="text-xs font-black uppercase tracking-[0.2em]">1. Product Identity</span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Official Product Name</label>
+                    <span className="text-[10px] font-bold text-emerald-500 flex items-center gap-1"><Check className="w-3 h-3" /> Validated</span>
+                  </div>
+                  <Input 
+                    placeholder="e.g. Ergonomic Office Chair" 
+                    className="rounded-2xl h-14 bg-white border-zinc-200 font-bold focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm" 
+                    value={productForm.name}
+                    onChange={(e) => setProductForm({...productForm, name: e.target.value})}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Catalog Category</label>
+                    <Input 
+                      placeholder="e.g. Furniture" 
+                      className="rounded-2xl h-14 bg-white border-zinc-200 font-bold focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm uppercase" 
+                      value={productForm.category}
+                      onChange={(e) => setProductForm({...productForm, category: e.target.value})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Global SKU</label>
+                    <div className="relative">
+                       <Input 
+                        placeholder="SKU-..." 
+                        className="rounded-2xl h-14 bg-white border-zinc-200 font-mono focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm uppercase pr-10" 
+                        value={productForm.sku}
+                        onChange={(e) => setProductForm({...productForm, sku: e.target.value})}
+                       />
+                       <Zap className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-300" />
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">UPC/Barcode</label>
+                  <div className="relative group">
+                    <Scan className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-600 transition-colors" />
+                    <Input 
+                      placeholder="Scan subject..." 
+                      className="rounded-2xl h-14 bg-white border-zinc-200 font-mono focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all pl-11 text-sm uppercase" 
+                      value={productForm.barcode}
+                      onChange={(e) => setProductForm({...productForm, barcode: e.target.value})}
+                    />
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                       <button 
+                        type="button"
+                        onClick={() => setIsScannerOpen(true)}
+                        className="w-8 h-8 rounded-lg bg-zinc-50 border border-zinc-200 flex items-center justify-center text-zinc-400 hover:bg-zinc-900 hover:text-white transition-all shadow-sm"
+                       >
+                          <Maximize2 className="w-4 h-4" />
+                       </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 2: INVENTORY LOGIC */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 text-zinc-900 border-b border-zinc-200/50 pb-3 group">
+                <div className="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center border border-orange-100 text-orange-600 transition-all group-hover:bg-orange-600 group-hover:text-white">
+                  <Layers className="w-4 h-4" />
+                </div>
+                <span className="text-xs font-black uppercase tracking-[0.2em]">2. Inventory Logic</span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 bg-zinc-50/50 p-8 rounded-[2.5rem] border border-zinc-100">
+                <div className="grid grid-cols-2 gap-6 animate-in fade-in slide-in-from-left-2 duration-500">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Current System Stock</label>
+                    <div className="relative">
+                       <Package className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-orange-400" />
+                       <Input 
+                        type="number"
+                        className="rounded-2xl h-14 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-orange-500/10 shadow-sm transition-all pl-11 h-14" 
+                        value={productForm.initialStock}
+                        onChange={(e) => setProductForm({...productForm, initialStock: parseInt(e.target.value) || 0})}
+                        disabled={!!editingProductId}
+                       />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Adjustment Rationale</label>
+                    <Select value={productForm.adjustmentReason} onValueChange={(v: any) => setProductForm({...productForm, adjustmentReason: v})}>
+                       <SelectTrigger className="rounded-2xl h-14 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-orange-500/10 shadow-sm transition-all px-4">
+                          <SelectValue placeholder="Reason" />
+                       </SelectTrigger>
+                       <SelectContent className="rounded-2xl border-zinc-200 bg-white">
+                          <SelectItem value="RECOUNT" className="font-bold">PHYSICAL RECOUNT</SelectItem>
+                          <SelectItem value="DAMAGE" className="font-bold text-rose-500">DAMAGED / WASTE</SelectItem>
+                          <SelectItem value="RETURN" className="font-bold text-blue-500">CUSTOMER RETURN</SelectItem>
+                          <SelectItem value="RESTOCK" className="font-bold text-emerald-500">CORE RESTOCK</SelectItem>
+                       </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Reorder Level <span className="text-rose-500 font-black">(MIN)</span></label>
+                    <Input 
+                      type="number"
+                      className="rounded-2xl h-14 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-rose-500/10 shadow-sm transition-all text-rose-600 h-14" 
+                      value={productForm.minStock}
+                      onChange={(e) => setProductForm({...productForm, minStock: parseInt(e.target.value) || 0})}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Maximum Buffer <span className="text-emerald-500 font-black">(MAX)</span></label>
+                    <Input 
+                      type="number"
+                      className="rounded-2xl h-14 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-amber-500/10 shadow-sm transition-all text-emerald-600 h-14" 
+                      value={productForm.maxStock}
+                      onChange={(e) => setProductForm({...productForm, maxStock: parseInt(e.target.value) || 0})}
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Supplier Lead Time <span className="text-zinc-300">(Days to Arrive)</span></label>
+                    <div className="relative">
+                       <Truck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                       <Input 
+                        type="number"
+                        className="rounded-2xl h-14 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-amber-500/10 shadow-sm transition-all pl-11 h-14" 
+                        value={productForm.leadTime}
+                        onChange={(e) => setProductForm({...productForm, leadTime: parseInt(e.target.value) || 0})}
+                       />
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="bg-white rounded-[2rem] p-8 border border-zinc-200 shadow-xl relative overflow-hidden flex flex-col justify-center gap-4">
+                   <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16" />
+                   <div className="space-y-1 min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Live Velocity Insight</p>
+                      <p className="text-3xl font-black text-zinc-900 leading-none">4.2 <span className="text-xs font-bold text-zinc-400 tracking-normal">units / day</span></p>
+                   </div>
+                   <div className="h-px bg-zinc-100" />
+                   <div className="space-y-1">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Stock Out Risk</p>
+                      <div className="flex items-center gap-3">
+                         <div className="flex-1 h-3 bg-zinc-50 rounded-full border border-zinc-100 overflow-hidden">
+                            <div className="h-full bg-emerald-400 w-[15%] rounded-full shadow-[0_0_10px_rgba(52,211,153,0.4)]" />
+                         </div>
+                         <span className="text-xs font-black text-emerald-500">LOW</span>
+                      </div>
+                   </div>
+                   <div className="mt-4 p-4 bg-blue-50/50 rounded-2xl border border-blue-100/50">
+                      <p className="text-[10px] font-medium text-blue-600/70 leading-relaxed italic">
+                        "Optimized for {activeBranch === "all" ? "Enterprise" : branches.find(b=>b.id===activeBranch)?.name} deployment. Recommended reorder trigger: <b>{Math.ceil(4.2 * productForm.leadTime) + productForm.minStock} units</b>."
+                      </p>
+                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 3: PRICING ENGINE */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 text-zinc-900 border-b border-zinc-200/50 pb-3 group">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center border border-emerald-100 text-emerald-600 transition-all group-hover:bg-emerald-600 group-hover:text-white">
+                  <TrendingUp className="w-4 h-4" />
+                </div>
+                <span className="text-xs font-black uppercase tracking-[0.2em]">3. Pricing Engine</span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Unit Cost Price</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-black">$</span>
+                    <Input 
+                      type="number"
+                      step="0.01"
+                      className="rounded-2xl h-16 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-sm transition-all pl-8 py-4 text-base" 
+                      value={productForm.cost || ""}
+                      onChange={(e) => {
+                        const cost = parseFloat(e.target.value) || 0;
+                        const markup = productForm.markup || 0;
+                        const price = markup < 100 ? cost / (1 - markup / 100) : cost;
+                        setProductForm({...productForm, cost, price: parseFloat(price.toFixed(2))});
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Target Margin (%)</label>
+                  <div className="relative">
+                    <Input 
+                      type="number"
+                      step="0.1"
+                      className="rounded-2xl h-16 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-sm transition-all pr-8 py-4 text-base" 
+                      value={productForm.markup || ""}
+                      onChange={(e) => {
+                        const markup = parseFloat(e.target.value) || 0;
+                        const safeMarkup = Math.min(markup, 99.9);
+                        const price = productForm.cost / (1 - safeMarkup / 100);
+                        setProductForm({...productForm, markup, price: parseFloat(price.toFixed(2))});
+                      }}
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">%</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Market Retail Price</label>
+                  <div className="relative group">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-black">$</span>
+                    <Input 
+                      type="number"
+                      step="0.01"
+                      className="rounded-2xl h-16 bg-emerald-50 border-emerald-100 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-inner transition-all pl-8 text-emerald-700 py-4 text-base" 
+                      value={productForm.price || ""}
+                      onChange={(e) => {
+                        const price = parseFloat(e.target.value) || 0;
+                        const markup = price > 0 ? ((price - productForm.cost) / price) * 100 : 0;
+                        setProductForm({...productForm, price, markup: parseFloat(markup.toFixed(1))});
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="md:col-span-3 bg-zinc-900 rounded-[2.5rem] p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl relative overflow-hidden group border border-zinc-800">
+                   <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                   <div className="space-y-1 min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500 truncate">Estimated Unit Profit</p>
+                      <p className="text-xl sm:text-2xl md:text-4xl font-black text-emerald-400 tracking-tight truncate leading-none">
+                        ${Math.max(0, productForm.price - productForm.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </p>
+                   </div>
+                   <div className="space-y-1 text-right min-w-0">
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500 truncate">Gross Margin</p>
+                      <p className="text-xl sm:text-2xl md:text-4xl font-black text-white tracking-tight truncate leading-none">
+                        {productForm.price > 0 ? (((productForm.price - productForm.cost) / productForm.price) * 100).toFixed(1) : "0.0"}%
+                      </p>
+                   </div>
+                </div>
+              </div>
+            </div>
+
+            {/* SECTION 4: AUTOMATION & AI INSIGHTS */}
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 text-zinc-900 border-b border-zinc-200/50 pb-3 group">
+                <div className="w-8 h-8 rounded-xl bg-purple-50 flex items-center justify-center border border-purple-100 text-purple-600 transition-all group-hover:bg-purple-600 group-hover:text-white">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <span className="text-xs font-black uppercase tracking-[0.2em]">4. Automation & AI</span>
+              </div>
+              
+              <div className="space-y-6 animate-in fade-in slide-in-from-top-2 duration-500">
+                 <div className="flex items-center justify-between p-7 bg-white rounded-[2.5rem] border border-zinc-100 shadow-sm hover:shadow-md transition-all">
+                    <div className="flex items-center gap-5">
+                       <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center border border-blue-100 text-blue-600 shadow-sm">
+                          <RefreshCw className={cn("w-7 h-7", productForm.autoReorder && "animate-spin-slow")} />
+                       </div>
+                       <div>
+                          <p className="font-black text-zinc-900 text-base">Autonomous Replenishment</p>
+                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mt-1">Self-Optimizing PO Generation</p>
+                       </div>
+                    </div>
+                    <Switch 
+                      checked={productForm.autoReorder}
+                      onCheckedChange={(checked) => setProductForm({...productForm, autoReorder: checked})}
+                      className="data-[state=checked]:bg-blue-600"
+                    />
+                 </div>
+
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="p-7 bg-white rounded-[2.5rem] border border-zinc-100 shadow-sm space-y-3 hover:border-blue-200 transition-colors group">
+                       <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Predicted Burn Rate</span>
+                          <Zap className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
+                       </div>
+                       <div className="flex items-end gap-2">
+                          <p className="text-2xl font-black text-zinc-900 leading-none">12.5 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">units / week</span></p>
+                       </div>
+                    </div>
+                    <div className="p-7 bg-white rounded-[2.5rem] border border-zinc-100 shadow-sm space-y-3 hover:border-blue-200 transition-colors group">
+                       <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">AI Suggested PO</span>
+                          <Sparkles className="w-4 h-4 text-blue-500 group-hover:rotate-12 transition-transform" />
+                       </div>
+                       <div className="flex items-end gap-2">
+                          <p className="text-2xl font-black text-zinc-900 leading-none">45 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">units</span></p>
+                       </div>
+                    </div>
+                 </div>
+
+                 <div className="p-6 bg-zinc-900 rounded-[2.5rem] border border-zinc-800 flex items-start gap-5 shadow-2xl">
+                    <div className="w-12 h-12 rounded-2xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0 mt-0.5 border border-blue-500/20">
+                       <Info className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1.5">
+                       <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] px-0">System Intelligence</p>
+                       <p className="text-[12px] font-medium text-zinc-400 leading-relaxed max-w-2xl">
+                         Lead time is calibrated to <b>{productForm.leadTime} days</b>. Logistics simulation indicates replenishment must trigger when stock hits <b>{Math.ceil(4.2 * productForm.leadTime) + productForm.minStock}</b> to ensure continuity.
+                       </p>
+                    </div>
+                 </div>
+              </div>
+            </div>
           </div>
-        </SheetContent>
-      </Sheet>
+          
+          {/* C. ACTION FOOTER */}
+          <div className="bg-white border-t border-zinc-100 flex-none sticky bottom-0 z-20 shadow-[0_-20px_40px_rgba(0,0,0,0.04)] backdrop-blur-2xl bg-white/95 pb-safe">
+            <div className="max-w-5xl mx-auto p-6 md:p-8 flex flex-col gap-6">
+              {editingProductId && (
+                <div className="flex items-center gap-3 overflow-x-auto no-scrollbar py-1">
+                  <Button variant="outline" className="rounded-2xl font-black text-[10px] uppercase tracking-widest border-zinc-200 h-12 px-6 bg-zinc-50/50 hover:bg-zinc-900 hover:text-white transition-all gap-2 group flex-none">
+                      <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform" /> Add Stock
+                  </Button>
+                  <Button variant="outline" className="rounded-2xl font-black text-[10px] uppercase tracking-widest border-zinc-200 h-12 px-6 bg-zinc-50/50 hover:bg-zinc-900 hover:text-white transition-all gap-2 group flex-none" onClick={() => setIsTransferDialogOpen(true)}>
+                      <ArrowRightLeft className="w-4 h-4 group-hover:scale-110 transition-transform" /> Transfer
+                  </Button>
+                  <Button variant="outline" className="rounded-2xl font-black text-[10px] uppercase tracking-widest border-zinc-200 h-12 px-6 bg-zinc-50/50 hover:bg-zinc-900 hover:text-white transition-all gap-2 group flex-none" onClick={() => setIsPurchaseOrderOpen(true)}>
+                      <Truck className="w-4 h-4 group-hover:translate-x-1 transition-transform" /> Purchase Order
+                  </Button>
+                </div>
+              )}
+              
+              <div className="flex items-center justify-between gap-4">
+                <Button 
+                   variant="ghost" 
+                   className="rounded-2xl font-black text-[10px] uppercase tracking-widest text-zinc-400 hover:text-rose-500 px-8 h-14 transition-colors"
+                   onClick={() => setIsProductSheetOpen(false)}
+                >
+                  Cancel Changes
+                </Button>
+                <div className="flex items-center gap-3">
+                   <Button 
+                    className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 transition-all font-black text-[10px] uppercase tracking-widest px-10 h-14 shadow-xl shadow-zinc-900/20 disabled:opacity-50 min-w-[200px]"
+                    onClick={handleSaveProduct}
+                    disabled={isSavingProduct}
+                   >
+                    {isSavingProduct ? (
+                       <div className="flex items-center gap-2">
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          <span>Syncing...</span>
+                       </div>
+                    ) : editingProductId ? "Commit Asset Lifecycle" : "Deploy Product Asset"}
+                   </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="animate-in fade-in duration-700">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 px-4 md:px-0">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-blue-600">Inventory intelligence active</span>
+              </div>
+              <h1 className="text-3xl md:text-5xl font-black text-zinc-900 tracking-tighter font-display">Stock Management</h1>
+              <p className="text-sm font-medium text-zinc-500 mt-2 max-w-lg leading-relaxed">
+                Global inventory control, automated replenishment, and logistics tracking for all branch assets.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Button 
+                onClick={() => openProductSheet()}
+                className="bg-zinc-900 text-white hover:bg-zinc-800 rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest transition-all shadow-xl shadow-zinc-900/10 flex-1 sm:flex-none"
+              >
+                <Plus className="w-4 h-4 mr-2" /> Add Product
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => setIsScannerOpen(true)}
+                className="rounded-2xl h-14 px-6 border-zinc-200 font-black text-[10px] uppercase tracking-widest transition-all bg-white flex-1 sm:flex-none hover:border-blue-500 hover:text-blue-600 shadow-sm"
+              >
+                <ScanLine className="w-4 h-4 mr-2 text-blue-600" /> Scan Barcode
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={() => setIsTransferDialogOpen(true)}
+                className="rounded-2xl h-14 px-6 border-zinc-200 font-black text-[10px] uppercase tracking-widest transition-all bg-white flex-1 sm:flex-none hover:bg-zinc-50"
+              >
+                <ArrowRightLeft className="w-4 h-4 mr-2" /> Transfer Stock
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mt-10">
+            <Card className="card-modern border-blue-100 bg-blue-50/20 shadow-sm hover:shadow-md transition-all">
+              <CardContent className="p-6 flex items-center gap-4">
+                <div className="p-3 bg-white rounded-2xl shadow-sm text-blue-600 border border-blue-50">
+                  <Box className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Total SKUs</p>
+                  <p className="text-2xl text-zinc-900 font-black">{totalSKUs.toLocaleString()}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="card-modern border-rose-100 bg-rose-50/20 shadow-sm hover:shadow-md transition-all">
+              <CardContent className="p-6 flex items-center gap-4">
+                <div className="p-3 bg-white rounded-2xl shadow-sm text-rose-600 border border-rose-50">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-rose-600 uppercase tracking-widest mb-0.5">Critical Units</p>
+                  <p className="text-2xl text-zinc-900 font-black">{lowStockItems} Items</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="card-modern border-emerald-100 bg-emerald-50/20 shadow-sm hover:shadow-md transition-all">
+              <CardContent className="p-6 flex items-center gap-4">
+                <div className="p-3 bg-white rounded-2xl shadow-sm text-emerald-600 border border-emerald-50">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-0.5">Active Logistics</p>
+                  <p className="text-2xl text-zinc-900 font-black">{inTransit} Ships</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="card-modern border-zinc-100 bg-zinc-50/50 shadow-sm hover:shadow-md transition-all">
+              <CardContent className="p-6 flex items-center gap-4">
+                <div className="p-3 bg-white rounded-2xl shadow-sm text-zinc-600 border border-zinc-50">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-0.5">Inventory Value</p>
+                  <p className="text-2xl text-zinc-900 font-black">{formatCurrency(inventoryValue)}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6 mt-10">
+            <div className="w-full overflow-x-auto no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
+              <TabsList className="bg-zinc-100 p-1 rounded-2xl w-max flex gap-1 border border-zinc-200/50 shadow-inner">
+                <TabsTrigger value="stock" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Stock Levels</TabsTrigger>
+                <TabsTrigger value="movements" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Movements Log</TabsTrigger>
+                <TabsTrigger value="suppliers" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Partnerships</TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="stock" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white">
+                <div className="p-6 border-b border-zinc-100 flex flex-col md:flex-row md:items-center justify-between gap-5 bg-zinc-50/10">
+                  <div className="relative w-full md:w-96 group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
+                    <Input 
+                      placeholder="Search SKU, name or category..." 
+                      className="pl-11 rounded-[1.25rem] border-zinc-200 bg-white focus:ring-4 focus:ring-blue-500/10 transition-all h-12 font-medium text-sm shadow-sm"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                      <SelectTrigger className="w-[180px] rounded-[1.25rem] h-12 bg-white border-zinc-200 shadow-sm font-bold text-[10px] uppercase tracking-widest text-zinc-600">
+                        <Filter className="w-4 h-4 mr-2" />
+                        <SelectValue placeholder="All Categories" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-2xl bg-white border-zinc-200">
+                        <SelectItem value="all">ALL GROUPS</SelectItem>
+                        {categories.map(cat => (
+                          <SelectItem key={cat} value={cat} className="uppercase">{cat}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Button
+                      variant="outline"
+                      className="rounded-[1.25rem] border-zinc-200 text-zinc-600 h-12 font-black text-[10px] uppercase tracking-widest transition-all bg-white hover:bg-zinc-50 shadow-sm"
+                      onClick={() => {
+                        const rows = [
+                          ["Name", "SKU", "Category", "Branch Stock", "Total Stock", "Price", "Status"],
+                          ...products
+                            .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
+                            .map(p => [
+                              p.name,
+                              p.sku || "",
+                              p.category || "",
+                              getProductStock(p.id, activeBranch),
+                              getProductStock(p.id, "all"),
+                              p.retail_price || p.price || 0,
+                              getProductStock(p.id, "all") === 0 ? "Out of Stock" : getProductStock(p.id, "all") <= (p.min_stock || 10) ? "Low Stock" : "In Stock"
+                            ])
+                        ];
+                        const csv = rows.map(r => r.map(String).join(",")).join("\n");
+                        const blob = new Blob([csv], { type: "text/csv" });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = `inventory-${new Date().toISOString().split('T')[0]}.csv`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                        toast.success("Inventory asset report exported");
+                      }}
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Export
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                        <TableHead className="w-[60px] py-6 pl-6">
+                            <input 
+                              type="checkbox" 
+                              className="rounded-md border-zinc-300 text-blue-600 focus:ring-blue-500 h-4 w-4 bg-white"
+                              checked={products.length > 0 && selectedProducts.length === products.filter(p => {
+                                const name = (p.name || "").toLowerCase();
+                                const sku = (p.sku || "").toLowerCase();
+                                const term = searchTerm.toLowerCase();
+                                return !term || name.includes(term) || sku.includes(term);
+                              }).length}
+                              onChange={() => {
+                                const filtered = products.filter(p => {
+                                  const name = (p.name || "").toLowerCase();
+                                  const sku = (p.sku || "").toLowerCase();
+                                  const term = searchTerm.toLowerCase();
+                                  return !term || name.includes(term) || sku.includes(term);
+                                });
+                                toggleSelectAll(filtered);
+                              }}
+                            />
+                        </TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Asset Identification</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Local Stock</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Enterprise Stock</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Unit Value</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Lifecycle</TableHead>
+                        <TableHead className="text-right font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6">Management</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {loading ? (
+                        Array.from({ length: 6 }).map((_, i) => (
+                          <TableRow key={i} className="border-b border-zinc-50">
+                            <TableCell className="pl-6"><div className="h-4 w-4 bg-zinc-100 rounded animate-pulse" /></TableCell>
+                            <TableCell><div className="flex gap-3 items-center"><div className="h-12 w-12 bg-zinc-100 rounded-xl animate-pulse" /><div className="space-y-2"><div className="h-4 w-32 bg-zinc-100 rounded animate-pulse" /><div className="h-3 w-16 bg-zinc-100 rounded animate-pulse" /></div></div></TableCell>
+                            <TableCell><div className="h-4 w-12 bg-zinc-100 rounded animate-pulse" /></TableCell>
+                            <TableCell><div className="h-4 w-24 bg-zinc-100 rounded animate-pulse" /></TableCell>
+                            <TableCell><div className="h-4 w-16 bg-zinc-100 rounded animate-pulse" /></TableCell>
+                            <TableCell><div className="h-6 w-20 bg-zinc-100 rounded-full animate-pulse" /></TableCell>
+                            <TableCell className="pr-6" />
+                          </TableRow>
+                        ))
+                      ) : products
+                          .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
+                          .filter(p => {
+                            const name = (p.name || "").toLowerCase();
+                            const sku = (p.sku || "").toLowerCase();
+                            const category = (p.category || "").toLowerCase();
+                            const term = searchTerm.toLowerCase();
+                            const matchesSearch = !term || name.includes(term) || sku.includes(term) || category.includes(term);
+                            const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
+                            return matchesSearch && matchesCat;
+                          })
+                          .length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="py-24 text-center">
+                              <div className="flex flex-col items-center gap-4 text-zinc-400">
+                                <Box className="w-16 h-16 opacity-10" />
+                                <div className="space-y-1">
+                                  <p className="text-xl font-bold text-zinc-900">
+                                    {searchTerm ? "Zero matching assets found" : "Logistics empty"}
+                                  </p>
+                                  <p className="text-sm font-medium text-zinc-500">
+                                    {searchTerm ? "Refine your parameters or clear the cache." : "Begin adding inventory to track lifecycle performance."}
+                                  </p>
+                                </div>
+                                {!searchTerm && (
+                                  <Button className="rounded-2xl bg-zinc-900 text-white h-12 px-6 font-bold text-xs mt-2" onClick={() => openProductSheet()}>
+                                    <Plus className="w-4 h-4 mr-2" /> Initialize First Asset
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                        products
+                          .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
+                          .filter(p => {
+                            const name = (p.name || "").toLowerCase();
+                            const sku = (p.sku || "").toLowerCase();
+                            const category = (p.category || "").toLowerCase();
+                            const term = searchTerm.toLowerCase();
+                            const matchesSearch = !term || name.includes(term) || sku.includes(term) || category.includes(term);
+                            const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
+                            return matchesSearch && matchesCat;
+                          })
+                          .map((item) => {
+                            const branchStock = getProductStock(item.id, activeBranch);
+                            const totalStock = getProductStock(item.id, "all");
+                            const status = totalStock === 0 ? "OUT OF STOCK" : totalStock <= (item.min_stock_level || 10) ? "LOW STOCK" : "IN STOCK";
+
+                            return (
+                              <TableRow key={item.id} className={cn("hover:bg-zinc-50/80 transition-colors border-b border-zinc-50 group/row", selectedProducts.includes(item.id) && "bg-blue-50/50")}>
+                                <TableCell className="py-5 pl-6">
+                                  <input 
+                                    type="checkbox" 
+                                    className="rounded-md border-zinc-300 text-blue-600 focus:ring-blue-500 h-4 w-4 bg-white transition-all cursor-pointer group-hover/row:scale-110"
+                                    checked={selectedProducts.includes(item.id)}
+                                    onChange={() => toggleSelectProduct(item.id)}
+                                  />
+                                </TableCell>
+                                <TableCell className="py-5">
+                                  <div className="flex items-center gap-4">
+                                    <div className="w-14 h-14 rounded-2xl border border-zinc-100 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-sm transition-transform group-hover/row:scale-105">
+                                      {item.image_url ? (
+                                        <img src={item.image_url} alt={item.name} className="w-full h-full object-cover" />
+                                      ) : (
+                                        <Box className="w-6 h-6 text-zinc-300" />
+                                      )}
+                                    </div>
+                                    <div>
+                                      <p className="font-black text-zinc-900 leading-none mb-1.5 uppercase text-xs tracking-tight">{item.name}</p>
+                                      <p className="text-[10px] font-mono text-zinc-400 font-bold uppercase tracking-[0.2em]">{item.sku}</p>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-5 text-sm font-black text-zinc-900">{branchStock}</TableCell>
+                                <TableCell className="py-5">
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between w-32">
+                                      <span className="text-sm font-black text-zinc-900 leading-none">{totalStock}</span>
+                                      <span className="text-[9px] text-zinc-400 font-black uppercase tracking-widest leading-none">Global</span>
+                                    </div>
+                                    <div className="w-32 h-1.5 bg-zinc-100 rounded-full overflow-hidden border border-zinc-100/50">
+                                      <div 
+                                        className={cn(
+                                          "h-full rounded-full transition-all duration-700",
+                                          totalStock === 0 ? "bg-zinc-300" : 
+                                          totalStock <= (item.min_stock_level || 10) ? "bg-rose-500" : "bg-blue-500"
+                                        )}
+                                        style={{ width: `${Math.min(100, (totalStock / (item.max_stock_level || 100)) * 100)}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-5 font-black text-zinc-900 text-sm tracking-tight">{formatCurrency(item.retail_price || item.price)}</TableCell>
+                                <TableCell className="py-5">
+                                  <Badge className={cn(
+                                    "text-[9px] font-black uppercase tracking-[0.2em] px-2.5 py-1 rounded-full border shadow-sm",
+                                    status === "IN STOCK" ? "bg-emerald-50 text-emerald-600 border-emerald-100/50" : 
+                                    status === "LOW STOCK" ? "bg-amber-50 text-amber-600 border-amber-100/50" : 
+                                    "bg-rose-50 text-rose-600 border-rose-100/50"
+                                  )}>
+                                    {status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="text-right py-5 pr-6">
+                                  <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
+                                      <MoreHorizontal className="w-5 h-5" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
+                                      <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs" onClick={() => openProductSheet(item)}>
+                                        <Box className="w-4 h-4 text-zinc-400" /> Edit Product Profile
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs" onClick={() => handleOpenUpdateStock(item)}>
+                                        <Layers className="w-4 h-4 text-zinc-400" /> Adjust Stock Count
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs" onClick={() => handleOpenAnalytics(item)}>
+                                        <BarChart3 className="w-4 h-4 text-zinc-400" /> Performance Analytics
+                                      </DropdownMenuItem>
+                                      <div className="h-px bg-zinc-100 my-1" />
+                                      <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-rose-50 text-rose-600 font-bold text-xs" onClick={() => handleDeleteProduct(item)}>
+                                        <Trash2 className="w-4 h-4" /> Decommission Asset
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })
+                        )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </Card>
+
+              {selectedProducts.length > 0 && (
+                <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[60] animate-in fade-in slide-in-from-bottom-6 duration-500">
+                  <div className="bg-zinc-950 text-white rounded-[2.5rem] px-8 py-5 shadow-2xl flex items-center gap-8 border border-white/10 ring-8 ring-black/5">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-blue-600 text-white w-8 h-8 rounded-full text-xs flex items-center justify-center font-black shadow-lg shadow-blue-500/20">
+                        {selectedProducts.length}
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Assets Highlighted</span>
+                    </div>
+                    <div className="w-px h-8 bg-zinc-800" />
+                    <div className="flex items-center gap-4">
+                      <Button 
+                        variant="ghost" 
+                        className="h-10 text-rose-500 hover:text-white hover:bg-rose-600 font-black text-[10px] uppercase tracking-widest rounded-xl px-6 transition-all"
+                        disabled={isBatchDeleting}
+                        onClick={handleBatchDelete}
+                      >
+                        {isBatchDeleting ? "Purging Records..." : "Decommission Permanent"}
+                      </Button>
+                      <Button 
+                        className="h-10 bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 font-black text-[10px] uppercase tracking-widest rounded-xl px-4 transition-all"
+                        onClick={() => setSelectedProducts([])}
+                      >
+                        Cancel Highlight
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="movements" className="space-y-6">
+               <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                      <TableHead className="w-[60px] py-6 pl-6">
+                        <input 
+                          type="checkbox" 
+                          className="rounded-md border-zinc-300 text-blue-600 focus:ring-blue-500 h-4 w-4 bg-white"
+                          checked={movements.length > 0 && selectedMovements.length === movements.filter(m => {
+                            if (activeBranch !== "all" && m.to !== activeBranch && m.from !== activeBranch && m.to !== branches.find(b=>b.id===activeBranch)?.name) return false;
+                            return true;
+                          }).length}
+                          onChange={() => {
+                            const filtered = movements.filter(m => {
+                              if (activeBranch !== "all" && m.to !== activeBranch && m.from !== activeBranch && m.to !== branches.find(b=>b.id===activeBranch)?.name) return false;
+                              return true;
+                            });
+                            if (selectedMovements.length === filtered.length) {
+                              setSelectedMovements([]);
+                            } else {
+                              setSelectedMovements(filtered.map(m => m.id));
+                            }
+                          }}
+                        />
+                      </TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Trace ID</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Operation Type</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Asset Desc</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Logistics Route</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Qty</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Timestamp</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6">Deployment State</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {movements.length === 0 ? (
+                       <TableRow>
+                          <TableCell colSpan={8} className="py-24 text-center">
+                              <div className="flex flex-col items-center gap-4 text-zinc-400">
+                                <ArrowRightLeft className="w-16 h-16 opacity-10" />
+                                <div className="space-y-1">
+                                  <p className="text-xl font-bold text-zinc-900">No logistical movements logged</p>
+                                  <p className="text-sm font-medium text-zinc-500">Asset transitions will appear here once initiated.</p>
+                                </div>
+                              </div>
+                          </TableCell>
+                       </TableRow>
+                    ) : movements.filter(m => {
+                      if (activeBranch !== "all" && m.to !== activeBranch && m.from !== activeBranch && m.to !== branches.find(b=>b.id===activeBranch)?.name) return false;
+                      return true;
+                    }).map((m) => (
+                      <TableRow key={m.id} className={cn("hover:bg-zinc-50/50 transition-colors border-b border-zinc-50 group/row", selectedMovements.includes(m.id) && "bg-blue-50/50")}>
+                        <TableCell className="py-5 pl-6">
+                          <input 
+                            type="checkbox" 
+                            className="rounded-md border-zinc-300 text-blue-600 focus:ring-blue-500 h-4 w-4 bg-white transition-all cursor-pointer group-hover/row:scale-110"
+                            checked={selectedMovements.includes(m.id)}
+                            onChange={() => {
+                              setSelectedMovements(prev => 
+                                prev.includes(m.id) ? prev.filter(id => id !== m.id) : [...prev, m.id]
+                              );
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell className="py-5 font-mono text-[10px] font-black text-zinc-400 uppercase tracking-widest">{m.id.substring(0,8)}</TableCell>
+                        <TableCell className="py-5">
+                          <Badge variant="outline" className={cn(
+                            "text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 border-none bg-zinc-50",
+                            m.type === "TRANSFER" ? "text-blue-600" :
+                            m.type === "PURCHASE" ? "text-emerald-600" :
+                            "text-amber-600 font-bold"
+                          )}>
+                            {m.type}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="py-5 font-black text-zinc-900 text-xs uppercase tracking-tight">{m.product}</TableCell>
+                        <TableCell className="py-5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-zinc-700 uppercase tracking-tight">{m.from}</span>
+                            <ArrowRight className="w-3 h-3 text-zinc-300" />
+                            <span className="text-[10px] font-black text-zinc-700 uppercase tracking-tight">{m.to}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="py-5 font-black text-zinc-900">{m.qty > 0 ? `+${m.qty}` : m.qty}</TableCell>
+                        <TableCell className="py-5 text-[10px] font-bold text-zinc-400 uppercase">{m.date}</TableCell>
+                        <TableCell className="py-5 pr-6">
+                           <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                <div className={cn(
+                                  "flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer hover:opacity-80 transition-all shadow-sm",
+                                  m.status === "COMPLETED" ? "bg-emerald-50 border-emerald-100/50" :
+                                  m.status === "CANCELLED" ? "bg-rose-50 border-rose-100/50" :
+                                  m.status === "IN_TRANSIT" ? "bg-blue-50 border-blue-100/50" :
+                                  "bg-amber-50 border-amber-100/50"
+                                )}>
+                                  <div className={cn(
+                                    "w-1.5 h-1.5 rounded-full",
+                                    m.status === "COMPLETED" ? "bg-emerald-500" : 
+                                    m.status === "CANCELLED" ? "bg-rose-500" :
+                                    m.status === "IN_TRANSIT" ? "bg-blue-500 animate-pulse" :
+                                    "bg-amber-500"
+                                  )} />
+                                  <span className={cn(
+                                    "text-[9px] font-black uppercase tracking-[0.2em]",
+                                    m.status === "COMPLETED" ? "text-emerald-600" : 
+                                    m.status === "CANCELLED" ? "text-rose-600" :
+                                    m.status === "IN_TRANSIT" ? "text-blue-600" :
+                                    "text-amber-600"
+                                  )}>
+                                    {m.status}
+                                  </span>
+                                </div>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white">
+                                <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "COMPLETED")} className="rounded-xl font-bold text-xs py-2.5">Set Completed</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "IN_TRANSIT")} className="rounded-xl font-bold text-xs py-2.5">Set In Transit</DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "PENDING")} className="rounded-xl font-bold text-xs py-2.5">Set Pending</DropdownMenuItem>
+                                <div className="h-px bg-zinc-100 my-1" />
+                                <DropdownMenuItem className="text-rose-600 rounded-xl font-bold text-xs py-2.5" onClick={() => handleUpdateMovementStatus(m, "CANCELLED")}>Decommission Log</DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="suppliers" className="space-y-6">
+              <div className="flex items-center justify-between px-2">
+                 <div className="space-y-1">
+                    <h3 className="font-black text-zinc-900 tracking-tight text-lg">Partner Ecosystem</h3>
+                    <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest">Global Sourcing Network</p>
+                 </div>
+                 <Button className="rounded-2xl bg-zinc-900 text-white h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all" onClick={() => setIsSupplierDialogOpen(true)}>
+                    <Plus className="w-4 h-4 mr-2" /> Strategic Partner
+                 </Button>
+              </div>
+
+               <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Vendor Name</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Key Correspondent</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Secure Email</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Operational Contact</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6">Lifecycle Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {suppliers.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-24 text-zinc-400">
+                           <div className="flex flex-col items-center gap-4">
+                              <Users className="w-16 h-16 opacity-10" />
+                              <p className="text-xl font-bold text-zinc-900">Vendor directory idle</p>
+                           </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      suppliers.map((s) => (
+                        <TableRow key={s.id} className="hover:bg-zinc-50/50 transition-colors border-b border-zinc-50 group/row font-display">
+                          <TableCell className="py-6 pl-6 font-black text-zinc-900 text-sm tracking-tight uppercase">{s.name}</TableCell>
+                          <TableCell className="py-6 text-sm font-bold text-zinc-600">{s.contact}</TableCell>
+                          <TableCell className="py-6 text-sm font-medium text-zinc-500 transition-colors hover:text-blue-500 cursor-pointer">{s.email}</TableCell>
+                          <TableCell className="py-6 text-sm font-bold text-zinc-600 tracking-wider font-mono">{s.phone}</TableCell>
+                          <TableCell className="py-6 pr-6">
+                            <Badge className={cn(
+                              "text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border",
+                              s.status === "ACTIVE" ? "bg-emerald-50 text-emerald-600 border-emerald-100/50" : "bg-zinc-100 text-zinc-600 border-zinc-200"
+                            )}>
+                              {s.status || "OPERATIONAL"}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </Card>
+            </TabsContent>
+          </Tabs>
+        </div>
+      )}
+      </div>
+    </ScrollArea>
 
       <BarcodeScanner 
         isOpen={isScannerOpen} 
@@ -2184,112 +1672,112 @@ export default function Inventory() {
 
       {/* Update Stock Dialog */}
       <Dialog open={isUpdateStockOpen} onOpenChange={setIsUpdateStockOpen}>
-        <DialogContent className="sm:max-w-md rounded-2xl p-6">
+        <DialogContent className="sm:max-w-md rounded-[2rem] p-6 border-zinc-200 shadow-2xl bg-white">
           <DialogHeader>
-            <DialogTitle>Update Stock: {selectedProduct?.name}</DialogTitle>
-            <DialogDescription>
-              Adjust current inventory levels manually. This will generate a movement log.
+            <DialogTitle className="text-2xl font-black text-zinc-900 tracking-tight">Stock Calibration</DialogTitle>
+            <DialogDescription className="text-zinc-500 font-medium">
+              Manually adjusting <b>{selectedProduct?.name}</b> across branch protocols.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {selectedProduct && (
-              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-between">
-                <span className="text-xs font-bold text-zinc-500">Current Stock</span>
-                <span className="text-sm font-bold text-zinc-900">
-                  {getProductStock(selectedProduct.id, updateStockData.branch_id || activeBranch)} units
+            <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100 flex items-center justify-between shadow-inner">
+                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Active Inventory</span>
+                <span className="text-sm font-black text-zinc-900">
+                  {getProductStock(selectedProduct?.id || "", updateStockData.branch_id || activeBranch)} Units
                 </span>
-              </div>
-            )}
+            </div>
             <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-500">Adjustment Type</label>
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Logic Protocol</label>
               <Select 
                 value={updateStockData.reason} 
                 onValueChange={(val) => setUpdateStockData({...updateStockData, reason: val})}
               >
-                <SelectTrigger className="h-12 rounded-xl">
+                <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="RESTOCK">Restock (Add)</SelectItem>
-                  <SelectItem value="RETURN">Return (Add)</SelectItem>
-                  <SelectItem value="DAMAGED">Damaged (Remove)</SelectItem>
-                  <SelectItem value="SHRINKAGE">Shrinkage / Lost (Remove)</SelectItem>
+                <SelectContent className="rounded-2xl bg-white">
+                  <SelectItem value="RESTOCK" className="font-bold">CORE RESTOCK (+)</SelectItem>
+                  <SelectItem value="RETURN" className="font-bold">CUSTOMER RETURN (+)</SelectItem>
+                  <SelectItem value="DAMAGED" className="font-bold text-rose-500">ASSET DAMAGE (-)</SelectItem>
+                  <SelectItem value="SHRINKAGE" className="font-bold text-rose-500">SHRINKAGE (-)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-500">Branch</label>
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Target Node (Branch)</label>
               <Select 
                 value={updateStockData.branch_id} 
                 onValueChange={(val) => setUpdateStockData({...updateStockData, branch_id: val})}
               >
-                <SelectTrigger className="h-12 rounded-xl">
+                <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="rounded-2xl bg-white">
                   {branches.map(b => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    <SelectItem key={b.id} value={b.id} className="font-bold">{b.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-bold text-zinc-500">Quantity</label>
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Calibration Quantity</label>
               <Input 
                 type="number" 
                 min="1"
-                className="h-12 rounded-xl"
+                className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-black"
                 value={updateStockData.qty}
                 onChange={(e) => setUpdateStockData({...updateStockData, qty: parseInt(e.target.value) || 0})}
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" className="rounded-xl" onClick={() => setIsUpdateStockOpen(false)}>Cancel</Button>
-            <Button className="bg-zinc-900 text-white rounded-xl" onClick={submitUpdateStock}>Update Inventory</Button>
+          <DialogFooter className="sm:justify-between gap-3">
+            <Button variant="ghost" className="rounded-2xl font-black text-[10px] uppercase tracking-widest h-12 px-6" onClick={() => setIsUpdateStockOpen(false)}>Abort</Button>
+            <Button className="bg-zinc-900 text-white rounded-2xl h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-zinc-900/20" onClick={submitUpdateStock}>Sync Calibration</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Analytics Dialog */}
       <Dialog open={isAnalyticsOpen} onOpenChange={setIsAnalyticsOpen}>
-        <DialogContent className="sm:max-w-4xl rounded-2xl p-0 overflow-hidden bg-zinc-50 border-none">
-          <div className="bg-white px-6 py-5 border-b border-zinc-100 flex items-center justify-between">
+        <DialogContent className="sm:max-w-4xl rounded-[2.5rem] p-0 overflow-hidden bg-zinc-50/50 border-none shadow-[0_0_100px_rgba(0,0,0,0.1)]">
+          <div className="bg-white px-8 py-7 border-b border-zinc-100 flex items-center justify-between">
             <div>
-              <DialogTitle className="flex items-center gap-2 text-xl font-display">
-                <BarChart3 className="w-6 h-6 text-indigo-600" />
-                {selectedProduct?.name} Analytics
+              <DialogTitle className="flex items-center gap-3 text-2xl font-black text-zinc-900 tracking-tight font-display">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center border border-indigo-100 text-indigo-600">
+                  <BarChart3 className="w-6 h-6" />
+                </div>
+                {selectedProduct?.name} Intelligence
               </DialogTitle>
-              <DialogDescription className="mt-1">
-                Historical stock levels, sales trends, and AI-driven supplier insights.
+              <DialogDescription className="mt-1 font-medium text-zinc-500">
+                AI-driven analysis of stock levels, sales trends, and partnership metrics.
               </DialogDescription>
             </div>
             <div className="text-right">
-              <Badge className={cn("text-[10px] font-bold uppercase", productInsights.reorderDays < 7 ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600")}>
-                {productInsights.reorderDays} Days of Stock Left
+              <Badge className={cn("text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 shadow-sm", productInsights.reorderDays < 7 ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-emerald-50 text-emerald-600 border-emerald-100")}>
+                {productInsights.reorderDays} DAYS RUNWAY
               </Badge>
-              <p className="text-[10px] text-zinc-400 font-medium mt-1">Velocity: {productInsights.velocity} units/day</p>
+              <p className="text-[10px] text-zinc-400 font-black uppercase tracking-widest mt-1.5">Velocity: {productInsights.velocity} U/DAY</p>
             </div>
           </div>
 
           <Tabs defaultValue="trends" className="w-full">
-            <div className="px-6 pt-4 bg-white">
-              <TabsList className="bg-zinc-100/80 p-1 rounded-xl">
-                <TabsTrigger value="trends" className="rounded-lg px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm font-bold text-xs">Sales & Stock Trends</TabsTrigger>
-                <TabsTrigger value="suppliers" className="rounded-lg px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm font-bold text-xs">Supplier Performance</TabsTrigger>
-                <TabsTrigger value="insights" className="rounded-lg px-4 py-1.5 data-[state=active]:bg-white data-[state=active]:shadow-sm font-bold text-xs">Optimization Strategies</TabsTrigger>
+            <div className="px-8 pt-4 bg-white border-b border-zinc-50">
+              <TabsList className="bg-zinc-100/80 p-1 rounded-2xl w-max flex gap-1 mb-4 shadow-inner">
+                <TabsTrigger value="trends" className="rounded-xl px-6 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md">Trends</TabsTrigger>
+                <TabsTrigger value="suppliers" className="rounded-xl px-6 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md">Suppliers</TabsTrigger>
+                <TabsTrigger value="insights" className="rounded-xl px-6 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md">AI Optima</TabsTrigger>
               </TabsList>
             </div>
 
-            <ScrollArea className="h-[450px] px-6 py-4">
-              <TabsContent value="trends" className="mt-0 space-y-4">
-                <Card className="card-modern shadow-sm border-zinc-200/60 p-6">
-                  <h3 className="text-sm font-bold text-zinc-900 mb-6 flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-indigo-500" /> 14-Day Performance History
+            <ScrollArea className="h-[480px] px-8 py-6">
+              <TabsContent value="trends" className="mt-0 space-y-6">
+                <Card className="card-modern shadow-xl border-zinc-100/60 p-8 bg-white rounded-[2rem]">
+                  <h3 className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.3em] mb-8 flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-indigo-500" /> Performance History (14 Days)
                   </h3>
-                  <div className="h-72 w-full">
+                  <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={productAnalytics}>
                         <defs>
@@ -2303,42 +1791,39 @@ export default function Inventory() {
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} dy={10} />
-                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} />
-                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} />
+                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a', fontWeight: 'bold' }} dy={10} />
+                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
+                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
                         <RechartsTooltip 
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)' }}
-                          labelStyle={{ fontWeight: 'bold', color: '#18181b', marginBottom: '4px' }}
+                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                          labelStyle={{ fontWeight: 'black', color: '#18181b', marginBottom: '8px', fontSize: '12px' }}
                         />
-                        <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold' }}/>
-                        <Area yAxisId="left" type="monotone" dataKey="sales" name="Sales Unit" stroke="#4f46e5" strokeWidth={2} fillOpacity={1} fill="url(#colorSales)" />
-                        <Area yAxisId="right" type="monotone" dataKey="stock" name="Stock Level" stroke="#0ea5e9" strokeWidth={2} fillOpacity={1} fill="url(#colorStock)" />
+                        <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', letterSpacing: '0.1em', textTransform: 'uppercase' }}/>
+                        <Area yAxisId="left" type="monotone" dataKey="sales" name="Observed Sales" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
+                        <Area yAxisId="right" type="monotone" dataKey="stock" name="Asset Levels" stroke="#0ea5e9" strokeWidth={3} fillOpacity={1} fill="url(#colorStock)" />
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
                 </Card>
               </TabsContent>
 
-              <TabsContent value="suppliers" className="mt-0 space-y-4">
-                <Card className="card-modern shadow-sm border-zinc-200/60 p-6">
-                   <h3 className="text-sm font-bold text-zinc-900 mb-6 flex items-center gap-2">
-                    <Truck className="w-4 h-4 text-emerald-500" /> Supplier Reliability Metrics
+              <TabsContent value="suppliers" className="mt-0 space-y-6">
+                <Card className="card-modern shadow-xl border-zinc-100/60 p-8 bg-white rounded-[2rem]">
+                   <h3 className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.3em] mb-8 flex items-center gap-2">
+                    <Truck className="w-4 h-4 text-emerald-500" /> Sourcing Reliability Index
                   </h3>
-                  <div className="h-72 w-full">
+                  <div className="h-80 w-full">
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={supplierMetrics} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                      <BarChart data={supplierMetrics}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#3f3f46', fontWeight: 'bold' }} dy={10} />
-                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} />
-                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} />
-                        <RechartsTooltip 
-                          cursor={{fill: '#f4f4f5'}}
-                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                        />
-                        <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 'bold' }}/>
-                        <Bar yAxisId="left" dataKey="qualityScore" name="Quality Score (%)" fill="#10b981" radius={[4, 4, 0, 0]} barSize={40} />
-                        <Bar yAxisId="left" dataKey="deliveryRate" name="On-Time Delivery (%)" fill="#f59e0b" radius={[4, 4, 0, 0]} barSize={40} />
-                        <Bar yAxisId="right" dataKey="leadTime" name="Lead Time (Days)" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={40} />
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#3f3f46', fontWeight: 'black' }} dy={10} />
+                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
+                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
+                        <RechartsTooltip cursor={{fill: '#f4f4f5'}} contentStyle={{ borderRadius: '16px', border: 'none' }} />
+                        <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', letterSpacing: '0.1em', textTransform: 'uppercase' }}/>
+                        <Bar yAxisId="left" dataKey="qualityScore" name="Quality Rating" fill="#10b981" radius={[6, 6, 0, 0]} barSize={40} />
+                        <Bar yAxisId="left" dataKey="deliveryRate" name="Service SLA" fill="#f59e0b" radius={[6, 6, 0, 0]} barSize={40} />
+                        <Bar yAxisId="right" dataKey="leadTime" name="Cycle Time" fill="#8b5cf6" radius={[6, 6, 0, 0]} barSize={40} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -2347,42 +1832,24 @@ export default function Inventory() {
 
               <TabsContent value="insights" className="mt-0 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card className="card-modern shadow-sm border-zinc-200/60 p-6 bg-gradient-to-br from-indigo-50/50 to-white">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-4">
+                  <Card className="card-modern shadow-sm border-zinc-200/60 p-6 bg-gradient-to-br from-indigo-50/50 to-white rounded-3xl">
+                    <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center mb-4 border border-indigo-200">
                       <Sparkles className="w-5 h-5" />
                     </div>
-                    <h4 className="font-bold text-zinc-900 mb-2">AI Restock Recommendation</h4>
-                    <p className="text-sm text-zinc-600 leading-relaxed">
+                    <h4 className="font-black text-zinc-900 mb-2 uppercase text-[10px] tracking-widest">Replenishment Logic</h4>
+                    <p className="text-sm text-zinc-600 leading-relaxed font-medium">
                       {productInsights.insightText}
                     </p>
                   </Card>
                   
-                  <Card className="card-modern shadow-sm border-zinc-200/60 p-6 bg-gradient-to-br from-blue-50/50 to-white">
-                     <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4">
+                  <Card className="card-modern shadow-sm border-zinc-200/60 p-6 bg-gradient-to-br from-blue-50/50 to-white rounded-3xl">
+                     <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center mb-4 border border-blue-200">
                       <TrendingUp className="w-5 h-5" />
                     </div>
-                    <h4 className="font-bold text-zinc-900 mb-2">Velocity Analysis</h4>
-                    <p className="text-sm text-zinc-600 leading-relaxed">
-                      This product averages <strong className="text-zinc-900">{productInsights.velocity} sales per day</strong>. 
-                      Based on your primary supplier's lead time ({supplierMetrics[0]?.leadTime || 0} days), you must reorder when stock hits exactly <strong>{Math.ceil(productInsights.velocity * (supplierMetrics[0]?.leadTime || 0))} units</strong> to prevent stockouts.
+                    <h4 className="font-black text-zinc-900 mb-2 uppercase text-[10px] tracking-widest">Velocity Simulation</h4>
+                    <p className="text-sm text-zinc-600 leading-relaxed font-medium">
+                      Observed velocity of <strong className="text-zinc-900">{productInsights.velocity} U/DAY</strong> suggests a replenishment buffer of <strong>{Math.ceil(productInsights.velocity * (supplierMetrics[0]?.leadTime || 0))} units</strong> to ensure zero stock-out probability.
                     </p>
-                  </Card>
-
-                   <Card className="card-modern shadow-sm border-zinc-200/60 p-6 md:col-span-2">
-                     <div className="flex items-center gap-3 border-b border-zinc-100 pb-4 mb-4">
-                        <Layers className="w-5 h-5 text-zinc-400" />
-                        <h4 className="font-bold text-zinc-900">Optimization Strategies</h4>
-                     </div>
-                     <ul className="space-y-3">
-                        <li className="flex gap-3 text-sm text-zinc-600">
-                          <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                          <span><strong>Supplier Routing:</strong> {supplierMetrics[0]?.name} offers better quality metrics, but {supplierMetrics[1]?.name || "alternatives"} may provide emergency stock faster due to geographical routing.</span>
-                        </li>
-                        <li className="flex gap-3 text-sm text-zinc-600">
-                           <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-                           <span><strong>Capital Efficiency:</strong> Consider adopting a Just-in-Time (JIT) model for this product class to free up cash flow, given its stable and predictable demand curve.</span>
-                        </li>
-                     </ul>
                   </Card>
                 </div>
               </TabsContent>
@@ -2390,25 +1857,26 @@ export default function Inventory() {
           </Tabs>
         </DialogContent>
       </Dialog>
-    </div>
-    </ScrollArea>
 
     {/* Delete Confirmation Dialog */}
     <Dialog open={!!deleteConfirmProduct} onOpenChange={(open) => { if (!open) setDeleteConfirmProduct(null); }}>
-      <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-md">
+      <DialogContent className="rounded-[2rem] border-zinc-200 sm:max-w-md shadow-2xl bg-white">
         <DialogHeader>
-          <DialogTitle className="text-xl font-bold text-rose-600">Delete Product?</DialogTitle>
-          <DialogDescription>
-            This will permanently delete <strong>{deleteConfirmProduct?.name}</strong> and all associated inventory records. This action cannot be undone.
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mb-4 border border-rose-100">
+            <Trash2 className="w-7 h-7" />
+          </div>
+          <DialogTitle className="text-2xl font-black text-zinc-900 tracking-tight">Decommission Asset?</DialogTitle>
+          <DialogDescription className="text-zinc-500 font-medium leading-relaxed">
+            Propagating this command will permanently remove <b>{deleteConfirmProduct?.name}</b> and all associated branch records. This bypasses the recovery protocol.
           </DialogDescription>
         </DialogHeader>
-        <DialogFooter className="gap-3 sm:gap-0 mt-4">
-          <Button variant="outline" className="flex-1 rounded-xl h-12 font-bold" onClick={() => setDeleteConfirmProduct(null)}>Cancel</Button>
+        <DialogFooter className="gap-3 sm:gap-0 mt-6 sm:justify-between">
+          <Button variant="ghost" className="rounded-2xl h-14 font-black text-[10px] uppercase tracking-widest px-8" onClick={() => setDeleteConfirmProduct(null)}>Abort CMD</Button>
           <Button
-            className="flex-1 rounded-xl bg-rose-600 text-white h-12 font-bold hover:bg-rose-700"
+            className="rounded-2xl bg-rose-600 text-white h-14 font-black text-[10px] uppercase tracking-widest px-10 hover:bg-rose-700 shadow-xl shadow-rose-600/20"
             onClick={confirmDeleteProduct}
           >
-            Yes, Delete
+            Execute Purge
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2419,7 +1887,6 @@ export default function Inventory() {
       <DialogContent showCloseButton={false} className="max-w-4xl w-[95vw] h-[85vh] md:h-auto p-0 overflow-hidden rounded-[2.5rem] border-none bg-black shadow-[0_0_100px_rgba(0,0,0,1)] outline-none border-white/5 top-1/2 -translate-y-1/2">
         <div className="relative h-full w-full flex flex-col overflow-hidden bg-zinc-950">
           
-          {/* Clean Viewport */}
           <div className="relative flex-1 w-full bg-black overflow-hidden">
             <video 
               ref={videoRef} 
@@ -2441,187 +1908,148 @@ export default function Inventory() {
               )}
             </AnimatePresence>
 
-            {/* Smart Context HUD */}
             <div className="absolute bottom-6 left-6 right-6 flex flex-col gap-4 z-50">
                <motion.div 
                 initial={{ y: 20, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                className="p-4 bg-black/40 backdrop-blur-3xl rounded-3xl border border-white/10 flex items-center justify-between"
+                className="p-5 bg-black/40 backdrop-blur-3xl rounded-[2rem] border border-white/10 flex items-center justify-between shadow-2xl"
                >
                   <div className="flex items-center gap-4">
                      <div className="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
                         <Package className="w-6 h-6 text-zinc-400" />
                      </div>
                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-0.5">Active Subject</p>
-                        <h3 className="text-sm font-bold text-white truncate max-w-[150px] sm:max-w-xs">{productForm.name || "Untitled Product"}</h3>
+                        <p className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-1">Optical Lock</p>
+                        <h3 className="text-sm font-bold text-white truncate max-w-[150px] sm:max-w-xs uppercase tracking-tight">{productForm.name || "UNIDENTIFIED"}</h3>
                      </div>
                   </div>
                   <div className="text-right">
-                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-500 mb-0.5">Retail Index</p>
-                     <p className="text-sm font-black text-emerald-400">${productForm.price || "0.00"}</p>
+                     <p className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-1">Index Price</p>
+                     <p className="text-sm font-black text-emerald-400 tracking-tighter">${productForm.price || "0.00"}</p>
                   </div>
                </motion.div>
             </div>
 
-            {/* Status Feedback */}
             {(!hasCameraAccess || isInitializing) && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 text-zinc-500 bg-black z-50">
                 <RefreshCw className="w-12 h-12 animate-spin text-blue-500/40" />
                 <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-400 animate-pulse">
-                  {isInitializing ? "Starting Lens" : "Waiting for Access"}
+                  {isInitializing ? "Lens Calibration" : "Waiting for Protocol"}
                 </p>
               </div>
             )}
 
-            {/* HUD: HUD Buttons (Close / Flash / Flip) */}
             <div className="absolute top-6 left-6 right-6 flex items-center justify-between z-50">
                <Button 
                   variant="outline" 
-                  className="rounded-full w-10 h-10 border-white/5 bg-black/40 backdrop-blur-3xl text-white hover:bg-white/10 p-0 shadow-2xl"
+                  className="rounded-full w-12 h-12 border-white/5 bg-black/40 backdrop-blur-3xl text-white hover:bg-white/10 p-0 shadow-2xl flex items-center justify-center transition-all"
                   onClick={() => setIsCameraOpen(false)}
                 >
-                <XIcon className="w-4 h-4" />
+                <XIcon className="w-5 h-5" />
               </Button>
               
-              <div className="flex gap-2">
+              <div className="flex gap-3">
                 <Button 
                     variant="outline" 
                     className={cn(
-                      "rounded-full w-10 h-10 border-white/5 bg-black/40 backdrop-blur-3xl transition-all p-0 shadow-2xl",
+                      "rounded-full w-12 h-12 border-white/5 bg-black/40 backdrop-blur-3xl transition-all p-0 shadow-2xl flex items-center justify-center",
                       flashlight ? "text-yellow-400 border-yellow-500/30" : "text-white"
                     )}
                     onClick={() => setFlashlight(!flashlight)}
                   >
-                  {flashlight ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4 opacity-40" />}
+                  {flashlight ? <Zap className="w-5 h-5" /> : <ZapOff className="w-5 h-5 opacity-40" />}
                 </Button>
                 <Button 
                     variant="outline" 
-                    className="rounded-full w-10 h-10 border-white/5 bg-black/40 backdrop-blur-3xl text-white p-0 shadow-2xl"
+                    className="rounded-full w-12 h-12 border-white/5 bg-black/40 backdrop-blur-3xl text-white p-0 shadow-2xl flex items-center justify-center"
                     onClick={() => setCameraMode(prev => prev === 'environment' ? 'user' : 'environment')}
                   >
-                  <RefreshCw className="w-4 h-4" />
+                  <RefreshCw className="w-5 h-5" />
                 </Button>
               </div>
             </div>
           </div>
 
-          {/* ── NEURAL CONTROL DECK (Bottom Section) ────────────────── */}
-          <div className="h-[180px] sm:h-[220px] w-full bg-zinc-950 border-t border-white/5 relative flex flex-col items-center justify-center gap-4 bg-gradient-to-b from-zinc-950 to-black px-8">
-            
-            {/* Technical Telemetry */}
-            <div className="flex items-center gap-5 px-5 py-1.5 bg-white/5 backdrop-blur-md rounded-full border border-white/5 shadow-inner">
+          <div className="h-[220px] w-full bg-zinc-950 border-t border-white/5 relative flex flex-col items-center justify-center gap-6 bg-gradient-to-b from-zinc-950 to-black px-8">
+            <div className="flex items-center gap-5 px-6 py-2 bg-white/5 backdrop-blur-md rounded-full border border-white/5 shadow-inner">
                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                  <span className="text-[8px] font-black uppercase tracking-widest text-zinc-400">Stable</span>
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+                  <span className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-400">Hardware Stable</span>
                </div>
-               <div className="w-px h-2.5 bg-white/10" />
             </div>
-            {/* Primary Actions */}
-            <div className="w-full flex items-center justify-between max-w-sm">
-               {/* Gallery Preview */}
-               <div className="flex items-center gap-4">
-                <div className="flex -space-x-3 overflow-hidden">
+
+            <div className="w-full flex items-center justify-between max-w-md">
+               <div className="flex items-center gap-4 min-w-[80px]">
+                <div className="flex -space-x-4 overflow-hidden py-1">
                   {capturedImages.slice(0, 3).map((img, i) => (
                     <motion.div
                       key={img}
                       initial={{ scale: 0, x: -10 }}
                       animate={{ scale: 1, x: 0 }}
-                      className="w-10 h-10 rounded-lg border border-white/20 bg-zinc-900 overflow-hidden ring-2 ring-black"
+                      className="w-12 h-12 rounded-xl border border-white/20 bg-zinc-900 overflow-hidden ring-2 ring-black shadow-2xl"
                     >
                       <img src={img} className="w-full h-full object-cover opacity-80" />
                     </motion.div>
                   ))}
                   {capturedImages.length === 0 && (
-                    <div className="w-10 h-10 rounded-lg border border-white/5 bg-white/5 flex items-center justify-center">
-                      <ImageIcon className="w-4 h-4 text-white/10" />
+                    <div className="w-12 h-12 rounded-xl border border-white/5 bg-white/5 flex items-center justify-center">
+                      <ImageIcon className="w-5 h-5 text-zinc-700" />
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col">
-                  <span className="text-[7px] font-bold text-zinc-500 uppercase tracking-widest">Captured</span>
-                  <span className="text-xs font-black text-white">{capturedImages.length}</span>
-                </div>
                </div>
 
-               {/* Shutter Button */}
                <Button 
-                className="group relative rounded-full w-24 h-24 sm:w-28 sm:h-28 bg-white/5 hover:bg-white/10 p-0 shadow-2xl active:scale-95 transition-all border-none ring-1 ring-white/10 backdrop-blur-md"
+                className="group relative rounded-full w-28 h-28 bg-white/5 hover:bg-white/10 p-0 shadow-[0_0_50px_rgba(255,255,255,0.05)] active:scale-95 transition-all border-none ring-2 ring-white/10 backdrop-blur-md"
                 onClick={async () => {
                   if (!videoRef.current || !canvasRef.current || isCapturing) return;
                   setIsCapturing(true);
-                  
                   if (navigator.vibrate) navigator.vibrate(50);
-                  new Audio("https://assets.mixkit.co/active_storage/sfx/702/702-preview.mp3").play().catch(() => {});
-
                   const canvas = canvasRef.current;
                   const video = videoRef.current;
-
-                  // High-speed mode: 640px optimized for thumbnails
-                  const MAX_RES = 640;
+                  const MAX_RES = 1080;
                   let width = video.videoWidth;
                   let height = video.videoHeight;
-
-                  if (width > height) {
-                    if (width > MAX_RES) {
-                      height *= MAX_RES / width;
-                      width = MAX_RES;
-                    }
-                  } else {
-                    if (height > MAX_RES) {
-                      width *= MAX_RES / height;
-                      height = MAX_RES;
-                    }
-                  }
-
+                  if (width > height) { if (width > MAX_RES) { height *= MAX_RES / width; width = MAX_RES; } }
+                  else { if (height > MAX_RES) { width *= MAX_RES / height; height = MAX_RES; } }
                   canvas.width = width;
                   canvas.height = height;
                   const ctx = canvas.getContext('2d', { alpha: false });
-                  if (ctx) {
-                    ctx.drawImage(video, 0, 0, width, height);
-                  }
-
+                  if (ctx) ctx.drawImage(video, 0, 0, width, height);
                   canvas.toBlob(async (blob) => {
                     if (!blob) return;
-                    
-                    // Visual feedback
                     setIsFlashActive(true);
                     setTimeout(() => setIsFlashActive(false), 100);
-
-                    // Immediate local feedback
                     const localUrl = URL.createObjectURL(blob);
                     setCapturedImages(prev => [localUrl, ...prev]);
                     setIsCapturing(false);
-
-                    // Background Sync (Fire and Forget)
                     try {
-                      const storageRef = ref(getStorage(), `products/burst_${Date.now()}.jpg`);
+                      const storageRef = ref(getStorage(), `products/sc_${Date.now()}.jpg`);
                       await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
                       const url = await getDownloadURL(storageRef);
                       setProductForm(prev => ({ ...prev, image_url: url }));
-                      toast.success("Image synced in background");
+                      toast.success("Optical capture indexed");
                     } catch (err: any) {
-                      toast.error(`Background sync failed: ${err.message}`);
+                      toast.error(`Capture sync failed: ${err.message}`);
                     }
-                  }, 'image/jpeg', 0.6);
+                  }, 'image/jpeg', 0.85);
                 }}
                >
-                 <div className="absolute inset-2 sm:inset-3 rounded-full border-2 border-white opacity-20 group-hover:opacity-100 transition-opacity" />
-                 <div className="w-16 h-16 sm:w-18 sm:h-18 rounded-full bg-white shadow-[0_0_30px_rgba(255,255,255,0.3)] ring-4 ring-black/20" />
+                 <div className="absolute inset-3 rounded-full border-2 border-white opacity-10 group-hover:opacity-100 transition-opacity" />
+                 <div className="w-20 h-20 rounded-full bg-white shadow-[0_0_40px_rgba(255,255,255,0.4)] ring-8 ring-black/20" />
                </Button>
 
-               {/* Finalize Action */}
-               <div className="flex flex-col items-center gap-3">
+               <div className="flex flex-col items-center gap-2 min-w-[80px]">
                   <Button 
-                    className="w-12 h-12 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-2xl flex items-center justify-center p-0 transition-all active:scale-90 hover:scale-110"
+                    className="w-14 h-14 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white shadow-2xl flex items-center justify-center p-0 transition-all active:scale-90 hover:scale-110 border-none"
                     onClick={async () => {
-                      await handleSaveProduct();
-                      setIsCameraOpen(false);
+                      if (capturedImages.length > 0) setIsCameraOpen(false);
+                      else setIsCameraOpen(false);
                     }}
                   >
-                     <Check className="w-6 h-6" />
+                     <Check className="w-7 h-7" />
                   </Button>
-                  <span className="text-[7px] font-black uppercase tracking-widest text-emerald-500">Finalize</span>
+                  <span className="text-[8px] font-black uppercase tracking-[0.2em] text-emerald-500">Log Frame</span>
                </div>
             </div>
           </div>

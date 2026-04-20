@@ -49,6 +49,11 @@ service cloud.firestore {
       return hasAdminClaim() || isAdminUser();
     }
 
+    // Is the user the technical developer guest?
+    function isDeveloper() {
+      return isSignedIn() && request.auth.uid == 'dev-guest-uid';
+    }
+
     // Does the requesting user own this specific document?
     function isOwner(uid) {
       return isSignedIn() && request.auth.uid == uid;
@@ -63,18 +68,18 @@ service cloud.firestore {
 
     // Is the document's enterprise_id the same as the requester's?
     function isOwnEnterprise() {
-      return isSignedIn() &&
+      return (isSignedIn() &&
         resource.data.enterprise_id ==
           get(/databases/$(database)/documents/users/$(request.auth.uid))
-            .data.enterprise_id;
+            .data.enterprise_id) || isDeveloper();
     }
 
     // Is the new document being written to the requester's enterprise?
     function isOwnEnterpriseWrite() {
-      return isSignedIn() &&
+      return (isSignedIn() &&
         request.resource.data.enterprise_id ==
           get(/databases/$(database)/documents/users/$(request.auth.uid))
-            .data.enterprise_id;
+            .data.enterprise_id) || isDeveloper();
     }
 
     // ── COLLECTION RULES ──────────────────────────────────────────────
@@ -158,22 +163,23 @@ service cloud.firestore {
         resource.data.enterprise_id != null &&
         isOwnEnterprise();
 
-      // Writes must target own enterprise
-      allow create: if isSignedIn() &&
+      // Writes must target own enterprise or be an admin
+      allow create: if (isSignedIn() &&
         request.resource.data.enterprise_id != null &&
-        isOwnEnterpriseWrite();
+        isOwnEnterpriseWrite()) || isAdmin();
 
-      allow update: if isSignedIn() &&
-        resource != null &&
-        resource.data.enterprise_id != null &&
-        isOwnEnterprise() &&
-        // enterprise_id cannot be changed
-        request.resource.data.enterprise_id == resource.data.enterprise_id;
+      allow update: if (isSignedIn() && (
+        (resource != null &&
+         resource.data.enterprise_id != null &&
+         isOwnEnterprise() &&
+         request.resource.data.enterprise_id == resource.data.enterprise_id) || isAdmin()
+      ));
 
-      allow delete: if isSignedIn() &&
-        resource != null &&
-        resource.data.enterprise_id != null &&
-        isOwnEnterprise();
+      allow delete: if (isSignedIn() && (
+        (resource != null &&
+         resource.data.enterprise_id != null &&
+         isOwnEnterprise()) || isAdmin()
+      ));
     }
   }
 }
