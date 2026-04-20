@@ -377,7 +377,7 @@ export default function POS() {
     return () => window.removeEventListener("app:action", handleAction);
   }, []);
 
-  const getProductStock = (productId: string) => {
+  const getProductStock = useCallback((productId: string) => {
     if (activeBranch === "all") {
       return inventory
         .filter(i => i.product_id === productId)
@@ -385,34 +385,35 @@ export default function POS() {
     }
     const item = inventory.find(i => i.product_id === productId && i.branch_id === activeBranch);
     return item ? (item.quantity || 0) : 0;
-  };
+  }, [inventory, activeBranch]);
 
-  const addToCart = (product: any) => {
+  const addToCart = useCallback((product: any) => {
     const stock = getProductStock(product.id);
     if (stock <= 0) {
       toast.error("Item out of stock at this branch");
       return;
     }
 
-    const existing = cart.find(item => item.product.id === product.id);
-    if (existing) {
-      if (existing.quantity >= stock) {
-        toast.error("Cannot add more than available stock");
-        return;
+    setCart(prev => {
+      const existing = prev.find(item => item.product.id === product.id);
+      if (existing) {
+        if (existing.quantity >= stock) {
+          toast.warn("Maximum available stock reached");
+          return prev;
+        }
+        return prev.map(item => 
+          item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        );
       }
-      setCart(cart.map(item => 
-        item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-      ));
-    } else {
-      setCart([...cart, { product, quantity: 1 }]);
-    }
-    toast.success(`${product.name} added to cart`, {
-      duration: 1000,
-      position: "bottom-right"
+      toast.success(`${product.name} added to cart`, {
+        duration: 1000,
+        position: "bottom-right"
+      });
+      return [...prev, { product, quantity: 1 }];
     });
-  };
+  }, [getProductStock]);
 
-  const handleScanResult = (data: string, type: 'barcode' | 'qr') => {
+  const handleScanResult = useCallback((data: string, type: 'barcode' | 'qr') => {
     const product = products.find(p => p.barcode === data || p.sku === data || p.id === data);
     if (product) {
       addToCart(product);
@@ -422,7 +423,7 @@ export default function POS() {
       toast.error(`No product found for ${type}: ${data}`);
       // Not closing scanner here to allow user to try again or try different item
     }
-  };
+  }, [products, addToCart, setIsScannerOpen]);
 
   const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {

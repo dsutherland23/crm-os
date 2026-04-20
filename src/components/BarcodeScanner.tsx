@@ -68,8 +68,13 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
               fps: 15, // Slightly higher FPS for better mobile response
               qrbox: (viewfinderWidth, viewfinderHeight) => {
                 const minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight);
-                const qrboxSize = Math.min(Math.floor(minEdgeSize * 0.7), 250);
-                return { width: qrboxSize, height: qrboxSize };
+                // Ensure qrbox is never smaller than 250px to avoid library error, 
+                // but clamp it to the viewfinder size if the screen is tiny.
+                const qrboxSize = Math.max(250, Math.min(Math.floor(minEdgeSize * 0.8), 400));
+                return { 
+                  width: Math.min(qrboxSize, viewfinderWidth - 20), 
+                  height: Math.min(qrboxSize, viewfinderHeight - 20) 
+                };
               },
               disableFlip: false,
             },

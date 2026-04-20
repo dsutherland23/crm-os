@@ -238,12 +238,10 @@ function AppContent() {
       {/* Global AI Copilot Floating Button */}
       {isModuleEnabled("ai") && activeTab !== "ai" && (
         <Dialog>
-          <DialogTrigger asChild>
-            <Button
-              className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:scale-110 active:scale-95 transition-all duration-300 group z-50 p-0 flex items-center justify-center border-none"
-            >
-              <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform text-blue-400" />
-            </Button>
+          <DialogTrigger
+            className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:scale-110 active:scale-95 transition-all duration-300 group z-50 p-0 flex items-center justify-center border-none cursor-pointer"
+          >
+            <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform text-blue-400" />
           </DialogTrigger>
           <DialogContent className="max-w-5xl h-[85vh] p-0 overflow-hidden rounded-[2rem] border-zinc-200/60 shadow-2xl">
             <AIInsights />
