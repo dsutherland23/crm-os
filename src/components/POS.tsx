@@ -148,6 +148,7 @@ export default function POS() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentSessionData, setCurrentSessionData] = useState<any>(null);
   const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
+  const [isCartCollapsed, setIsCartCollapsed] = useState(false);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -1016,7 +1017,20 @@ export default function POS() {
                 )}
               </div>
               <div className="flex items-center gap-4">
-                <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-zinc-900 font-display whitespace-nowrap">Terminal</h1>
+                <div className="flex items-center gap-3">
+                  <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-zinc-900 font-display whitespace-nowrap">Terminal</h1>
+                  
+                  {isCartCollapsed && (
+                    <Button 
+                      onClick={() => setIsCartCollapsed(false)}
+                      variant="outline"
+                      className="hidden md:flex items-center gap-2 rounded-xl h-10 border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all animate-in fade-in slide-in-from-left-2"
+                    >
+                      <ShoppingCart className="w-4 h-4" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Show Order ({cart.length})</span>
+                    </Button>
+                  )}
+                </div>
                 {posSession?.sessionId && (
                   <div className="flex items-center gap-3">
                     {/* Duty Status Dropdown */}
@@ -1237,9 +1251,10 @@ export default function POS() {
 
       {/* Cart Sidebar */}
       <div className={cn(
-        "fixed inset-y-0 right-0 w-full sm:w-[420px] border-l border-zinc-200 bg-white flex flex-col shadow-2xl z-40 transition-transform duration-500",
-        "md:translate-x-0 md:relative md:w-[400px] md:shadow-xl md:z-auto",
-        isCartOpenOnMobile ? "translate-x-0 shadow-2xl" : "translate-x-full md:translate-x-0"
+        "fixed inset-y-0 right-0 w-full sm:w-[420px] border-l border-zinc-200 bg-white flex flex-col shadow-2xl z-40 transition-all duration-500 ease-in-out",
+        "md:relative md:shadow-xl md:z-auto",
+        isCartOpenOnMobile ? "translate-x-0" : "translate-x-full md:translate-x-0",
+        isCartCollapsed ? "md:w-0 md:opacity-0 md:pointer-events-none -mr-4" : "md:w-[400px] md:opacity-100"
       )}>
         <div className="p-6 lg:p-8 border-b border-zinc-100 space-y-4">
           <div className="flex items-center justify-between">
@@ -1251,6 +1266,9 @@ export default function POS() {
               <Badge className="bg-blue-600 text-white border-none px-2 py-0.5 rounded-lg">{cart.length} items</Badge>
               <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsCartOpenOnMobile(false)}>
                 <X className="w-5 h-5" />
+              </Button>
+              <Button variant="ghost" size="icon" className="hidden md:flex text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-xl" onClick={() => setIsCartCollapsed(true)}>
+                <X className="w-4 h-4" />
               </Button>
             </div>
           </div>

@@ -723,7 +723,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest hover:bg-zinc-100 rounded-xl px-3"
+                  className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest hover:bg-zinc-100 rounded-xl px-3 shrink-0"
                   onClick={() => setIsActivityCollapsed(!isActivityCollapsed)}
                 >
                   <div className="flex items-center gap-2">
@@ -731,17 +731,20 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                       "w-1.5 h-1.5 rounded-full",
                       isActivityCollapsed ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
                     )} />
-                    {isActivityCollapsed ? "Expand Protocol" : "Collapse Feed"}
+                    <span className="hidden sm:inline">{isActivityCollapsed ? "Expand Protocol" : "Collapse Feed"}</span>
+                    <span className="sm:hidden">{isActivityCollapsed ? "Expand" : "Collapse"}</span>
                   </div>
                 </Button>
-                <div className="w-px h-6 bg-zinc-100 mx-1" />
+                <div className="w-px h-6 bg-zinc-100 mx-1 shrink-0" />
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="text-blue-600 font-bold text-[10px] uppercase tracking-widest hover:bg-blue-50 rounded-xl px-3"
+                  className="text-blue-600 font-bold text-[10px] uppercase tracking-widest hover:bg-blue-50 rounded-xl px-3 shrink-0"
                   onClick={() => setActiveTab?.("audit")}
                 >
-                  Full Audit <ChevronRight className="w-4 h-4 ml-1" />
+                  <span className="hidden sm:inline">Full Audit</span>
+                  <span className="sm:hidden">Audit</span>
+                  <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
             </div>
