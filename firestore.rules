@@ -61,25 +61,25 @@ service cloud.firestore {
 
     // Does the user belong to the given enterprise?
     function belongsToEnterprise(enterpriseId) {
-      return isSignedIn() &&
+      return isDeveloper() || (isSignedIn() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid))
-          .data.enterprise_id == enterpriseId;
+          .data.enterprise_id == enterpriseId);
     }
 
     // Is the document's enterprise_id the same as the requester's?
     function isOwnEnterprise() {
-      return (isSignedIn() &&
+      return isDeveloper() || (isSignedIn() &&
         resource.data.enterprise_id ==
           get(/databases/$(database)/documents/users/$(request.auth.uid))
-            .data.enterprise_id) || isDeveloper();
+            .data.enterprise_id);
     }
 
     // Is the new document being written to the requester's enterprise?
     function isOwnEnterpriseWrite() {
-      return (isSignedIn() &&
+      return isDeveloper() || (isSignedIn() &&
         request.resource.data.enterprise_id ==
           get(/databases/$(database)/documents/users/$(request.auth.uid))
-            .data.enterprise_id) || isDeveloper();
+            .data.enterprise_id);
     }
 
     // ── COLLECTION RULES ──────────────────────────────────────────────
@@ -154,8 +154,8 @@ service cloud.firestore {
     // Users can only access documents matching their own enterprise_id.
     // Admins have read-only cross-tenant access.
     match /{collection}/{docId} {
-      // Adminread-only across tenants
-      allow read: if isAdmin();
+      // Admin and Developer read-only across tenants
+      allow read: if isAdmin() || isDeveloper();
 
       // Regular tenant access — must match own enterprise
       allow read: if isSignedIn() &&
@@ -176,9 +176,11 @@ service cloud.firestore {
       ));
 
       allow delete: if (isSignedIn() && (
+        isAdmin() || 
+        isDeveloper() ||
         (resource != null &&
          resource.data.enterprise_id != null &&
-         isOwnEnterprise()) || isAdmin()
+         isOwnEnterprise())
       ));
     }
   }

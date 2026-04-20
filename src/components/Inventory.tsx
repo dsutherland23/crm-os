@@ -39,7 +39,8 @@ import {
   getStorage,
   ref,
   uploadBytes,
-  getDownloadURL
+  getDownloadURL,
+  auth
 } from '@/lib/firebase';
 import { toast } from 'sonner';
 import { cn } from "@/lib/utils";
@@ -57,7 +58,12 @@ const formatCurrency = (amount: number) => {
 };
 
 export default function Inventory() {
-  const { activeBranch, setActiveBranch, enterpriseId, formatCurrency } = useModules();
+  const { 
+    activeBranch, setActiveBranch, hasActiveTransaction, setHasActiveTransaction, 
+    formatCurrency, currency, enterpriseId, branding, setPosSession, 
+    posSession, clearSession, updateShiftStatus, logout,
+    shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies 
+  } = useModules();
   const [activeTab, setActiveTab] = useState('stock');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -329,10 +335,14 @@ export default function Inventory() {
         updated_at: new Date().toISOString()
       };
 
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Transaction Timeout')), 15000)
+      );
+
       if (editingProductId) {
         const productRef = doc(db, 'products', editingProductId);
         batch.update(productRef, productData);
-        await batch.commit();
+        await Promise.race([batch.commit(), timeoutPromise]);
         toast.success('Product asset lifecycle updated');
       } else {
         const productRef = doc(collection(db, 'products'));
@@ -366,7 +376,7 @@ export default function Inventory() {
           });
         }
         
-        await batch.commit();
+        await Promise.race([batch.commit(), timeoutPromise]);
         toast.success('New product asset deployed');
       }
       
@@ -374,10 +384,15 @@ export default function Inventory() {
       fetchData();
     } catch (error: any) {
       console.error('CRITICAL: Strategic deployment failed:', error);
-      const isPermissionError = error?.code === 'permission-denied';
-      toast.error(isPermissionError 
-        ? `Access Denied: Enterprise "${enterpriseId}" authorization rejected.`
-        : 'Strategic deployment failed. Verify network connectivity.');
+      if (error.message === 'Transaction Timeout') {
+        toast.error('Network congestion: Deployment taking too long. Check your connection.');
+      } else {
+        const isPermissionError = error?.code === 'permission-denied';
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        toast.error(isPermissionError 
+          ? `Access Denied: Enterprise "${enterpriseId}" authorization rejected.`
+          : `Strategic deployment failed: ${errorMessage.slice(0, 60)}...`);
+      }
     } finally {
       setIsSavingProduct(false);
     }
@@ -391,7 +406,11 @@ export default function Inventory() {
     if (!deleteConfirmProduct) return;
     try {
       await deleteDoc(doc(db, 'products', deleteConfirmProduct.id));
-      const q = query(collection(db, 'inventory'), where('product_id', '==', deleteConfirmProduct.id));
+      const q = query(
+        collection(db, 'inventory'), 
+        where('product_id', '==', deleteConfirmProduct.id),
+        where('enterprise_id', '==', enterpriseId)
+      );
       const snapshots = await getDocs(q);
       const batch = writeBatch(db);
       snapshots.forEach(d => batch.delete(d.ref));
@@ -400,8 +419,9 @@ export default function Inventory() {
       toast.success('Asset decommissioned successfully');
       setDeleteConfirmProduct(null);
       fetchData();
-    } catch (error) {
-      toast.error('Purge failed');
+    } catch (error: any) {
+      console.error('Purge error:', error);
+      toast.error(error.code === 'permission-denied' ? 'Authorization error during purge' : 'Purge failed');
     }
   };
 
@@ -412,7 +432,11 @@ export default function Inventory() {
       const batch = writeBatch(db);
       for (const id of selectedProducts) {
         batch.delete(doc(db, 'products', id));
-        const q = query(collection(db, 'inventory'), where('product_id', '==', id));
+        const q = query(
+          collection(db, 'inventory'), 
+          where('product_id', '==', id),
+          where('enterprise_id', '==', enterpriseId)
+        );
         const snapshots = await getDocs(q);
         snapshots.forEach(d => batch.delete(d.ref));
       }
@@ -420,8 +444,9 @@ export default function Inventory() {
       toast.success(`${selectedProducts.length} assets purged`);
       setSelectedProducts([]);
       fetchData();
-    } catch (error) {
-      toast.error('Batch decommission failed');
+    } catch (error: any) {
+      console.error('Batch purge error:', error);
+      toast.error('Batch decommission failed. Verify administrative authority.');
     } finally {
       setIsBatchDeleting(false);
     }
@@ -478,32 +503,40 @@ export default function Inventory() {
     }
 
     try {
+      if (!enterpriseId) throw new Error('Identity Missing');
+
       const q = query(
         collection(db, 'inventory'), 
         where('product_id', '==', selectedProduct.id),
-        where('branch_id', '==', updateStockData.branch_id)
+        where('branch_id', '==', updateStockData.branch_id),
+        where('enterprise_id', '==', enterpriseId)
       );
       const snapshot = await getDocs(q);
       
       const multiplier = (updateStockData.reason === 'DAMAGED' || updateStockData.reason === 'SHRINKAGE') ? -1 : 1;
       const adjustQty = updateStockData.qty * multiplier;
 
+      const batch = writeBatch(db);
+
       if (snapshot.empty) {
-        await addDoc(collection(db, 'inventory'), {
+        const invRef = doc(collection(db, 'inventory'));
+        batch.set(invRef, {
           product_id: selectedProduct.id,
           branch_id: updateStockData.branch_id,
           quantity: Math.max(0, adjustQty),
+          enterprise_id: enterpriseId,
           updated_at: new Date().toISOString()
         });
       } else {
         const invDoc = snapshot.docs[0];
-        await updateDoc(invDoc.ref, {
+        batch.update(invDoc.ref, {
           quantity: Math.max(0, (invDoc.data().quantity || 0) + adjustQty),
           updated_at: new Date().toISOString()
         });
       }
 
-      await addDoc(collection(db, 'inventory_movements'), {
+      const movRef = doc(collection(db, 'inventory_movements'));
+      batch.set(movRef, {
         product_id: selectedProduct.id,
         product: selectedProduct.name,
         qty: adjustQty,
@@ -511,14 +544,17 @@ export default function Inventory() {
         from: multiplier > 0 ? 'SUPPLIER' : branches.find(b=>b.id===updateStockData.branch_id)?.name || 'LOCAL',
         to: multiplier > 0 ? branches.find(b=>b.id===updateStockData.branch_id)?.name || 'LOCAL' : 'WASTE',
         date: new Date().toISOString(),
-        status: 'COMPLETED'
+        status: 'COMPLETED',
+        enterprise_id: enterpriseId
       });
 
+      await batch.commit();
       toast.success('Stock calibration synchronized');
       setIsUpdateStockOpen(false);
       fetchData();
-    } catch (error) {
-      toast.error('Synchronization failure');
+    } catch (error: any) {
+      console.error('Calibration error:', error);
+      toast.error(error.code === 'permission-denied' ? 'Authorization failure: Verify enterprise context' : 'Synchronization failure');
     }
   };
 
@@ -563,17 +599,26 @@ export default function Inventory() {
     };
     reader.readAsDataURL(file);
 
-    // 2. Async Cloud Sync
+    // 2. Async Cloud Sync with Timeout
     setIsUploadingImage(true);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Sync Timeout')), 15000)
+    );
+
     try {
       const storageRef = ref(getStorage(), `products/${Date.now()}_${file.name.replace(/\s+/g, '_')}`);
-      const uploadResult = await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(uploadResult.ref);
+      
+      const uploadTask = (async () => {
+        const uploadResult = await uploadBytes(storageRef, file);
+        return await getDownloadURL(uploadResult.ref);
+      })();
+
+      const url = await Promise.race([uploadTask, timeoutPromise]) as string;
       setProductForm(prev => ({ ...prev, image_url: url }));
       toast.success('Asset visual synchronized');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Visual Sync Error:", error);
-      toast.error('Cloud synchronization failed');
+      toast.error(error.message === 'Sync Timeout' ? 'Cloud sync delayed - using local preview' : 'Cloud synchronization failed');
     } finally {
       setIsUploadingImage(false);
     }
@@ -967,11 +1012,11 @@ export default function Inventory() {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Market Retail Price</label>
                   <div className="relative group">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-black">$</span>
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-black">{currency === 'USD' ? '$' : currency}</span>
                     <Input 
                       type="number"
                       step="0.01"
-                      className="rounded-2xl h-16 bg-emerald-50 border-emerald-100 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-inner transition-all pl-8 text-emerald-700 py-4 text-base" 
+                      className="rounded-2xl h-16 bg-emerald-50 border-emerald-100 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-inner transition-all pl-12 text-emerald-700 py-4 text-base" 
                       value={productForm.price || ""}
                       onChange={(e) => {
                         const price = parseFloat(e.target.value) || 0;

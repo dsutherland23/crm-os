@@ -25,7 +25,13 @@ import {
   Percent,
   Lock,
   ArrowLeft,
-  ClipboardCheck
+  ClipboardCheck,
+  Play,
+  Coffee,
+  Utensils,
+  AlertCircle,
+  Users,
+  Clock
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -72,7 +78,7 @@ interface CartDiscount {
 export default function POS() {
   const { 
     activeBranch, setActiveBranch, hasActiveTransaction, setHasActiveTransaction, 
-    formatCurrency, enterpriseId, branding, setPosSession, 
+    formatCurrency, currency, enterpriseId, branding, setPosSession, 
     posSession, clearSession, updateShiftStatus, logout,
     shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies 
   } = useModules();
@@ -127,12 +133,38 @@ export default function POS() {
   const [autoCloseTime, setAutoCloseTime] = useState("");
   const [autoCloseEnabled, setAutoCloseEnabled] = useState(false);
   const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
+  const [isStockSynced, setIsStockSynced] = useState(false);
+  const [isOpeningFloatOpen, setIsOpeningFloatOpen] = useState(false);
+
+  // Reset sync state when opening close dialog
+  useEffect(() => {
+    if (isClosePromptOpen) {
+      setIsStockSynced(false);
+    }
+  }, [isClosePromptOpen]);
+  const [openingFloat, setOpeningFloat] = useState("");
   const [countedCash, setCountedCash] = useState("");
   const [closeRegisterNotes, setCloseRegisterNotes] = useState("");
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [currentSessionData, setCurrentSessionData] = useState<any>(null);
+  const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [isCountingBills, setIsCountingBills] = useState(false);
+  const [billCounts, setBillCounts] = useState<Record<number, string>>({});
+
+  const handleBillCountChange = (denom: number, value: string) => {
+    const newCounts = { ...billCounts, [denom]: value };
+    setBillCounts(newCounts);
+    
+    // Calculate total from counts
+    const total = Object.entries(newCounts).reduce((acc, [d, count]) => {
+      return acc + (Number(d) * (Number(count) || 0));
+    }, 0);
+    
+    setOpeningFloat(total > 0 ? total.toFixed(2) : "");
+  };
 
   // ── Sync with Global Session ────────────────────────────────────
   useEffect(() => {
@@ -145,7 +177,10 @@ export default function POS() {
 
   const [globalTaxRate, setGlobalTaxRate] = useState(15.0); // Fallback to 15%
 
+  // Data Fetching: Global Config & Products
   useEffect(() => {
+    if (!enterpriseId) return;
+
     const unsubProducts = onSnapshot(
       query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
@@ -182,6 +217,26 @@ export default function POS() {
       (err) => console.error("staff:", err)
     );
 
+    const unsubSessions = onSnapshot(
+      query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH", "IN_MEETING"])),
+      (snapshot) => setActiveSessions(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("sessions:", err)
+    );
+
+    return () => {
+      unsubProducts();
+      unsubInventory();
+      unsubCustomers();
+      unsubCampaigns();
+      unsubStaff();
+      unsubSessions();
+    };
+  }, [enterpriseId]);
+
+  // Global Settings Listener
+  useEffect(() => {
+    if (!enterpriseId) return;
+
     const unsubSettings = onSnapshot(
       doc(db, "settings", "global"),
       (docSnapshot) => {
@@ -198,28 +253,57 @@ export default function POS() {
           });
         }
       },
-      (err) => console.error("settings:", err)
+      (err) => console.error("settings-listener-error:", err)
     );
 
-    const unsubSessions = onSnapshot(
-      query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH", "IN_MEETING"])),
-      (snapshot) => setActiveSessions(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("sessions:", err)
+    return () => unsubSettings();
+  }, [enterpriseId]);
+
+  // Specific Session Monitor
+  useEffect(() => {
+    if (!currentSessionId || typeof currentSessionId !== 'string') {
+      setCurrentSessionData(null);
+      return;
+    }
+
+    const unsubSession = onSnapshot(
+      doc(db, "pos_sessions", currentSessionId), 
+      (docSnap) => {
+        if (docSnap.exists()) {
+          setCurrentSessionData(docSnap.data());
+        }
+      }, 
+      (err) => console.error("session-monitor-error:", err)
     );
 
+    return () => unsubSession();
+  }, [currentSessionId]);
+
+  // Global Clock
+  useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-
-    return () => {
-      unsubProducts();
-      unsubInventory();
-      unsubCustomers();
-      unsubCampaigns();
-      unsubStaff();
-      unsubSettings();
-      unsubSessions();
-      clearInterval(timer);
-    };
+    return () => clearInterval(timer);
   }, []);
+
+  const [sessionExpectedCash, setSessionExpectedCash] = useState(0);
+
+  useEffect(() => {
+    if (isClosePromptOpen && currentSessionId) {
+      const q = query(
+        collection(db, "transactions"), 
+        where("sessionId", "==", currentSessionId),
+        where("paymentMethod", "==", "CASH")
+      );
+      
+      const unsub = onSnapshot(q, (snapshot) => {
+        const cashTotal = snapshot.docs.reduce((acc, docSnap) => acc + (docSnap.data().total || 0), 0);
+        const opening = currentSessionData?.openingFloat || 0;
+        setSessionExpectedCash(opening + cashTotal);
+      });
+      
+      return () => unsub();
+    }
+  }, [isClosePromptOpen, currentSessionId, currentSessionData]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -297,10 +381,10 @@ export default function POS() {
     if (activeBranch === "all") {
       return inventory
         .filter(i => i.product_id === productId)
-        .reduce((acc, curr) => acc + curr.stock, 0);
+        .reduce((acc, curr) => acc + (curr.quantity || 0), 0);
     }
     const item = inventory.find(i => i.product_id === productId && i.branch_id === activeBranch);
-    return item ? item.stock : 0;
+    return item ? (item.quantity || 0) : 0;
   };
 
   const addToCart = (product: any) => {
@@ -497,7 +581,7 @@ export default function POS() {
         enterprise_id: enterpriseId
       });
 
-      // 2. Deduct inventory stock for each item
+      // 2. Deduct inventory quantity for each item
       await Promise.all(cart.map(async (item) => {
         const invItem = inventory.find(i =>
           i.product_id === item.product.id &&
@@ -505,7 +589,7 @@ export default function POS() {
         );
         if (invItem) {
           await updateDoc(doc(db, "inventory", invItem.id), {
-            stock: Math.max(0, (invItem.stock || 0) - item.quantity)
+            quantity: Math.max(0, (invItem.quantity || 0) - item.quantity)
           });
         }
       }));
@@ -618,41 +702,15 @@ export default function POS() {
             } else {
                // Update global branch if user has a primary one
                const primaryBranch = selectedAdmin.branches?.[0];
-               const targetBranch = (primaryBranch && primaryBranch !== "all") ? primaryBranch : activeBranch;
                if (primaryBranch && primaryBranch !== "all") {
                  setActiveBranch(primaryBranch);
                }
 
-               // Create new session
-               const docRef = await addDoc(collection(db, "pos_sessions"), {
-                 staffId: selectedAdmin.id,
-                 staffName: selectedAdmin.name,
-                 branchId: targetBranch,
-                startTime: new Date().toISOString(),
-                status: "ACTIVE",
-                enterprise_id: enterpriseId
-              });
-              await addDoc(collection(db, "audit_logs"), {
-                action: "Shift Started",
-                details: `Staff member ${selectedAdmin.name} started a new shift`,
-                timestamp: new Date().toISOString(),
-                user: selectedAdmin.name,
-                enterprise_id: enterpriseId
-              });
-              setCurrentSessionId(docRef.id);
-              toast.success("Authorization successful - Shift Started");
-
-              setIsAuthorized(true);
-              setPosSession({
-                staffId: selectedAdmin.id,
-                staffName: selectedAdmin.name,
-                payGrade: selectedAdmin.payGrade || 'STANDARD',
-                sessionId: docRef.id,
-                staffData: selectedAdmin,
-                shiftStatus: "ACTIVE",
-                statusSince: new Date().toISOString()
-              });
-            }
+               // Instead of immediate creation, trigger the Opening Float Prompt
+               setIsAuthorized(true);
+               setIsOpeningFloatOpen(true);
+               toast.info(`Welcome, ${selectedAdmin.name}. Please set opening float.`);
+             }
           } catch (error: any) {
             toast.error("Failed to start session: " + error.message);
             setPinEntry("");
@@ -665,7 +723,55 @@ export default function POS() {
     }
   };
 
-  const handleTimeClock = async (statusType: "ON_BREAK" | "ON_LUNCH" | "IN_MEETING" | "LOCKED") => {
+  const handleConfirmOpeningFloat = async () => {
+    if (!selectedAdmin || !openingFloat) {
+      toast.error("Please enter a valid opening float");
+      return;
+    }
+
+    try {
+      const primaryBranch = selectedAdmin.branches?.[0];
+      const targetBranch = (primaryBranch && primaryBranch !== "all") ? primaryBranch : activeBranch;
+      
+      const docRef = await addDoc(collection(db, "pos_sessions"), {
+        staffId: selectedAdmin.id,
+        staffName: selectedAdmin.name,
+        branchId: targetBranch,
+        startTime: new Date().toISOString(),
+        status: "ACTIVE",
+        enterprise_id: enterpriseId,
+        openingFloat: parseFloat(openingFloat) || 0
+      });
+
+      await addDoc(collection(db, "audit_logs"), {
+        action: "Shift Started",
+        details: `Staff member ${selectedAdmin.name} started shift with float: ${openingFloat}`,
+        timestamp: new Date().toISOString(),
+        user: selectedAdmin.name,
+        enterprise_id: enterpriseId
+      });
+
+      setCurrentSessionId(docRef.id);
+      setIsOpeningFloatOpen(false);
+      setIsAuthorized(true);
+      setPosSession({
+        staffId: selectedAdmin.id,
+        staffName: selectedAdmin.name,
+        payGrade: selectedAdmin.payGrade || 'STANDARD',
+        sessionId: docRef.id,
+        staffData: selectedAdmin,
+        shiftStatus: "ACTIVE",
+        statusSince: new Date().toISOString()
+      });
+      
+      toast.success("Shift started with float amount confirmed.");
+      setOpeningFloat(""); // Clear for next use
+    } catch (err: any) {
+      toast.error("Failed to start session: " + err.message);
+    }
+  };
+
+  const handleTimeClock = async (statusType: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING" | "LOCKED") => {
     if (currentSessionId && statusType !== "LOCKED") {
       try {
         await updateDoc(doc(db, "pos_sessions", currentSessionId), {
@@ -848,16 +954,21 @@ export default function POS() {
   const handleCloseRegister = async () => {
     if (currentSessionId) {
       try {
+        const actualCount = parseFloat(countedCash) || 0;
+        const variance = actualCount - sessionExpectedCash;
+
         await updateDoc(doc(db, "pos_sessions", currentSessionId), {
           endTime: new Date().toISOString(),
           status: "CLOSED",
-          countedCash: countedCash || "0",
+          countedCash: actualCount,
+          expectedCash: sessionExpectedCash,
+          variance: variance,
           notes: closeRegisterNotes
         });
         
         await addDoc(collection(db, "audit_logs"), {
           action: "Shift Closed",
-          details: `Staff member ${selectedAdmin?.name || 'Unknown'} closed the register with ${countedCash ? '$'+countedCash : 'no'} declared cash`,
+          details: `Staff member ${selectedAdmin?.name || 'Unknown'} closed register. Expected: ${formatCurrency(sessionExpectedCash)}, Counted: ${formatCurrency(actualCount)}, Variance: ${formatCurrency(variance)}`,
           timestamp: new Date().toISOString(),
           user: selectedAdmin?.name || "System",
           enterprise_id: enterpriseId
@@ -906,15 +1017,91 @@ export default function POS() {
               <div className="flex items-center gap-4">
                 <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-zinc-900 font-display whitespace-nowrap">Terminal</h1>
                 {posSession?.sessionId && (
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    className="rounded-xl border-zinc-200 bg-white text-zinc-600 font-bold h-9 px-4 hover:bg-zinc-50"
-                    onClick={() => setIsClosePromptOpen(true)}
-                  >
-                    <History className="w-4 h-4 mr-2" />
-                    Close Registry
-                  </Button>
+                  <div className="flex items-center gap-3">
+                    {/* Duty Status Dropdown */}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <div 
+                          className={cn(
+                            "rounded-xl h-11 px-4 border border-zinc-200 bg-white hover:bg-zinc-50 shadow-sm transition-all flex items-center gap-3 cursor-pointer select-none",
+                            (currentSessionData?.status === 'ON_BREAK') && "border-amber-200 bg-amber-50/30 text-amber-600",
+                            (currentSessionData?.status === 'ON_LUNCH') && "border-orange-200 bg-orange-50/30 text-orange-600",
+                            (currentSessionData?.status === 'IN_MEETING') && "border-indigo-200 bg-indigo-50/30 text-indigo-600"
+                          )}
+                        >
+                          <div className="flex items-center gap-2">
+                             {(() => {
+                               const s = currentSessionData?.status || 'ACTIVE';
+                               if (s === 'ON_BREAK') return <Coffee className="w-4 h-4" />;
+                               if (s === 'ON_LUNCH') return <Utensils className="w-4 h-4" />;
+                               if (s === 'IN_MEETING') return <Users className="w-4 h-4" />;
+                               return <Play className="w-4 h-4 text-emerald-500" />;
+                             })()}
+                             <span className="text-xs font-black uppercase tracking-widest">
+                               {currentSessionData?.status?.replace('ON_', '').replace('IN_', '') || 'On Duty'}
+                             </span>
+                          </div>
+                          <ChevronRight className="w-4 h-4 rotate-90 text-zinc-400" />
+                        </div>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent className="w-64 rounded-2xl p-1 shadow-2xl border-none bg-white/95 backdrop-blur-xl" align="end">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="px-3 py-3 border-b border-zinc-100 mb-1">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Shift Summary</p>
+                            <div className="space-y-2">
+                               <div className="flex items-center justify-between text-[10px] font-bold">
+                                 <span className="text-zinc-500 uppercase tracking-tighter">Shift Started</span>
+                                 <span className="text-zinc-900 font-black">{new Date(currentSessionData?.startTime || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                               </div>
+                               <div className="flex items-center justify-between text-[10px] font-bold border-t border-zinc-50 pt-2">
+                                 <span className="text-zinc-500 uppercase tracking-tighter">Opening Float</span>
+                                 <span className="text-blue-600 font-black">{formatCurrency(currentSessionData?.openingFloat || 0)}</span>
+                               </div>
+                            </div>
+                          </DropdownMenuLabel>
+                        </DropdownMenuGroup>
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-[10px] font-black uppercase tracking-widest text-zinc-400 px-3 py-2">Duty Controls</DropdownMenuLabel>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-emerald-50 cursor-pointer group" onClick={() => handleTimeClock('ACTIVE')}>
+                            <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <Play className="w-4 h-4 text-emerald-600" />
+                            </div>
+                            <span className="font-bold text-zinc-700 text-sm">Resume Duty</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-amber-50 cursor-pointer group" onClick={() => handleTimeClock('ON_BREAK')}>
+                            <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <Coffee className="w-4 h-4 text-amber-600" />
+                            </div>
+                            <span className="font-bold text-zinc-700 text-sm">On Break</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-orange-50 cursor-pointer group" onClick={() => handleTimeClock('ON_LUNCH')}>
+                            <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <Utensils className="w-4 h-4 text-orange-600" />
+                            </div>
+                            <span className="font-bold text-zinc-700 text-sm">On Lunch</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-indigo-50 cursor-pointer group" onClick={() => handleTimeClock('IN_MEETING')}>
+                            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <Users className="w-4 h-4 text-indigo-600" />
+                            </div>
+                            <span className="font-bold text-zinc-700 text-sm">In Meeting</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                        <DropdownMenuGroup>
+                          <DropdownMenuSeparator className="bg-zinc-100" />
+                          <DropdownMenuItem 
+                            className="rounded-xl h-12 px-3 focus:bg-rose-50 cursor-pointer group" 
+                            onClick={() => setIsClosePromptOpen(true)}
+                          >
+                            <div className="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <History className="w-4 h-4 text-rose-600" />
+                            </div>
+                            <span className="font-bold text-rose-700 text-sm">End Shift</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
                 )}
               </div>
               <p className="text-xs lg:text-sm text-zinc-500">Quick-access product catalog and barcode scanner.</p>
@@ -998,10 +1185,13 @@ export default function POS() {
                     >
                       <div className="aspect-square overflow-hidden bg-zinc-100 relative">
                         <img 
-                          src={product.image_url || product.image} 
+                          src={product.image_url || product.image || "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=400"} 
                           alt={product.name} 
                           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                           referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1581646730702-60193386ec9c?auto=format&fit=crop&q=80&w=400";
+                          }}
                         />
                         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                           <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-xl">
@@ -1012,7 +1202,9 @@ export default function POS() {
                       <CardContent className="p-4">
                         <div className="flex justify-between items-start mb-1">
                           <p className="text-sm font-bold text-zinc-900 truncate">{product.name}</p>
-                          <p className="text-sm font-bold text-blue-600">{formatCurrency(product.retail_price || product.price)}</p>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-blue-600">{formatCurrency(product.retail_price || product.price || 0)}</p>
+                          </div>
                         </div>
                         <div className="flex items-center justify-between">
                           <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{product.category}</p>
@@ -1062,75 +1254,41 @@ export default function POS() {
             </div>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button 
-                variant="outline" 
-                className="w-full justify-start rounded-xl border-zinc-200 h-11 text-zinc-500 hover:text-zinc-900 bg-zinc-50/50"
-              >
-                {selectedCustomer ? (
-                  <div className="flex items-center justify-between w-full">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-bold">
-                        {(selectedCustomer.name || 'CU').substring(0, 2).toUpperCase()}
-                      </div>
-                      <span className="text-sm font-bold text-zinc-900">{selectedCustomer.name}</span>
-                    </div>
-                    <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100">{selectedCustomer.points || 0} pts</Badge>
+          <Button 
+            variant="outline" 
+            className="w-full justify-start rounded-2xl border-zinc-200 h-14 text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 group transition-all hover:bg-white hover:border-blue-500/30"
+            onClick={() => setIsCustomerSearchOpen(true)}
+          >
+            {selectedCustomer ? (
+              <div className="flex items-center justify-between w-full">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center text-[10px] font-black shadow-inner">
+                    {(selectedCustomer.name || 'CU').substring(0, 2).toUpperCase()}
                   </div>
-                ) : (
-                  <>
-                    <UserPlus className="w-4 h-4 mr-2" />
-                    Link Customer
-                  </>
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-             <DropdownMenuContent className="w-80 rounded-xl border-zinc-200 p-2">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest px-2 pt-2">Link Customer</DropdownMenuLabel>
-                <div className="px-2 pb-2">
-                  <Input
-                    placeholder="Search customers..."
-                    className="h-9 rounded-lg text-xs"
-                    value={customerSearch}
-                    onChange={(e) => setCustomerSearch(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                  />
+                  <div className="text-left">
+                    <p className="text-sm font-black text-zinc-900">{selectedCustomer.name}</p>
+                    <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Active Account</p>
+                  </div>
                 </div>
-                <ScrollArea className="max-h-52">
-                  {customers
-                    .filter(c => {
-                      const term = customerSearch.toLowerCase();
-                      return !term ||
-                        (c.name || "").toLowerCase().includes(term) ||
-                        (c.email || "").toLowerCase().includes(term) ||
-                        (c.phone || "").includes(term);
-                    })
-                    .slice(0, 20)
-                    .map(c => (
-                      <DropdownMenuItem key={c.id} className="rounded-lg cursor-pointer" onClick={() => { setSelectedCustomer(c); setCustomerSearch(""); }}>
-                        <div className="flex items-center justify-between w-full">
-                          <div>
-                            <p className="font-bold text-zinc-900 text-sm">{c.name}</p>
-                            <p className="text-xs text-zinc-400">{c.email}</p>
-                          </div>
-                          <Badge variant="outline" className="text-[9px] ml-2">{c.segment || "Customer"}</Badge>
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
-                </ScrollArea>
-                {selectedCustomer && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="rounded-lg cursor-pointer text-rose-600 focus:text-rose-600" onClick={() => { setSelectedCustomer(null); setCustomerSearch(""); }}>
-                      Remove Customer
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <div className="flex items-center gap-2">
+                   <div className="text-right">
+                     <p className="text-[10px] font-black text-emerald-600">{selectedCustomer.points || 0} PTS</p>
+                   </div>
+                   <ChevronRight className="w-4 h-4 text-zinc-300 group-hover:text-blue-500 transition-colors" />
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-zinc-100 text-zinc-400 flex items-center justify-center">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <p className="text-sm font-bold text-zinc-900">Walk-in Customer</p>
+                  <p className="text-[10px] text-zinc-400 font-medium">Click to link existing account</p>
+                </div>
+              </div>
+            )}
+          </Button>
           
           {/* AI Upsell Suggestion */}
           {cart.length > 0 && (
@@ -1554,65 +1712,351 @@ export default function POS() {
               />
             </div>
             
-            <div className="p-4 rounded-xl border border-zinc-200 bg-zinc-50/50 space-y-3">
+            <div className={cn(
+              "p-4 rounded-xl border transition-all duration-300",
+              isStockSynced 
+                ? "border-emerald-200 bg-emerald-50/50" 
+                : "border-zinc-200 bg-zinc-50/50 space-y-3"
+            )}>
               <div className="flex items-start gap-3">
-                <Package className="w-5 h-5 text-zinc-500 mt-0.5 shrink-0" />
+                <div className={cn(
+                  "p-2 rounded-lg transition-colors",
+                  isStockSynced ? "bg-emerald-100 text-emerald-600" : "bg-zinc-100 text-zinc-500"
+                )}>
+                  <Package className="w-4 h-4" />
+                </div>
                 <div>
-                  <p className="text-sm font-bold text-zinc-900">No stock deductions pending</p>
-                  <p className="text-xs text-zinc-500">Press Sync Stock Deductions to confirm before closing.</p>
+                  <p className={cn("text-sm font-bold", isStockSynced ? "text-emerald-900" : "text-zinc-900")}>
+                    {isStockSynced ? "Stock Deductions Synchronized" : "Pending stock deductions"}
+                  </p>
+                  <p className="text-[10px] text-zinc-500 font-medium">
+                    {isStockSynced ? "Inventory levels reconciled with global ledger." : "Confirm inventory levels before closing registry."}
+                  </p>
                 </div>
               </div>
-              <Button
-                variant="secondary"
-                className="w-full rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-900 font-bold border border-zinc-200"
-                onClick={async () => {
-                  try {
-                    await addDoc(collection(db, "audit_logs"), {
-                      action: "Stock Sync Requested",
-                      details: `Manual stock deduction sync triggered by ${selectedAdmin?.name || 'Unknown'} at register close`,
-                      timestamp: serverTimestamp(),
-                      user: selectedAdmin?.name || "System",
-                      enterprise_id: enterpriseId
-                    });
-                    toast.success("Stock deductions confirmed and logged");
-                  } catch (err) {
-                    toast.error("Failed to sync stock deductions");
-                  }
-                }}
-              >
-                <Package className="w-4 h-4 mr-2" /> Sync Stock Deductions
-              </Button>
+              {!isStockSynced && (
+                <Button
+                  variant="secondary"
+                  className="w-full mt-3 rounded-xl bg-white hover:bg-zinc-50 text-zinc-900 font-bold border border-zinc-200 shadow-sm transition-all active:scale-95"
+                  onClick={async () => {
+                    try {
+                      await addDoc(collection(db, "audit_logs"), {
+                        action: "Stock Sync Requested",
+                        details: `Manual stock deduction sync triggered by ${selectedAdmin?.name || 'Unknown'} at register close`,
+                        timestamp: serverTimestamp(),
+                        user: selectedAdmin?.name || "System",
+                        enterprise_id: enterpriseId
+                      });
+                      setIsStockSynced(true);
+                      toast.success("Stock deductions confirmed and logged");
+                    } catch (err) {
+                      toast.error("Failed to sync stock deductions");
+                    }
+                  }}
+                >
+                  Confirm & Sync Ledger
+                </Button>
+              )}
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-sm font-bold text-zinc-900">Amount Counted</Label>
-              <Input 
-                placeholder="Enter cash counted" 
-                type="number"
-                value={countedCash}
-                onChange={(e) => setCountedCash(e.target.value)}
-                className="border-green-100 bg-green-50/30 focus-visible:ring-green-500" 
-              />
+            <div className="p-5 rounded-2xl bg-zinc-900 text-white space-y-4 shadow-xl">
+              <div className="flex justify-between items-end">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Expected Registry Total</p>
+                  <p className="text-2xl font-black">{formatCurrency(sessionExpectedCash)}</p>
+                </div>
+                <div className="text-right space-y-1 opacity-60">
+                   <p className="text-[10px] font-bold uppercase">Opening Float</p>
+                   <p className="text-xs font-black">{formatCurrency(currentSessionData?.openingFloat || 0)}</p>
+                </div>
+              </div>
+              <div className="h-px bg-white/10" />
+              <div className="space-y-2">
+                <Label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Manual Cash Count</Label>
+                <div className="relative group">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-black text-xl group-focus-within:text-white transition-colors">{currency === 'USD' ? '$' : ''}</span>
+                  <Input 
+                    placeholder="0.00" 
+                    type="number"
+                    value={countedCash}
+                    onChange={(e) => setCountedCash(e.target.value)}
+                    className="h-14 pl-10 rounded-xl border-none bg-white/10 text-white font-black text-xl focus:ring-4 focus:ring-blue-500/20 placeholder:text-zinc-600 transition-all" 
+                  />
+                </div>
+              </div>
             </div>
 
+            {countedCash && (
+              <div className="space-y-4">
+                <div className={cn(
+                  "p-5 rounded-2xl border-2 flex items-center justify-between font-black text-sm shadow-sm",
+                  Math.abs(parseFloat(countedCash) - sessionExpectedCash) < 1
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-700" 
+                    : "bg-rose-50 border-rose-200 text-rose-700 animate-pulse"
+                )}>
+                  <div className="flex items-center gap-2">
+                    <div className={cn("w-2 h-2 rounded-full", Math.abs(parseFloat(countedCash) - sessionExpectedCash) < 1 ? "bg-emerald-500" : "bg-rose-500")} />
+                    <span>Variance Amount:</span>
+                  </div>
+                  <span className="text-xl">{formatCurrency(parseFloat(countedCash) - sessionExpectedCash)}</span>
+                </div>
+                
+                {Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && (
+                  <div className="p-4 rounded-xl border border-rose-100 bg-rose-50/50 flex gap-3 items-start">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-[11px] font-black text-rose-600 uppercase tracking-widest">Significant Variance Detected</p>
+                      <p className="text-[10px] text-rose-500 font-bold leading-tight">A detailed explanation is required in the notes field before submitting this audit.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label className="text-sm font-bold text-zinc-900">Notes (Optional)</Label>
+              <Label className={cn(
+                "text-sm font-bold transition-colors",
+                (countedCash && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1) ? "text-rose-600" : "text-zinc-900"
+              )}>
+                Shift Audit Notes {(countedCash && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1) && "(Required)"}
+              </Label>
               <textarea 
-                className="w-full border border-zinc-200 rounded-xl p-3 text-sm min-h-[80px] focus:outline-none focus:ring-2 focus:ring-zinc-900/20 transition-all resize-none"
-                placeholder="Add any notes about this cash count..."
+                className={cn(
+                  "w-full border rounded-2xl p-4 text-sm min-h-[100px] focus:outline-none focus:ring-4 transition-all resize-none shadow-inner",
+                  (countedCash && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1)
+                    ? "border-rose-200 bg-rose-50/20 focus:ring-rose-500/10 placeholder:text-rose-300"
+                    : "border-zinc-200 bg-zinc-50/50 focus:ring-blue-500/10"
+                )}
+                placeholder={Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 ? "Please explain the discrepancy..." : "Add any notes about this cash count..."}
                 value={closeRegisterNotes}
                 onChange={(e) => setCloseRegisterNotes(e.target.value)}
               />
             </div>
             
-            <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/50">
-              <p className="text-xs font-bold text-amber-900">⚠️ Please press "Sync Stock Deductions" above before closing the register.</p>
+            <div className="p-5 rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 flex items-start gap-3">
+              <div className="p-2 bg-white rounded-xl shadow-sm text-amber-600 mt-0.5">
+                <ClipboardCheck className="w-4 h-4" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-black text-amber-900 leading-none">Pre-Closure Synchronization</p>
+                <p className="text-[10px] text-amber-700 font-bold leading-relaxed">Ensure all pending stock deductions are synchronized to the global ledger before finalizing the registry closure.</p>
+              </div>
             </div>
           </div>
           <DialogFooter className="gap-2 sm:gap-0 pt-4">
             <Button variant="outline" onClick={() => setIsClosePromptOpen(false)} className="rounded-xl border-zinc-200 hover:bg-zinc-50 font-bold flex-1">Cancel</Button>
-            <Button id="pos-close-shift-btn" className="rounded-xl bg-zinc-500 hover:bg-zinc-600 text-white font-bold flex-1" onClick={handleCloseRegister}>Close Register</Button>
+            <Button 
+              id="pos-close-shift-btn" 
+              className={cn(
+                "rounded-xl font-bold flex-1 h-12 transition-all",
+                (!isStockSynced || (countedCash && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && !closeRegisterNotes.trim()))
+                  ? "bg-zinc-100 text-zinc-400 cursor-not-allowed border-zinc-200"
+                  : "bg-zinc-900 hover:bg-zinc-800 text-white shadow-xl shadow-zinc-900/20"
+              )} 
+              disabled={!isStockSynced || (countedCash && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && !closeRegisterNotes.trim())}
+              onClick={handleCloseRegister}
+            >
+              Close Register
+            </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isOpeningFloatOpen} onOpenChange={setIsOpeningFloatOpen}>
+        <DialogContent className="sm:max-w-xl rounded-[2.5rem] p-10 border-none shadow-2xl bg-white overflow-hidden max-h-[90vh] overflow-y-auto">
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-indigo-500/5 pointer-events-none" />
+          <DialogHeader className="relative space-y-4">
+            <div className="flex justify-between items-start">
+              <div className="w-16 h-16 bg-blue-100 rounded-3xl flex items-center justify-center shadow-inner">
+                <History className="w-8 h-8 text-blue-600" />
+              </div>
+              <div className="flex bg-zinc-100 p-1 rounded-2xl gap-1">
+                <button 
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", !isCountingBills ? "bg-white shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700")}
+                  onClick={() => setIsCountingBills(false)}
+                >
+                  Simple
+                </button>
+                <button 
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", isCountingBills ? "bg-white shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700")}
+                  onClick={() => setIsCountingBills(true)}
+                >
+                  Count bills
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <DialogTitle className="text-3xl font-black tracking-tight text-zinc-900">Start Registry</DialogTitle>
+              <DialogDescription className="text-zinc-500 font-bold text-base">
+                Initialize the floating amount for terminal #{selectedAdmin?.id?.substring(0,4).toUpperCase()}.
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+          
+          <div className="space-y-8 pt-8 relative">
+            {!isCountingBills ? (
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">Opening Floating Amount ({currency})</Label>
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-zinc-100 rounded-full text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <Clock className="w-3 h-3" /> {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  <div className="relative group">
+                    <span className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-400 font-black text-3xl group-focus-within:text-blue-500 transition-colors">
+                      {currency === 'USD' ? '$' : ''}
+                    </span>
+                    <Input 
+                      placeholder="0.00" 
+                      type="number"
+                      step="0.01"
+                      className="h-24 pl-14 pr-6 rounded-3xl border-none bg-zinc-50 font-black text-5xl text-zinc-900 focus:ring-4 focus:ring-blue-500/10 placeholder:text-zinc-200 transition-all shadow-inner"
+                      value={openingFloat}
+                      onChange={(e) => setOpeningFloat(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[100, 250, 500].map((amt) => (
+                      <button 
+                        key={amt}
+                        className="h-14 rounded-2xl border border-zinc-100 font-black text-zinc-600 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-600 transition-all active:scale-95 shadow-sm bg-white"
+                        onClick={() => setOpeningFloat(amt.toString())}
+                      >
+                        {formatCurrency(amt)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="grid grid-cols-2 gap-4">
+                  {[1000, 500, 100, 50, 20, 10, 5, 1].map(denom => (
+                    <div key={denom} className="flex items-center gap-3 p-3 bg-zinc-50 rounded-2xl border border-zinc-100 focus-within:border-blue-500/50 transition-colors">
+                      <div className="w-12 h-10 bg-white rounded-xl border border-zinc-200 flex items-center justify-center font-black text-zinc-400 text-xs shadow-sm">
+                        {denom}
+                      </div>
+                      <Input 
+                        type="number"
+                        placeholder="0"
+                        className="h-10 border-none bg-transparent font-bold text-lg text-zinc-900 p-0 focus-visible:ring-0"
+                        value={billCounts[denom] || ""}
+                        onChange={(e) => handleBillCountChange(denom, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="p-6 rounded-3xl bg-blue-600 text-white flex justify-between items-center shadow-xl shadow-blue-600/20">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Total Count</p>
+                    <p className="text-3xl font-black">{formatCurrency(parseFloat(openingFloat) || 0)}</p>
+                  </div>
+                  <History className="w-8 h-8 opacity-20" />
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-5 rounded-3xl bg-zinc-50/50 border border-zinc-100/50 space-y-1.5 shadow-sm">
+                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Operator</p>
+                <div className="flex items-center gap-2">
+                   <div className="w-5 h-5 rounded-full bg-zinc-900 flex items-center justify-center text-[8px] text-white font-bold">{selectedAdmin?.initials}</div>
+                   <p className="font-bold text-zinc-900 truncate text-xs">{selectedAdmin?.name}</p>
+                </div>
+              </div>
+              <div className="p-5 rounded-3xl bg-zinc-50/50 border border-zinc-100/50 space-y-1.5 text-right shadow-sm">
+                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Registry ID</p>
+                <p className="font-bold text-zinc-900 truncate text-xs">{(activeBranch || 'all').toUpperCase()}-01</p>
+              </div>
+            </div>
+
+            <Button 
+              className="w-full h-16 rounded-[1.5rem] bg-zinc-900 hover:bg-zinc-800 text-white font-black text-xl shadow-2xl shadow-zinc-900/20 transition-all hover:scale-[1.02] active:scale-95 group relative overflow-hidden"
+              onClick={handleConfirmOpeningFloat}
+              disabled={!openingFloat || parseFloat(openingFloat) <= 0}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-600/0 via-white/10 to-blue-600/0 -translate-x-full group-hover:animate-shimmer" />
+              Initialize Terminal Session
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customer Selector Dialog */}
+      <Dialog open={isCustomerSearchOpen} onOpenChange={setIsCustomerSearchOpen}>
+        <DialogContent className="sm:max-w-2xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+          <div className="p-8 pb-4 border-b border-zinc-100">
+            <DialogHeader className="mb-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <DialogTitle className="text-2xl font-black text-zinc-900">Select Customer</DialogTitle>
+                  <DialogDescription className="text-zinc-500 font-bold">Link an existing account to this transaction.</DialogDescription>
+                </div>
+                <Button 
+                  variant="outline" 
+                  className="rounded-2xl h-10 border-zinc-200 text-xs font-bold text-zinc-600 bg-white hover:bg-zinc-50"
+                  onClick={() => { setSelectedCustomer(null); setIsCustomerSearchOpen(false); }}
+                >
+                  <Users className="w-4 h-4 mr-2" />
+                  Walk-in Customer
+                </Button>
+              </div>
+            </DialogHeader>
+            <div className="relative group">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
+              <Input 
+                placeholder="Search by name, phone, or email..." 
+                className="h-14 pl-12 rounded-2xl border-none bg-zinc-50 font-bold text-zinc-900 focus:ring-4 focus:ring-blue-500/10 placeholder:text-zinc-300 transition-all shadow-inner"
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+                autoFocus
+              />
+            </div>
+          </div>
+          
+          <ScrollArea className="h-[450px]">
+            <div className="p-4 space-y-2">
+              {customers.filter(c => {
+                const search = customerSearch.toLowerCase();
+                return (c.name || '').toLowerCase().includes(search) || 
+                       (c.phone || '').includes(search) || 
+                       (c.email || '').toLowerCase().includes(search);
+              }).map((customer) => (
+                <div 
+                  key={customer.id}
+                  className="p-5 rounded-3xl hover:bg-zinc-50 border border-transparent hover:border-zinc-100 transition-all cursor-pointer group flex items-center justify-between"
+                  onClick={() => {
+                    setSelectedCustomer(customer);
+                    setIsCustomerSearchOpen(false);
+                    setCustomerSearch("");
+                    toast.success(`Active Customer: ${customer.name}`);
+                  }}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-zinc-100 flex items-center justify-center font-black text-zinc-400 group-hover:bg-white group-hover:text-blue-500 transition-colors">
+                      {(customer.name || 'CU').substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="font-bold text-zinc-900 group-hover:text-blue-600 transition-colors">{customer.name}</p>
+                      <p className="text-xs text-zinc-500 font-medium">{customer.phone || customer.email || 'No contact info'}</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-100 font-black text-[10px]">
+                      {customer.points || 0} PTS
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+              {customers.length === 0 && (
+                <div className="text-center py-20">
+                  <Users className="w-12 h-12 text-zinc-100 mx-auto mb-4" />
+                  <p className="text-zinc-400 font-bold">No customers found</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </div>

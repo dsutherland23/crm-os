@@ -1553,6 +1553,7 @@ export default function CRM() {
             <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
               <TabsList className="bg-zinc-100 p-1 rounded-xl w-max flex gap-1">
                 <TabsTrigger value="overview" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Overview</TabsTrigger>
+                <TabsTrigger value="transactions" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Purchase History</TabsTrigger>
                 <TabsTrigger value="invoices" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Invoices</TabsTrigger>
                 <TabsTrigger value="communication" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Communication</TabsTrigger>
                 <TabsTrigger value="notes" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Internal Notes</TabsTrigger>
@@ -1792,6 +1793,61 @@ export default function CRM() {
                     </TableBody>
                   </Table>
                 </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="transactions">
+              <Card className="card-modern overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                      <TableHead className="font-bold text-zinc-900 py-4">Order ID</TableHead>
+                      <TableHead className="font-bold text-zinc-900 py-4">Total Amount</TableHead>
+                      <TableHead className="font-bold text-zinc-900 py-4">Date</TableHead>
+                      <TableHead className="font-bold text-zinc-900 py-4">Payment</TableHead>
+                      <TableHead className="text-right font-bold text-zinc-900 py-4">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {customerTransactions.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-12 text-center text-zinc-400">
+                          No transactions found for this customer.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      customerTransactions.map((tx) => (
+                        <TableRow key={tx.id} className="hover:bg-zinc-50 transition-colors border-b border-zinc-50 cursor-pointer group" onClick={() => { setSelectedTransaction(tx); setIsTransactionDialogOpen(true); }}>
+                          <TableCell className="py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-zinc-100 flex items-center justify-center">
+                                <History className="w-4 h-4 text-zinc-400" />
+                              </div>
+                              <div>
+                                <p className="font-bold text-zinc-900 text-sm">#{tx.id.substring(0, 8)}</p>
+                                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{tx.items?.length || 0} ITEMS</p>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-4 font-bold text-zinc-900">{formatCurrency(tx.total || 0)}</TableCell>
+                          <TableCell className="py-4 text-sm text-zinc-600">
+                            {tx.timestamp?.toDate ? tx.timestamp.toDate().toLocaleDateString() : new Date(tx.timestamp || 0).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell className="py-4">
+                            <Badge variant="outline" className="text-[10px] uppercase font-bold text-zinc-500 border-zinc-200">
+                              {tx.payment_method || tx.paymentMethod || "CASH"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right py-4">
+                            <Button variant="ghost" size="sm" className="rounded-lg font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                              View Receipt <ChevronRight className="w-4 h-4 ml-1" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
               </Card>
             </TabsContent>
 

@@ -18,7 +18,8 @@ const isMock = () => !USE_LIVE_DB && !!getMockUser();
 // Conditional Firestore Exports
 export const collection = (db: any, path: string) => fs.collection(db, path);
 export const query = (ref: any, ...constraints: any[]) => fs.query(ref, ...constraints);
-export const doc = (db: any, path: string, ...rest: string[]) => fs.doc(db, path, ...rest);
+export const doc = (dbOrCol: any, ...pathSegments: string[]) => 
+  pathSegments.length > 0 ? fs.doc(dbOrCol, ...pathSegments) : fs.doc(dbOrCol);
 export const where = fs.where;
 export const orderBy = fs.orderBy;
 export const limit = fs.limit;
@@ -36,13 +37,21 @@ export const addDoc = (ref: any, data: any) =>
 export const updateDoc = (ref: any, data: any) => 
   isMock() ? demoFs.mockUpdateDoc(ref, data) : fs.updateDoc(ref, data);
 
-export const writeBatch = (db: any) => 
-  isMock() ? { 
-    set: () => {}, 
-    update: () => {}, 
-    delete: () => {}, 
-    commit: () => Promise.resolve() 
-  } : fs.writeBatch(db);
+export const writeBatch = (db: any) => {
+  if (isMock()) {
+     const operations: Array<() => Promise<any>> = [];
+     return {
+       set: (ref: any, data: any) => operations.push(() => demoFs.mockAddDoc(ref, data)),
+       update: (ref: any, data: any) => operations.push(() => demoFs.mockUpdateDoc(ref, data)),
+       delete: (ref: any) => operations.push(() => demoFs.mockDeleteDoc(ref)),
+       commit: async () => {
+         for (const op of operations) await op();
+         return Promise.resolve();
+       }
+     };
+  }
+  return fs.writeBatch(db);
+};
 
 export const arrayUnion = fs.arrayUnion;
 export const arrayRemove = fs.arrayRemove;

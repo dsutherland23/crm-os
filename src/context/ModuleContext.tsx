@@ -222,17 +222,12 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   };
 
   const formatCurrency = (amount: number) => {
-    const target = FX_RATES[currency] || FX_RATES["USD"];
-    const converted = amount * target.rate;
-    
-    const formatted = new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: currency,
-      currencyDisplay: "narrowSymbol",
+      currencyDisplay: "symbol",
       minimumFractionDigits: 2
-    }).format(converted);
-
-    return formatted;
+    }).format(amount);
   };
 
   return (
