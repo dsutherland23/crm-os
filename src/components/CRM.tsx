@@ -153,6 +153,7 @@ export default function CRM() {
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isPermanentDeleteOpen, setIsPermanentDeleteOpen] = useState(false);
   const [customerFormData, setCustomerFormData] = useState({
     name: "",
     first_name: "",
@@ -1490,11 +1491,18 @@ export default function CRM() {
 
                   <DropdownMenuSeparator className="my-2 bg-zinc-100" />
                   
-                  <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3 text-rose-600 focus:text-rose-600 focus:bg-rose-50" onClick={() => {
+                  <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3 text-orange-600 focus:text-orange-600 focus:bg-orange-50" onClick={() => {
                     setIsDeleteConfirmOpen(true);
                   }}>
+                    <div className="p-2 bg-orange-50 rounded-lg text-orange-600"><History className="w-4 h-4" /></div>
+                    <span className="font-bold text-xs">Archive Profile</span>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3 text-rose-600 focus:text-rose-600 focus:bg-rose-50" onClick={() => {
+                    setIsPermanentDeleteOpen(true);
+                  }}>
                     <div className="p-2 bg-rose-50 rounded-lg text-rose-600"><Trash2 className="w-4 h-4" /></div>
-                    <span className="font-bold text-xs">Archive Customer</span>
+                    <span className="font-bold text-xs">Decommission Record</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -2255,6 +2263,32 @@ export default function CRM() {
                 >
                   {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin" /> : <History className="w-4 h-4 mr-2" />}
                   Yes, Archive
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Permanent Delete Confirm Dialog */}
+          <Dialog open={isPermanentDeleteOpen} onOpenChange={setIsPermanentDeleteOpen}>
+            <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-bold text-rose-600">Permanent Deletion?</DialogTitle>
+                <DialogDescription>
+                  This will PERMANENTLY erase {selectedCustomer?.name} and all associated metadata. This action cannot be reversed under any protocol.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="gap-3 sm:gap-0 mt-4">
+                <Button variant="outline" className="flex-1 rounded-xl h-12 font-bold" onClick={() => setIsPermanentDeleteOpen(false)}>No, Preserve</Button>
+                <Button 
+                  className="flex-1 rounded-xl bg-rose-600 text-white h-12 font-bold hover:bg-rose-700 shadow-lg shadow-rose-600/20"
+                  onClick={async () => {
+                    await handleDeleteCustomer();
+                    setIsPermanentDeleteOpen(false);
+                  }}
+                  disabled={isSubmittingCustomer}
+                >
+                  {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                  Yes, Purge
                 </Button>
               </DialogFooter>
             </DialogContent>

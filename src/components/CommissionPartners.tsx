@@ -278,14 +278,14 @@ export default function CommissionPartners() {
           </div>
           <p className="text-sm text-zinc-500 font-medium italic">Monitor referral performance and manage incentive settlements.</p>
         </div>
-        <div className="flex gap-3">
-           <Button variant="outline" className="rounded-xl h-12 px-6 border-zinc-200 font-bold" onClick={() => setIsAuthorized(false)}>
+        <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+           <Button variant="outline" className="rounded-xl h-12 px-6 border-zinc-200 font-bold flex-1 sm:flex-none" onClick={() => setIsAuthorized(false)}>
               Lock Terminal
            </Button>
-           <Button onClick={() => setIsBulkSettleOpen(true)} className="rounded-xl h-12 px-6 bg-zinc-100 text-zinc-900 border border-zinc-200 hover:bg-zinc-200 font-bold">
+           <Button onClick={() => setIsBulkSettleOpen(true)} className="rounded-xl h-12 px-6 bg-zinc-100 text-zinc-900 border border-zinc-200 hover:bg-zinc-200 font-bold flex-1 sm:flex-none">
               <Coins className="w-4 h-4 mr-2" /> Bulk Settle
            </Button>
-           <Button className="rounded-xl h-12 px-6 bg-zinc-900 text-white hover:bg-zinc-800 font-bold shadow-xl shadow-zinc-200" onClick={() => setIsAddPartnerOpen(true)}>
+           <Button className="rounded-xl h-12 px-6 bg-zinc-900 text-white hover:bg-zinc-800 font-bold shadow-xl shadow-zinc-200 flex-1 sm:flex-none" onClick={() => setIsAddPartnerOpen(true)}>
              <Plus className="w-4 h-4 mr-2" /> Add Partner
            </Button>
         </div>

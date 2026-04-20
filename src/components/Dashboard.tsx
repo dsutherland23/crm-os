@@ -249,6 +249,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     logs: null,
   });
 
+  const [isActivityCollapsed, setIsActivityCollapsed] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
@@ -710,20 +711,44 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
         {/* ── System Activity ──────────────────────────────────── */}
         <Card className="card-modern">
-          <CardHeader className="border-b border-zinc-100">
+          <CardHeader className="border-b border-zinc-100 p-6 md:p-8">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base lg:text-lg font-bold">System Activity</CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-blue-600 font-bold text-xs hover:bg-blue-50 rounded-lg gap-1"
-                onClick={() => setActiveTab?.("audit")}
-              >
-                View Full Log <ChevronRight className="w-4 h-4" />
-              </Button>
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-zinc-100 text-zinc-900 rounded-lg">
+                  <Activity className="w-4 h-4" />
+                </div>
+                <CardTitle className="text-xl md:text-2xl font-bold font-display">System Activity</CardTitle>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest hover:bg-zinc-100 rounded-xl px-3"
+                  onClick={() => setIsActivityCollapsed(!isActivityCollapsed)}
+                >
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "w-1.5 h-1.5 rounded-full",
+                      isActivityCollapsed ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
+                    )} />
+                    {isActivityCollapsed ? "Expand Protocol" : "Collapse Feed"}
+                  </div>
+                </Button>
+                <div className="w-px h-6 bg-zinc-100 mx-1" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-blue-600 font-bold text-[10px] uppercase tracking-widest hover:bg-blue-50 rounded-xl px-3"
+                  onClick={() => setActiveTab?.("audit")}
+                >
+                  Full Audit <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+              </div>
             </div>
+            {!isActivityCollapsed && <CardDescription className="mt-2 text-zinc-500">Propagating events across enterprise infrastructure</CardDescription>}
           </CardHeader>
-          <CardContent className="p-0">
+          {!isActivityCollapsed && (
+            <CardContent className="p-0 animate-in slide-in-from-top-2 fade-in duration-300">
             {loadingMap.logs ? (
               <div className="divide-y divide-zinc-50">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -784,6 +809,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
               </div>
             )}
           </CardContent>
+          )}
         </Card>
 
       </div>

@@ -558,6 +558,92 @@ export default function Inventory() {
     }
   };
 
+  const handleTransferStock = async () => {
+    if (!transferData.product_id || !transferData.from_branch_id || !transferData.to_branch_id || transferData.qty <= 0) {
+      toast.error('Mission violation: Incomplete routing or quantity');
+      return;
+    }
+
+    if (transferData.from_branch_id === transferData.to_branch_id) {
+       toast.error('Logistics error: Source and destination nodes identical');
+       return;
+    }
+
+    const sourceProduct = products.find(p => p.id === transferData.product_id);
+    const sourceStock = getProductStock(transferData.product_id, transferData.from_branch_id);
+
+    if (sourceStock < transferData.qty) {
+      toast.error('Insufficient saturation: Source node lacks depth for this transfer.');
+      return;
+    }
+
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Decrease from source
+      const sourceQ = query(
+        collection(db, 'inventory'), 
+        where('product_id', '==', transferData.product_id),
+        where('branch_id', '==', transferData.from_branch_id),
+        where('enterprise_id', '==', enterpriseId)
+      );
+      const sourceSnap = await getDocs(sourceQ);
+      if (!sourceSnap.empty) {
+        batch.update(sourceSnap.docs[0].ref, {
+          quantity: sourceSnap.docs[0].data().quantity - transferData.qty,
+          updated_at: new Date().toISOString()
+        });
+      }
+
+      // 2. Increase at destination
+      const destQ = query(
+        collection(db, 'inventory'), 
+        where('product_id', '==', transferData.product_id),
+        where('branch_id', '==', transferData.to_branch_id),
+        where('enterprise_id', '==', enterpriseId)
+      );
+      const destSnap = await getDocs(destQ);
+      if (destSnap.empty) {
+        const invRef = doc(collection(db, 'inventory'));
+        batch.set(invRef, {
+          product_id: transferData.product_id,
+          branch_id: transferData.to_branch_id,
+          quantity: transferData.qty,
+          enterprise_id: enterpriseId,
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        batch.update(destSnap.docs[0].ref, {
+          quantity: destSnap.docs[0].data().quantity + transferData.qty,
+          updated_at: new Date().toISOString()
+        });
+      }
+
+      // 3. Log movement
+      const movRef = doc(collection(db, 'inventory_movements'));
+      batch.set(movRef, {
+        product_id: transferData.product_id,
+        product: sourceProduct?.name || 'Unknown',
+        qty: transferData.qty,
+        type: 'TRANSFER',
+        from: branches.find(b => b.id === transferData.from_branch_id)?.name || 'LOCAL',
+        to: branches.find(b => b.id === transferData.to_branch_id)?.name || 'REMOTE',
+        date: new Date().toISOString(),
+        status: 'COMPLETED',
+        enterprise_id: enterpriseId
+      });
+
+      await batch.commit();
+      toast.success('Logistical transfer synchronized');
+      setIsTransferDialogOpen(false);
+      setTransferData({ product_id: '', from_branch_id: '', to_branch_id: '', qty: 0, reason: 'INTERNAL_TRANSFER' });
+      fetchData();
+    } catch (error: any) {
+      console.error('Transfer execution failure:', error);
+      toast.error('Strategic transfer failure. Verify operational clearance.');
+    }
+  };
+
   const handleUpdateMovementStatus = async (movement: any, newStatus: string) => {
     try {
       await updateDoc(doc(db, 'inventory_movements', movement.id), {
@@ -1488,35 +1574,6 @@ export default function Inventory() {
                 </div>
               </Card>
 
-              {selectedProducts.length > 0 && (
-                <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-[60] animate-in fade-in slide-in-from-bottom-6 duration-500">
-                  <div className="bg-zinc-950 text-white rounded-[2.5rem] px-8 py-5 shadow-2xl flex items-center gap-8 border border-white/10 ring-8 ring-black/5">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-blue-600 text-white w-8 h-8 rounded-full text-xs flex items-center justify-center font-black shadow-lg shadow-blue-500/20">
-                        {selectedProducts.length}
-                      </div>
-                      <span className="text-[10px] font-black uppercase tracking-[0.3em] text-zinc-500">Assets Highlighted</span>
-                    </div>
-                    <div className="w-px h-8 bg-zinc-800" />
-                    <div className="flex items-center gap-4">
-                      <Button 
-                        variant="ghost" 
-                        className="h-10 text-rose-500 hover:text-white hover:bg-rose-600 font-black text-[10px] uppercase tracking-widest rounded-xl px-6 transition-all"
-                        disabled={isBatchDeleting}
-                        onClick={handleBatchDelete}
-                      >
-                        {isBatchDeleting ? "Purging Records..." : "Decommission Permanent"}
-                      </Button>
-                      <Button 
-                        className="h-10 bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 font-black text-[10px] uppercase tracking-widest rounded-xl px-4 transition-all"
-                        onClick={() => setSelectedProducts([])}
-                      >
-                        Cancel Highlight
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </TabsContent>
 
             <TabsContent value="movements" className="space-y-6">
@@ -1708,6 +1765,100 @@ export default function Inventory() {
       )}
       </div>
     </ScrollArea>
+
+      {/* Transfer Stock Dialog */}
+      <Dialog open={isTransferDialogOpen} onOpenChange={setIsTransferDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-[2rem] p-6 border-zinc-200 shadow-2xl bg-white">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-zinc-900 tracking-tight">Strategic Transfer</DialogTitle>
+            <DialogDescription className="text-zinc-500 font-medium">
+              Redistributing assets across the logistical network.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Asset Selection</label>
+              <Select 
+                value={transferData.product_id} 
+                onValueChange={(val) => setTransferData({...transferData, product_id: val})}
+              >
+                <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
+                  <SelectValue placeholder="Select Asset" />
+                </SelectTrigger>
+                <SelectContent className="rounded-2xl bg-white">
+                  {products.map(p => (
+                    <SelectItem key={p.id} value={p.id} className="font-bold">{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Source Node</label>
+                <Select 
+                  value={transferData.from_branch_id} 
+                  onValueChange={(val) => setTransferData({...transferData, from_branch_id: val})}
+                >
+                  <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
+                    <SelectValue placeholder="From" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl bg-white">
+                    {branches.map(b => (
+                      <SelectItem key={b.id} value={b.id} className="font-bold">{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Destination Node</label>
+                <Select 
+                  value={transferData.to_branch_id} 
+                  onValueChange={(val) => setTransferData({...transferData, to_branch_id: val})}
+                >
+                  <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
+                    <SelectValue placeholder="To" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl bg-white">
+                    {branches.map(b => (
+                      <SelectItem key={b.id} value={b.id} className="font-bold">{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Transfer Depth (Qty)</label>
+              <div className="relative">
+                <Input 
+                  type="number" 
+                  min="1"
+                  className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-black pl-4"
+                  value={transferData.qty}
+                  onChange={(e) => setTransferData({...transferData, qty: parseInt(e.target.value) || 0})}
+                />
+                {transferData.product_id && transferData.from_branch_id && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2">
+                    <Badge variant="outline" className="bg-zinc-50 font-black text-[9px] uppercase tracking-widest border-zinc-200">
+                      Max: {getProductStock(transferData.product_id, transferData.from_branch_id)}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-between gap-3">
+            <Button variant="ghost" className="rounded-2xl font-black text-[10px] uppercase tracking-widest h-12 px-6" onClick={() => setIsTransferDialogOpen(false)}>Abort Mission</Button>
+            <Button 
+              className="bg-blue-600 text-white hover:bg-blue-700 rounded-2xl h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/20" 
+              onClick={handleTransferStock}
+            >
+              Initiate Transfer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <BarcodeScanner 
         isOpen={isScannerOpen} 
@@ -2102,6 +2253,66 @@ export default function Inventory() {
         <canvas ref={canvasRef} className="hidden" />
       </DialogContent>
     </Dialog>
+
+    {selectedProducts.length > 0 && (
+      <div className="fixed bottom-4 sm:bottom-10 left-1/2 -translate-x-1/2 z-[60] w-[90%] sm:w-auto animate-in fade-in slide-in-from-bottom-6 duration-500">
+        <div className="bg-zinc-950 text-white rounded-3xl sm:rounded-[2.5rem] px-4 py-3 sm:px-8 sm:py-5 shadow-2xl flex flex-col sm:flex-row items-center gap-4 sm:gap-8 border border-white/10 ring-4 sm:ring-8 ring-black/5">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 text-white w-7 h-7 sm:w-8 sm:h-8 rounded-full text-[10px] sm:text-xs flex items-center justify-center font-black shadow-lg shadow-blue-500/20">
+              {selectedProducts.length}
+            </div>
+            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] sm:tracking-[0.3em] text-zinc-500">Asset Selection</span>
+          </div>
+          <div className="hidden sm:block w-px h-8 bg-zinc-800" />
+          <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
+            <Button 
+              variant="ghost" 
+              className="flex-1 sm:flex-none h-10 text-rose-500 hover:text-white hover:bg-rose-600 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-xl px-4 sm:px-6 transition-all"
+              disabled={isBatchDeleting}
+              onClick={handleBatchDelete}
+            >
+              {isBatchDeleting ? "Purging..." : "Decommission"}
+            </Button>
+            <Button 
+              className="flex-1 sm:flex-none h-10 bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-xl px-3 sm:px-4 transition-all"
+              onClick={() => setSelectedProducts([])}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {selectedMovements.length > 0 && (
+      <div className="fixed bottom-4 sm:bottom-10 left-1/2 -translate-x-1/2 z-[60] w-[90%] sm:w-auto animate-in fade-in slide-in-from-bottom-6 duration-500">
+        <div className="bg-zinc-950 text-white rounded-3xl sm:rounded-[2.5rem] px-4 py-3 sm:px-8 sm:py-5 shadow-2xl flex flex-col sm:flex-row items-center gap-4 sm:gap-8 border border-white/10 ring-4 sm:ring-8 ring-black/5">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-600 text-white w-7 h-7 sm:w-8 sm:h-8 rounded-full text-[10px] sm:text-xs flex items-center justify-center font-black shadow-lg shadow-blue-500/20">
+              {selectedMovements.length}
+            </div>
+            <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.2em] sm:tracking-[0.3em] text-zinc-500">Logs Selection</span>
+          </div>
+          <div className="hidden sm:block w-px h-8 bg-zinc-800" />
+          <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
+            <Button 
+              variant="ghost" 
+              className="flex-1 sm:flex-none h-10 text-rose-500 hover:text-white hover:bg-rose-600 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-xl px-4 sm:px-6 transition-all"
+              disabled={isBatchDeletingMovements}
+              onClick={handleBatchDeleteMovements}
+            >
+              {isBatchDeletingMovements ? "Purging..." : "Purge Selection"}
+            </Button>
+            <Button 
+              className="flex-1 sm:flex-none h-10 bg-white/5 text-zinc-400 hover:text-white hover:bg-white/10 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-xl px-3 sm:px-4 transition-all"
+              onClick={() => setSelectedMovements([])}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

@@ -197,7 +197,7 @@ export default function POS() {
     );
 
     const unsubCustomers = onSnapshot(
-      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId)),
+      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived")),
       (snapshot) => setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("customers:", err)
     );
