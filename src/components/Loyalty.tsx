@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Star, Gift, Crown, TrendingUp, Search, Plus, MoreHorizontal, Percent, Tags, Box, Calendar, Key, Loader2, AlertCircle, Edit3, Trash2 } from "lucide-react";
+import { Star, Gift, Crown, TrendingUp, Search, Plus, MoreHorizontal, Percent, Tags, Box, Calendar, Key, Loader2, AlertCircle, Edit3, Trash2, ClipboardCheck, History, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,7 @@ import { db, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
 
 import { useModules } from "@/context/ModuleContext";
-import { where } from "firebase/firestore";
+import { where, limit } from "firebase/firestore";
 
 export default function Loyalty() {
   const { enterpriseId } = useModules();
@@ -41,6 +41,7 @@ export default function Loyalty() {
 
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
+  const [utilizationLogs, setUtilizationLogs] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -51,6 +52,8 @@ export default function Loyalty() {
     selected_branches: [] as string[],
     rules: {
       req_quantity: "2",
+      min_spend: "0",
+      requirement_type: "quantity" as "quantity" | "spend",
       get_quantity: "1",
       item_position: "1st Item",
       step_pattern: "Every Set",
@@ -70,6 +73,7 @@ export default function Loyalty() {
     const unsubGroups = onSnapshot(query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId)), (snap) => setGroups(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "customer_groups"));
     const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)), (snap) => setProducts(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "products"));
     const unsubCampaigns = onSnapshot(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId)), (snap) => setCampaigns(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "campaigns"));
+    const unsubUsage = onSnapshot(query(collection(db, "customer_campaign_usage"), where("enterprise_id", "==", enterpriseId), orderBy("used_at", "desc"), limit(50)), (snap) => setUtilizationLogs(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => console.error("usage logs error:", e));
     
     const unsubSettings = onSnapshot(doc(db, "loyalty_settings", enterpriseId), (docSnap) => {
       if (docSnap.exists()) {
@@ -80,9 +84,9 @@ export default function Loyalty() {
           rewardValue: data.rewardValue || 5
         });
       }
-    });
+    }, (e) => console.error("loyalty settings error:", e));
 
-    return () => { unsubBranches(); unsubGroups(); unsubProducts(); unsubCampaigns(); unsubSettings(); };
+    return () => { unsubBranches(); unsubGroups(); unsubProducts(); unsubCampaigns(); unsubUsage(); unsubSettings(); };
   }, [enterpriseId]);
 
   const handleOpenDialog = (type: "Standard" | "Action") => {
@@ -96,6 +100,8 @@ export default function Loyalty() {
       selected_branches: [],
       rules: {
         req_quantity: "2",
+        min_spend: "0",
+        requirement_type: "quantity",
         get_quantity: "1",
         item_position: "1st Item",
         step_pattern: "Every Set",
@@ -467,6 +473,82 @@ export default function Loyalty() {
             </TableBody>
           </Table>
         </Card>
+
+        {/* Campaign Utilization Log */}
+        <Card className="card-modern overflow-hidden border-amber-100 shadow-amber-50/50">
+          <CardHeader className="border-b border-amber-50 bg-amber-50/30">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-xl font-bold text-amber-900 flex items-center gap-2">
+                  <ClipboardCheck className="w-5 h-5" />
+                  Redemption History
+                </CardTitle>
+                <CardDescription className="text-amber-700/70 font-medium">Real-time audit trail of all applied rewards and discounts.</CardDescription>
+              </div>
+              <Badge className="bg-amber-100 text-amber-700 border-amber-200">Audit Ready</Badge>
+            </div>
+          </CardHeader>
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-amber-50/20">
+                <TableHead className="py-4 font-bold text-amber-900">Customer</TableHead>
+                <TableHead className="py-4 font-bold text-amber-900">Campaign</TableHead>
+                <TableHead className="py-4 font-bold text-amber-900">Applied By</TableHead>
+                <TableHead className="py-4 font-bold text-amber-900">Date</TableHead>
+                <TableHead className="py-4 font-bold text-amber-900">Time</TableHead>
+                <TableHead className="py-4 font-bold text-amber-900 text-right">Transaction</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {utilizationLogs.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="py-12 text-center">
+                    <div className="flex flex-col items-center gap-2 text-amber-400">
+                      <History className="w-8 h-8 opacity-20" />
+                      <p className="text-sm font-bold opacity-50">No redemptions recorded yet.</p>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : (
+                utilizationLogs.map((log) => {
+                  const usedAt = log.used_at?.toDate ? log.used_at.toDate() : new Date(log.used_at);
+                  return (
+                    <TableRow key={log.id} className="hover:bg-amber-50/10 transition-colors border-amber-50/50">
+                      <TableCell className="py-4">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-zinc-900">{log.customer_name}</span>
+                          <span className="text-[10px] text-zinc-400 font-mono tracking-tighter uppercase">{log.customer_id.substring(0, 8)}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-100 text-[10px] font-black uppercase">
+                          {log.campaign_name}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-4">
+                        <div className="flex items-center gap-2 text-zinc-600 font-bold text-xs">
+                          <Users className="w-3.5 h-3.5 text-zinc-400" />
+                          {log.staff_name || "System"}
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-4 text-xs font-bold text-zinc-500">
+                        {usedAt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </TableCell>
+                      <TableCell className="py-4 text-xs font-mono font-black text-amber-600">
+                        {usedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </TableCell>
+                      <TableCell className="py-4 text-right">
+                        <span className="text-[10px] font-mono text-zinc-400 bg-zinc-50 px-2 py-1 rounded border border-zinc-100">
+                          #{log.transaction_id?.substring(0,8).toUpperCase() || 'EXTERNAL'}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </Card>
       </div>
 
       <Dialog open={isRewardLogicOpen} onOpenChange={setIsRewardLogicOpen}>
@@ -657,19 +739,51 @@ export default function Loyalty() {
                   
                   {campaignCreationType === "Standard" ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-zinc-700">When customer buys *</Label>
-                        <div className="flex gap-2">
-                           <Input placeholder="Quantity" className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full" value={formData.rules.req_quantity} onChange={(e) => setFormData({...formData, rules: {...formData.rules, req_quantity: e.target.value}})} />
-                           <Select defaultValue="items">
-                             <SelectTrigger className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-32 shrink-0">
-                               <SelectValue />
-                             </SelectTrigger>
-                             <SelectContent>
-                               <SelectItem value="items">items</SelectItem>
-                               <SelectItem value="amount">amount</SelectItem>
-                             </SelectContent>
-                           </Select>
+                      <div className="space-y-4">
+                        <Label className="text-xs font-bold text-zinc-700 uppercase tracking-widest opacity-70">Promotion logic</Label>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-zinc-50/50 p-4 rounded-2xl border border-zinc-100">
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-black text-zinc-400 uppercase">Requirement Type</Label>
+                            <Select 
+                              value={formData.rules.requirement_type || "quantity"} 
+                              onValueChange={(val: any) => setFormData({...formData, rules: {...formData.rules, requirement_type: val}})}
+                            >
+                              <SelectTrigger className="h-11 rounded-xl bg-white border-zinc-200">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="rounded-xl border-zinc-100">
+                                <SelectItem value="quantity">Item Quantity</SelectItem>
+                                <SelectItem value="spend">Minimum Spend</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-black text-zinc-400 uppercase">
+                              {formData.rules.requirement_type === "spend" ? "Min Spend Amount" : "Required Quantity"}
+                            </Label>
+                            <div className="relative">
+                              {formData.rules.requirement_type === "spend" && (
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-sm font-bold">$</span>
+                              )}
+                              <Input 
+                                type="number"
+                                className={cn(
+                                  "h-11 rounded-xl bg-white border-zinc-200 w-full font-bold",
+                                  formData.rules.requirement_type === "spend" ? "pl-7" : "px-4"
+                                )}
+                                placeholder={formData.rules.requirement_type === "spend" ? "5000" : "2"}
+                                value={formData.rules.requirement_type === "spend" ? formData.rules.min_spend : formData.rules.req_quantity} 
+                                onChange={(e) => {
+                                  if (formData.rules.requirement_type === "spend") {
+                                    setFormData({...formData, rules: {...formData.rules, min_spend: e.target.value}});
+                                  } else {
+                                    setFormData({...formData, rules: {...formData.rules, req_quantity: e.target.value}});
+                                  }
+                                }} 
+                              />
+                            </div>
+                          </div>
                         </div>
                       </div>
                       <div className="space-y-2">

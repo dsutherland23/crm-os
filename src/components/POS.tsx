@@ -140,7 +140,7 @@ export default function POS() {
     );
     const unsub = onSnapshot(q, (snap) => {
       setCustomerUsage(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (err) => console.error("customer_usage sync error:", err));
     return () => unsub();
   }, [selectedCustomer, enterpriseId]);
 
@@ -182,6 +182,21 @@ export default function POS() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isCountingBills, setIsCountingBills] = useState(false);
   const [billCounts, setBillCounts] = useState<Record<number, string>>({});
+  const [loyaltySettings, setLoyaltySettings] = useState({ pointsRequiredForReward: 100, rewardValue: 5 });
+
+  useEffect(() => {
+    if (!enterpriseId) return;
+    const unsub = onSnapshot(doc(db, "loyalty_settings", enterpriseId), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setLoyaltySettings({
+          pointsRequiredForReward: data.pointsRequiredForReward || 100,
+          rewardValue: data.rewardValue || 5
+        });
+      }
+    }, (err) => console.error("loyalty_settings sync error:", err));
+    return () => unsub();
+  }, [enterpriseId]);
 
   const handleBillCountChange = (denom: number, value: string) => {
     const newCounts = { ...billCounts, [denom]: value };
@@ -231,57 +246,63 @@ export default function POS() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    const unsubProducts = onSnapshot(
-      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => {
-        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-        setLoading(false);
-      },
-      (err) => { console.error("products:", err); setLoading(false); }
-    );
-
-    const unsubInventory = onSnapshot(
-      query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("inventory:", err)
-    );
-
-    const unsubCustomers = onSnapshot(
-      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived")),
-      (snapshot) => setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("customers:", err)
-    );
-
-    const unsubCampaigns = onSnapshot(
-      query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
-      (snapshot) => setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("campaigns:", err)
-    );
-
+    // ── Pre-Auth Listeners (Required for login screen) ────────────────
     const unsubStaff = onSnapshot(
       query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
       (snapshot) => {
         const dbStaff = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
         setStaffList(dbStaff.map(s => ({ ...s, initials: (s.name || '').substring(0, 2).toUpperCase() })));
       },
-      (err) => console.error("staff:", err)
+      (err) => console.error("staff sync error:", err)
     );
 
     const unsubSessions = onSnapshot(
       query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH", "IN_MEETING"])),
       (snapshot) => setActiveSessions(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("sessions:", err)
+      (err) => console.error("sessions sync error:", err)
     );
 
+    // ── Post-Auth Listeners (Operational data) ─────────────────────
+    let unsubProducts: any, unsubInventory: any, unsubCustomers: any, unsubCampaigns: any;
+
+    if (isAuthorized) {
+      unsubProducts = onSnapshot(
+        query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
+        (snapshot) => {
+          setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+          setLoading(false);
+        },
+        (err) => { console.error("products sync error:", err); setLoading(false); }
+      );
+
+      unsubInventory = onSnapshot(
+        query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
+        (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+        (err) => console.error("inventory sync error:", err)
+      );
+
+      unsubCustomers = onSnapshot(
+        query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived")),
+        (snapshot) => setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+        (err) => console.error("customers sync error:", err)
+      );
+
+      unsubCampaigns = onSnapshot(
+        query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
+        (snapshot) => setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+        (err) => console.error("campaigns sync error:", err)
+      );
+    }
+
     return () => {
-      unsubProducts();
-      unsubInventory();
-      unsubCustomers();
-      unsubCampaigns();
       unsubStaff();
       unsubSessions();
+      unsubProducts?.();
+      unsubInventory?.();
+      unsubCustomers?.();
+      unsubCampaigns?.();
     };
-  }, [enterpriseId]);
+  }, [enterpriseId, isAuthorized]);
 
   // Global Settings Listener
   useEffect(() => {
@@ -541,7 +562,8 @@ export default function POS() {
       name: campaign.name,
       type: type as any,
       value: val,
-      target_products: targetProducts
+      target_products: targetProducts,
+      isLoyaltyReward: (campaign as any).isLoyaltyReward
     });
     setIsDiscountDialogOpen(false);
     toast.success(`Applied ${campaign.name} discount!`);
@@ -583,20 +605,42 @@ export default function POS() {
     toast.success("Discount applied");
   };
 
-  // Calculations
   const subtotal = cart.reduce((sum, item) => sum + ((item.product.retail_price || item.product.price || 0) * item.quantity), 0);
   const totalItems = cart.reduce((acc, curr) => acc + curr.quantity, 0);
-  
-  const eligibleCampaigns = campaigns.filter(c => {
-    const reqQty = Number(c.rules?.req_quantity || 1);
-    // Threshold met?
-    if (totalItems < reqQty) return false;
-    
-    // Status check
-    if (c.status !== "ACTIVE") return false;
-    
-    return true;
-  });
+
+  const eligibleCampaigns = useMemo(() => {
+    const list = campaigns.filter(c => {
+      const reqType = c.rules?.requirement_type || "quantity";
+      
+      if (reqType === "spend") {
+        const minSpend = Number(c.rules?.min_spend || 0);
+        if (subtotal < minSpend) return false;
+      } else {
+        const reqQty = Number(c.rules?.req_quantity || 1);
+        if (totalItems < reqQty) return false;
+      }
+      
+      if (c.status !== "ACTIVE") return false;
+      return true;
+    });
+
+    // Integrated point-based loyalty rewards
+    if (selectedCustomer && (selectedCustomer.points || 0) >= (loyaltySettings.pointsRequiredForReward || 100)) {
+      list.unshift({
+        id: "LOYALTY_POINTS_REWARD",
+        name: "Loyalty Points Reward",
+        description: `Redeem your points for a ${formatCurrency(loyaltySettings.rewardValue || 0)} discount`,
+        rules: {
+          discount_type: "Fixed Amount",
+          discount_value: String(loyaltySettings.rewardValue || 0)
+        },
+        type: "Loyalty Points",
+        isLoyaltyReward: true
+      });
+    }
+
+    return list;
+  }, [campaigns, totalItems, selectedCustomer, loyaltySettings, formatCurrency]);
 
   let discountAmount = 0;
   if (cartDiscount) {
@@ -672,10 +716,18 @@ export default function POS() {
         }
       }));
 
-      // 3. Update customer LTV if linked
+      // 3. Update customer LTV and Loyalty Points if linked
       if (selectedCustomer?.id) {
+        // Calculate point earnings based on settings
+        // Assuming 1 point per dollar spent if not configured elsewhere
+        const pointsEarned = Math.floor(total);
+        const pointAdjustment = (cartDiscount as any)?.isLoyaltyReward 
+          ? -(loyaltySettings.pointsRequiredForReward || 100) 
+          : pointsEarned;
+
         await updateDoc(doc(db, "customers", selectedCustomer.id), {
           spend: (selectedCustomer.spend || 0) + total,
+          points: Math.max(0, (selectedCustomer.points || 0) + pointAdjustment),
           last_purchase_date: serverTimestamp(),
           lastContact: new Date().toISOString()
         });
@@ -700,8 +752,10 @@ export default function POS() {
             campaign_id: campaign.id,
             campaign_name: campaign.name,
             used_at: serverTimestamp(),
-            transaction_id: orderRef.id,
-            enterprise_id: enterpriseId
+            transaction_id: txRef.id,
+            enterprise_id: enterpriseId,
+            staff_name: selectedAdmin?.name || "System",
+            staff_id: selectedAdmin?.id || "system"
           });
         }
       }
@@ -737,13 +791,18 @@ export default function POS() {
       if (newPin.length === 4) {
         if (selectedAdmin && newPin === selectedAdmin.pin) {
           try {
+            if (!enterpriseId) {
+              toast.error("System state initializing... please wait.");
+              return;
+            }
+
             // Check for an existing open session for this user at this branch
+            // Simplified query to avoid index-related SDK assertion crashes during PIN entry
             const activeSessionQuery = query(
               collection(db, "pos_sessions"),
               where("enterprise_id", "==", enterpriseId),
-              where("staffId", "==", selectedAdmin.id),
+              where("staffId", "==", selectedAdmin.id || ""),
               where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH"]),
-              orderBy("startTime", "desc"),
               limit(1)
             );
             const activeSessionSnap = await getDocs(activeSessionQuery);
