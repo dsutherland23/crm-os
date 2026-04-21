@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { ModuleConfig } from "../types";
 import { DEFAULT_MODULE_CONFIG } from "../constants";
+import { db, doc, onSnapshot } from "@/lib/firebase";
 
 interface ModuleContextType {
   config: ModuleConfig;
@@ -62,13 +63,18 @@ export interface BrandingConfig {
 }
 
 const DEFAULT_BRANDING: BrandingConfig = {
-  name: "Your Organization",
+  name: "ORIVOCRM PRO",
   logo: "",
-  email: "admin@example.com",
-  phone: "+1 000 000 0000",
-  address: "Your Business Address",
-  socials: { facebook: "", instagram: "", twitter: "", website: "" },
-  disclaimer: "Terms and conditions apply."
+  email: "connect@orivocrm.pro",
+  phone: "+1 888-ORIVO-CRM",
+  address: "Orivo HQ, Digital Valley, Cloud Suite 101",
+  socials: { 
+    facebook: "https://facebook.com/orivocrm", 
+    instagram: "https://instagram.com/orivocrm", 
+    twitter: "https://twitter.com/orivocrm", 
+    website: "https://orivocrm.pro" 
+  },
+  disclaimer: "By transacting with our organization, you agree to our terms of service. All rights reserved v2026."
 };
 
 const ModuleContext = createContext<ModuleContextType | undefined>(undefined);
@@ -113,6 +119,22 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   const [enterpriseId, setEnterpriseId] = useState<string | null>(() => {
     return localStorage.getItem("crm_enterprise_id") || null;
   });
+
+  // Listen for Cloud Branding & Config Sync
+  useEffect(() => {
+    if (!enterpriseId) return;
+
+    const unsub = onSnapshot(doc(db, "enterprise_settings", enterpriseId), (docSnap) => {
+       if (docSnap.exists()) {
+         const data = docSnap.data();
+         if (data.branding) setBrandingState(data.branding);
+         if (data.topSpenderThreshold !== undefined) setTopSpenderThreshold(Number(data.topSpenderThreshold));
+         if (data.currency) setCurrency(data.currency);
+       }
+    });
+
+    return () => unsub();
+  }, [enterpriseId]);
 
   const [posSession, setPosSession] = useState<{ 
     staffId: string; staffName: string; payGrade: string; 

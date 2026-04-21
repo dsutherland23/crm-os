@@ -59,6 +59,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
@@ -66,6 +74,8 @@ import { motion, AnimatePresence } from "motion/react";
 
 import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDocs, orderBy, limit, serverTimestamp } from "@/lib/firebase";
 import { PrintableInvoice } from "./PrintableInvoice";
+import { POSReceipt } from "./POSReceipt";
+import { POSAIUpsell } from "./POSAIUpsell";
 
 interface CartDiscount {
   id: string;
@@ -101,6 +111,7 @@ export default function POS() {
   const [lastTransaction, setLastTransaction] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT">("CARD");
+  const [receiptType, setReceiptType] = useState<"INVOICE" | "POS">("POS");
   const [products, setProducts] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -166,6 +177,27 @@ export default function POS() {
     
     setOpeningFloat(total > 0 ? total.toFixed(2) : "");
   };
+
+  const [isShiftHistoryOpen, setIsShiftHistoryOpen] = useState(false);
+  const [shiftHistory, setShiftHistory] = useState<any[]>([]);
+
+  // Fetch shift history
+  useEffect(() => {
+    if (!enterpriseId || !isShiftHistoryOpen) return;
+    
+    const q = query(
+      collection(db, "pos_sessions"),
+      where("enterprise_id", "==", enterpriseId),
+      orderBy("startTime", "desc"),
+      limit(20)
+    );
+    
+    const unsub = onSnapshot(q, (snapshot) => {
+      setShiftHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    
+    return () => unsub();
+  }, [enterpriseId, isShiftHistoryOpen]);
 
   // ── Sync with Global Session ────────────────────────────────────
   useEffect(() => {
@@ -1087,7 +1119,7 @@ export default function POS() {
                             <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
                               <Coffee className="w-4 h-4 text-amber-600" />
                             </div>
-                            <span className="font-bold text-zinc-700 text-sm">On Break</span>
+                          <span className="font-bold text-zinc-700 text-sm">On Break</span>
                           </DropdownMenuItem>
                           <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-orange-50 cursor-pointer group" onClick={() => handleTimeClock('ON_LUNCH')}>
                             <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
@@ -1100,6 +1132,12 @@ export default function POS() {
                               <Users className="w-4 h-4 text-indigo-600" />
                             </div>
                             <span className="font-bold text-zinc-700 text-sm">In Meeting</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => setIsShiftHistoryOpen(true)}>
+                            <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <History className="w-4 h-4 text-zinc-600" />
+                            </div>
+                            <span className="font-bold text-zinc-700 text-sm">Shift Records</span>
                           </DropdownMenuItem>
                         </DropdownMenuGroup>
                         <DropdownMenuGroup>
@@ -1310,24 +1348,12 @@ export default function POS() {
           </Button>
           
           {/* AI Upsell Suggestion */}
-          {cart.length > 0 && (
-            <motion.div 
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl border border-blue-100 flex gap-3 items-start"
-            >
-              <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600">
-                <Sparkles className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">AI Recommendation</p>
-                <p className="text-xs text-zinc-700 leading-relaxed">
-                  Add <span className="font-bold">AppleCare+</span> for this device to increase protection. 
-                  <button className="text-blue-600 font-bold hover:underline ml-1">Add {formatCurrency(199)}</button>
-                </p>
-              </div>
-            </motion.div>
-          )}
+          <POSAIUpsell 
+            cart={cart} 
+            allProducts={products} 
+            onAdd={(product) => addToCart(product)} 
+            formatCurrency={formatCurrency}
+          />
         </div>
 
         <ScrollArea className="flex-1 p-8">
@@ -1540,17 +1566,18 @@ export default function POS() {
                   <p className="text-xs text-zinc-500">Order #{(lastTransaction?.id || 'PENDING').substring(0,8).toUpperCase()}</p>
                </div>
                <div className="flex gap-2">
-                  <Button 
+                   <Button 
                     variant="outline" 
                     className="rounded-xl h-10 px-4 font-bold border-zinc-200"
                     onClick={() => {
-                       const printContents = document.getElementById('printable-invoice')?.innerHTML;
+                       const elementId = receiptType === "POS" ? "pos-receipt" : "printable-invoice";
+                       const printContents = document.getElementById(elementId)?.innerHTML;
                        if (printContents) {
                          const originalContents = document.body.innerHTML;
                          document.body.innerHTML = printContents;
                          window.print();
                          document.body.innerHTML = originalContents;
-                         window.location.reload(); // Reload to restore state if needed, or better use print styles
+                         window.location.reload(); 
                        } else {
                          window.print();
                        }
@@ -1559,7 +1586,23 @@ export default function POS() {
                     <Printer className="w-4 h-4 mr-2" />
                     Print
                   </Button>
-                  <Button 
+                  <div className="flex bg-zinc-200 p-1 rounded-xl gap-1">
+                    <Button 
+                      variant="ghost" 
+                      className={cn("rounded-lg h-8 px-3 text-[10px] font-black uppercase tracking-widest", receiptType === "POS" ? "bg-white text-blue-600 shadow-sm" : "text-zinc-600")}
+                      onClick={() => setReceiptType("POS")}
+                    >
+                      POS
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      className={cn("rounded-lg h-8 px-3 text-[10px] font-black uppercase tracking-widest", receiptType === "INVOICE" ? "bg-white text-blue-600 shadow-sm" : "text-zinc-600")}
+                      onClick={() => setReceiptType("INVOICE")}
+                    >
+                      A4
+                    </Button>
+                  </div>
+                   <Button 
                     className="rounded-xl h-10 px-6 font-bold bg-zinc-900 text-white"
                     onClick={() => setShowReceipt(false)}
                   >
@@ -1570,26 +1613,50 @@ export default function POS() {
 
             {lastTransaction && (
               <div className="w-full h-fit flex justify-center">
-                <PrintableInvoice 
-                  branding={branding} 
-                  order={{
-                    id: lastTransaction.id,
-                    customerName: lastTransaction.customer?.name || "Walk-in",
-                    customerAddress: lastTransaction.customer?.address,
-                    customerPhone: lastTransaction.customer?.phone,
-                    customerEmail: lastTransaction.customer?.email,
-                    date: lastTransaction.timestamp,
-                    items: lastTransaction.items.map((item: any) => ({
-                      id: item.product.id,
-                      name: item.product.name,
-                      price: item.product.retail_price || item.product.price || 0,
-                      qty: item.quantity
-                    })),
-                    subtotal: lastTransaction.subtotal,
-                    tax: lastTransaction.tax,
-                    total: lastTransaction.total
-                  }}
-                />
+                {receiptType === "INVOICE" ? (
+                  <PrintableInvoice 
+                    branding={branding} 
+                    enterpriseId={enterpriseId}
+                    order={{
+                      id: lastTransaction.id,
+                      customerName: lastTransaction.customer?.name || "Walk-in",
+                      customerAddress: lastTransaction.customer?.address,
+                      customerPhone: lastTransaction.customer?.phone,
+                      customerEmail: lastTransaction.customer?.email,
+                      date: lastTransaction.timestamp,
+                      items: lastTransaction.items.map((item: any) => ({
+                        id: item.product.id,
+                        name: item.product.name,
+                        price: item.product.retail_price || item.product.price || 0,
+                        qty: item.quantity
+                      })),
+                      subtotal: lastTransaction.subtotal,
+                      tax: lastTransaction.tax,
+                      total: lastTransaction.total
+                    }}
+                  />
+                ) : (
+                  <POSReceipt 
+                    branding={branding}
+                    formatCurrency={formatCurrency}
+                    order={{
+                      id: lastTransaction.id,
+                      customerName: lastTransaction.customer?.name || "Walk-in",
+                      date: lastTransaction.timestamp,
+                      items: lastTransaction.items.map((item: any) => ({
+                        id: item.product.id,
+                        name: item.product.name,
+                        price: item.product.retail_price || item.product.price || 0,
+                        qty: item.quantity
+                      })),
+                      subtotal: lastTransaction.subtotal,
+                      tax: lastTransaction.tax,
+                      discountAmount: lastTransaction.discountAmount,
+                      total: lastTransaction.total,
+                      paymentMethod: lastTransaction.paymentMethod
+                    }}
+                  />
+                )}
               </div>
             )}
             
@@ -1998,6 +2065,84 @@ export default function POS() {
               <div className="absolute inset-0 bg-gradient-to-r from-blue-600/0 via-white/10 to-blue-600/0 -translate-x-full group-hover:animate-shimmer" />
               Initialize Terminal Session
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isShiftHistoryOpen} onOpenChange={setIsShiftHistoryOpen}>
+        <DialogContent className="sm:max-w-3xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+          <div className="p-8 pb-4 border-b border-zinc-100 bg-zinc-50/50">
+            <DialogHeader>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-zinc-900 rounded-2xl flex items-center justify-center text-white">
+                  <History className="w-6 h-6" />
+                </div>
+                <div>
+                  <DialogTitle className="text-2xl font-black text-zinc-900">Shift Records</DialogTitle>
+                  <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Registry Audit Log & Floating History</DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+          </div>
+          <ScrollArea className="h-[500px]">
+            <div className="p-6 space-y-4">
+              {shiftHistory.length === 0 ? (
+                <div className="text-center py-20 opacity-20">
+                   <History className="w-16 h-16 mx-auto mb-4" />
+                   <p className="font-bold uppercase tracking-widest">No shift records found</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-zinc-100 hover:bg-transparent">
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest">Operator</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest">Started</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest">Closed</TableHead>
+                      <TableHead className="text-right text-[10px] font-black uppercase tracking-widest">Opening Float</TableHead>
+                      <TableHead className="text-right text-[10px] font-black uppercase tracking-widest">Closing Count</TableHead>
+                      <TableHead className="text-right text-[10px] font-black uppercase tracking-widest">Variance</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {shiftHistory.map((session) => {
+                      const startTime = session.startTime ? new Date(session.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : "-";
+                      const endTime = session.endTime ? new Date(session.endTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : (session.status === 'ACTIVE' ? <Badge className="bg-emerald-100 text-emerald-600 border-none font-black text-[8px]">ACTIVE</Badge> : "-");
+                      const variance = (session.countedCash || 0) - (session.expectedCash || 0);
+                      
+                      return (
+                        <TableRow key={session.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors">
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-zinc-100 flex items-center justify-center text-[8px] font-black border border-zinc-200">
+                                {(session.staffName || '??').substring(0,2).toUpperCase()}
+                              </div>
+                              <span className="font-bold text-xs text-zinc-900">{session.staffName}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-xs text-zinc-500 font-medium whitespace-nowrap">{startTime}</TableCell>
+                          <TableCell className="text-xs text-zinc-500 font-medium whitespace-nowrap">{endTime}</TableCell>
+                          <TableCell className="text-right font-bold text-xs text-zinc-900">{formatCurrency(session.openingFloat || 0)}</TableCell>
+                          <TableCell className="text-right font-bold text-xs text-zinc-900">{session.endTime ? formatCurrency(session.countedCash || 0) : "-"}</TableCell>
+                          <TableCell className="text-right">
+                             {session.endTime ? (
+                               <Badge className={cn(
+                                 "text-[9px] font-black border-none",
+                                 Math.abs(variance) < 1 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600"
+                               )}>
+                                 {variance > 0 ? "+" : ""}{formatCurrency(variance)}
+                               </Badge>
+                             ) : "-"}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </ScrollArea>
+          <div className="p-6 bg-zinc-50 border-t border-zinc-100 flex justify-end">
+             <Button variant="ghost" className="rounded-xl font-bold" onClick={() => setIsShiftHistoryOpen(false)}>Close Registry Audit</Button>
           </div>
         </DialogContent>
       </Dialog>

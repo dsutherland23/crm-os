@@ -22,6 +22,7 @@ import StaffManager from "./components/StaffManager";
 import VerificationGate from "./components/VerificationGate";
 import AdminPortal from "./components/AdminPortal";
 import Support from "./components/Support";
+import { SocialHub } from "./components/SocialHub";
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
@@ -35,7 +36,13 @@ function AppContent() {
     window.location.hash.startsWith("#/admin") ||
     window.location.pathname === "/admin" ||
     new URLSearchParams(window.location.search).get("admin") === "1";
+    
+  const isSocialRoute = 
+    window.location.pathname === "/connect" || 
+    window.location.hash.startsWith("#/connect");
+
   if (isAdminRoute) return <AdminPortal />;
+  if (isSocialRoute) return <SocialHub />;
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null | undefined>(undefined); // undefined = still loading
