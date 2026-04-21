@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,6 +38,9 @@ export default function Loyalty() {
     pointsRequiredForReward: 100,
     rewardValue: 5, // e.g. $5 off
   });
+
+  const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -115,7 +118,7 @@ export default function Loyalty() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const payload = {
+      const payload: any = {
         name: formData.name.trim(),
         description: formData.description.trim(),
         type: campaignCreationType,
@@ -128,12 +131,19 @@ export default function Loyalty() {
         target_customers: formData.target_customers,
         one_time_per_customer: formData.oneTimePerCustomer,
         status: "ACTIVE",
-        created_at: serverTimestamp(),
         enterprise_id: enterpriseId
       };
-      await addDoc(collection(db, "campaigns"), payload);
-      toast.success("Campaign created successfully!");
+
+      if (editingCampaignId) {
+        await updateDoc(doc(db, "campaigns", editingCampaignId), payload);
+        toast.success("Campaign updated successfully!");
+      } else {
+        payload.created_at = serverTimestamp();
+        await addDoc(collection(db, "campaigns"), payload);
+        toast.success("Campaign created successfully!");
+      }
       setIsDialogOpen(false);
+      setEditingCampaignId(null);
     } catch (e: any) {
       toast.error("Failed to create campaign: " + e.message);
     } finally {
@@ -156,6 +166,51 @@ export default function Loyalty() {
       toast.error("Failed to update reward logic: " + error.message);
     } finally {
       setIsSavingLogic(false);
+    }
+  };
+
+  const handleEditCampaign = (campaign: any) => {
+    setEditingCampaignId(campaign.id);
+    setCampaignCreationType(campaign.type);
+    setFormData({
+      name: campaign.name,
+      description: campaign.description || "",
+      action_type: campaign.action_type,
+      start_date: campaign.start_date || "",
+      end_date: campaign.end_date || "",
+      selected_branches: campaign.branches || [],
+      rules: campaign.rules,
+      applies_to: campaign.target_products?.length > 0 ? "Specific Products" : "All Products (same product rule applies)",
+      selected_products: campaign.target_products || [],
+      target_customers: campaign.target_customers || "All Customers",
+      oneTimePerCustomer: campaign.one_time_per_customer || false
+    });
+    setIsDialogOpen(true);
+  };
+
+  const deleteCampaign = async (id: string) => {
+    try {
+      await updateDoc(doc(db, "campaigns", id), { status: "DELETED" });
+      toast.success("Campaign deleted");
+    } catch (e) {
+      toast.error("Failed to delete campaign");
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedCampaigns.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedCampaigns.length} campaigns?`)) return;
+    
+    setIsSubmitting(true);
+    try {
+      const promises = selectedCampaigns.map(id => updateDoc(doc(db, "campaigns", id), { status: "DELETED" }));
+      await Promise.all(promises);
+      toast.success(`${selectedCampaigns.length} campaigns deleted`);
+      setSelectedCampaigns([]);
+    } catch (e) {
+      toast.error("Bulk delete failed");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -325,28 +380,62 @@ export default function Loyalty() {
                 <CardTitle className="text-xl font-bold">Active Campaigns</CardTitle>
                 <CardDescription>Currently running discounts and promotional logic.</CardDescription>
               </div>
+              {selectedCampaigns.length > 0 && (
+                <Button 
+                  variant="destructive" 
+                  size="sm" 
+                  className="rounded-xl h-9 px-4 font-bold text-xs uppercase tracking-wider shadow-lg shadow-rose-500/20"
+                  onClick={handleBulkDelete}
+                  disabled={isSubmitting}
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-2" />
+                  Delete Selected ({selectedCampaigns.length})
+                </Button>
+              )}
             </div>
           </CardHeader>
           <Table>
             <TableHeader>
               <TableRow className="bg-zinc-50/50">
+                <TableHead className="w-12 py-4">
+                  <Checkbox 
+                    checked={selectedCampaigns.length === campaigns.filter(c => c.status !== "DELETED").length && campaigns.length > 0}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedCampaigns(campaigns.filter(c => c.status !== "DELETED").map(c => c.id));
+                      } else {
+                        setSelectedCampaigns([]);
+                      }
+                    }}
+                  />
+                </TableHead>
                 <TableHead className="py-4 font-bold text-zinc-900">Campaign Name</TableHead>
                 <TableHead className="py-4 font-bold text-zinc-900">Type</TableHead>
                 <TableHead className="py-4 font-bold text-zinc-900">Status</TableHead>
                 <TableHead className="py-4 font-bold text-zinc-900">Start Date</TableHead>
                 <TableHead className="py-4 font-bold text-zinc-900">End Date</TableHead>
+                <TableHead className="py-4 font-bold text-zinc-900 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {campaigns.length === 0 ? (
+              {campaigns.filter(c => c.status !== "DELETED").length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="py-8 text-center text-zinc-500">
+                  <TableCell colSpan={7} className="py-8 text-center text-zinc-500">
                     No campaigns found. Create one to get started.
                   </TableCell>
                 </TableRow>
               ) : (
-                campaigns.map((c) => (
-                  <TableRow key={c.id} className="hover:bg-zinc-50/30">
+                campaigns.filter(c => c.status !== "DELETED").map((c) => (
+                  <TableRow key={c.id} className={cn("hover:bg-zinc-50/30", selectedCampaigns.includes(c.id) && "bg-zinc-50")}>
+                    <TableCell className="py-4">
+                      <Checkbox 
+                        checked={selectedCampaigns.includes(c.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) setSelectedCampaigns(prev => [...prev, c.id]);
+                          else setSelectedCampaigns(prev => prev.filter(id => id !== c.id));
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="py-4 font-bold text-zinc-900">{c.name}</TableCell>
                     <TableCell className="py-4 text-xs font-medium text-zinc-500">{c.type}</TableCell>
                     <TableCell className="py-4">
@@ -354,6 +443,24 @@ export default function Loyalty() {
                     </TableCell>
                     <TableCell className="py-4 text-xs font-mono text-zinc-500">{c.start_date || "N/A"}</TableCell>
                     <TableCell className="py-4 text-xs font-mono text-zinc-500">{c.end_date || "N/A"}</TableCell>
+                    <TableCell className="py-4 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><MoreHorizontal className="w-4 h-4" /></Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40 rounded-xl">
+                          <DropdownMenuItem onClick={() => handleEditCampaign(c)} className="py-2 px-3 font-bold text-[10px] uppercase tracking-widest cursor-pointer">
+                            <Edit3 className="w-3.5 h-3.5 mr-2 text-blue-600" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator className="bg-zinc-100" />
+                          <DropdownMenuItem onClick={() => deleteCampaign(c.id)} className="py-2 px-3 font-bold text-[10px] uppercase tracking-widest cursor-pointer text-rose-600">
+                            <Trash2 className="w-3.5 h-3.5 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
                   </TableRow>
                 ))
               )}
@@ -417,7 +524,7 @@ export default function Loyalty() {
         <DialogContent className="sm:max-w-4xl w-[95vw] rounded-3xl p-0 overflow-hidden border-none shadow-2xl bg-zinc-50/50">
           <DialogHeader className="p-6 bg-white border-b border-zinc-100">
             <DialogTitle className="text-xl font-bold font-display tracking-tight text-zinc-900">
-              {campaignCreationType === "Standard" ? "Create New Discount Campaign" : "Create New Campaign"}
+              {editingCampaignId ? `Edit Campaign: ${formData.name}` : (campaignCreationType === "Standard" ? "Create New Discount Campaign" : "Create New Campaign")}
             </DialogTitle>
           </DialogHeader>
 
@@ -765,7 +872,7 @@ export default function Loyalty() {
           <DialogFooter className="p-6 bg-white border-t border-zinc-100 flex items-center justify-end gap-3 flex-none">
             <Button variant="outline" className="rounded-xl h-11 px-6 font-bold" onClick={() => setIsDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
             <Button className="rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white h-11 px-6 font-bold shadow-lg shadow-zinc-900/20" onClick={handleCreateCampaign} disabled={isSubmitting}>
-              {isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating...</> : "Create Campaign"}
+              {isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> {editingCampaignId ? "Updating..." : "Creating..."}</> : (editingCampaignId ? "Update Campaign" : "Create Campaign")}
             </Button>
           </DialogFooter>
         </DialogContent>
