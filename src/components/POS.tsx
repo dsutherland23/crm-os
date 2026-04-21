@@ -609,7 +609,24 @@ export default function POS() {
   const totalItems = cart.reduce((acc, curr) => acc + curr.quantity, 0);
 
   const eligibleCampaigns = useMemo(() => {
+    if (totalItems === 0) return [];
+    
     const list = campaigns.filter(c => {
+      // 1. Status Check
+      if (c.status !== "ACTIVE") return false;
+
+      // 2. Branch Check (Multi-select support)
+      if (c.branches && c.branches.length > 0) {
+        const resolvedBranch = activeBranch === "all" ? "main" : activeBranch;
+        if (!c.branches.includes(resolvedBranch)) return false;
+      }
+
+      // 3. Customer Group Check
+      if (c.target_customers && c.target_customers !== "All Customers") {
+        if (!selectedCustomer || selectedCustomer.group !== c.target_customers) return false;
+      }
+
+      // 4. Threshold Check (Spend/Quantity)
       const reqType = c.rules?.requirement_type || "quantity";
       
       if (reqType === "spend") {
@@ -620,7 +637,6 @@ export default function POS() {
         if (totalItems < reqQty) return false;
       }
       
-      if (c.status !== "ACTIVE") return false;
       return true;
     });
 
@@ -663,11 +679,11 @@ export default function POS() {
     }
   }
 
-  const taxableAmount = Math.max(0, subtotal - discountAmount);
-  // Ensure we safely handle dividing by 100 for the percentage
+  // Tax is calculated on the GROSS subtotal before rewards/discounts are applied 
+  // to ensure correct tax reporting for loyalty-based transactions.
   const calculatedTaxRate = (globalTaxRate || 15) / 100;
-  const tax = taxableAmount * calculatedTaxRate;
-  const total = taxableAmount + tax;
+  const tax = subtotal * calculatedTaxRate;
+  const total = Math.max(0, subtotal + tax - discountAmount);
 
   const handleCompleteTransaction = async () => {
     if (cart.length === 0) { toast.error("Cart is empty"); return; }

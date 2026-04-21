@@ -626,96 +626,22 @@ export default function Loyalty() {
 
               <Card className="shadow-sm border-zinc-200 overflow-hidden rounded-2xl bg-white">
                 <div className="p-6 space-y-6">
-                  <h3 className="text-lg font-bold text-zinc-900">{campaignCreationType === "Standard" ? "Branch Selection" : "Campaign Type"}</h3>
-                  
-                  {campaignCreationType === "Standard" ? (
-                    <div className="space-y-3 max-w-md">
-                      <Label className="text-xs font-bold text-zinc-700">Select Branch</Label>
-                      <Select 
-                        value={formData.selected_branches[0] || ""} 
-                        onValueChange={(val) => setFormData({...formData, selected_branches: [val]})}
-                      >
-                        <SelectTrigger className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full">
-                          <SelectValue placeholder="Select Branch" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {branches.map(b => (
-                            <SelectItem key={b.id} value={b.name}>{b.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-zinc-500">{products.length} products available in selected branch</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-5">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-zinc-700">Campaign Name</Label>
-                        <Input placeholder="e.g., Buy 2 Get 1 Free" className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-zinc-700">Campaign Type</Label>
-                        <Select value={formData.action_type} onValueChange={(val) => setFormData({...formData, action_type: val})}>
-                          <SelectTrigger className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Buy X Get Y (Different Products)">Buy X Get Y (Different Products)</SelectItem>
-                            <SelectItem value="Buy X Get X (Same Product)">Buy X Get X (Same Product)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-zinc-700">Applies To</Label>
-                        <Select value={formData.applies_to} onValueChange={(val) => setFormData({...formData, applies_to: val})}>
-                          <SelectTrigger className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="All Products (same product rule applies)">All Products (same product rule applies)</SelectItem>
-                            <SelectItem value="Specific Products">Specific Products</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-zinc-700">Available in Branches</Label>
-                        <div className="p-4 rounded-lg bg-zinc-50 border border-zinc-200">
-                          {branches.map(b => (
-                            <label key={b.id} className="flex items-center gap-3 cursor-pointer">
-                              <Checkbox 
-                                checked={formData.selected_branches.includes(b.name)}
-                                onCheckedChange={(checked) => {
-                                  if(checked) setFormData({...formData, selected_branches: [...formData.selected_branches, b.name]});
-                                  else setFormData({...formData, selected_branches: formData.selected_branches.filter(sb => sb !== b.name)});
-                                }}
-                              />
-                              <span className="text-sm font-medium text-zinc-700">{b.name}</span>
-                            </label>
-                          ))}
-                          {branches.length === 0 && <span className="text-xs text-zinc-500">No branches found.</span>}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </Card>
-
-              {campaignCreationType === "Standard" && (
-                <Card className="shadow-sm border-zinc-200 overflow-hidden rounded-2xl bg-white">
-                  <div className="p-6 space-y-6">
+                  <div className="flex items-center gap-2">
+                    <TrendingUp className="w-5 h-5 text-zinc-900" />
                     <h3 className="text-lg font-bold text-zinc-900">Campaign Information</h3>
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-zinc-700">Campaign Name *</Label>
-                        <Input placeholder="e.g., Buy 2 Get 20% Off" className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs font-bold text-zinc-700">Description</Label>
-                        <Textarea placeholder="Optional description of the campaign" className="rounded-lg bg-zinc-50 border-zinc-200 w-full min-h-[100px]" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
-                      </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-zinc-700">Campaign Name *</Label>
+                      <Input placeholder="e.g., Summer Special 10% Off" className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-zinc-700">Description</Label>
+                      <Textarea placeholder="Optional description of the campaign" className="rounded-lg bg-zinc-50 border-zinc-200 w-full min-h-[100px]" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} />
                     </div>
                   </div>
-                </Card>
-              )}
+                </div>
+              </Card>
 
               {/* Start & End Dates wrapper if Action vs Standard */}
               <div className="grid grid-cols-2 gap-4">
@@ -934,6 +860,37 @@ export default function Loyalty() {
                           </div>
                         )}
                      </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Branch Selection */}
+              <Card className="shadow-sm border-zinc-200 overflow-hidden rounded-2xl bg-white">
+                <div className="p-6 space-y-6">
+                  <div className="flex items-center gap-2">
+                     <TrendingUp className="w-5 h-5 text-zinc-900" />
+                     <h3 className="text-lg font-bold text-zinc-900">Branch Scoping</h3>
+                  </div>
+                  <div className="space-y-4">
+                    <Label className="text-xs font-bold text-zinc-700">Eligible Branches</Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {branches.map(branch => (
+                        <div key={branch.id} className="flex items-center gap-3 p-3 rounded-xl border border-zinc-100 bg-zinc-50/50">
+                          <Checkbox 
+                            id={`branch-${branch.id}`}
+                            checked={formData.selected_branches.includes(branch.id)}
+                            onCheckedChange={(checked) => {
+                              const newBranches = checked 
+                                ? [...formData.selected_branches, branch.id]
+                                : formData.selected_branches.filter(id => id !== branch.id);
+                              setFormData({...formData, selected_branches: newBranches});
+                            }}
+                          />
+                          <label htmlFor={`branch-${branch.id}`} className="text-sm font-bold text-zinc-800 cursor-pointer">{branch.name}</label>
+                        </div>
+                      ))}
+                      {branches.length === 0 && <p className="text-zinc-400 text-xs italic">No branches configured.</p>}
+                    </div>
                   </div>
                 </div>
               </Card>
