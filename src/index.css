@@ -319,3 +319,79 @@
     offset-distance: 100%;
   }
 }
+
+/* Flip Countdown Styles */
+.flip-countdown-container {
+  display: flex;
+  gap: 2px;
+  perspective: 400px;
+}
+
+.flip-unit {
+  position: relative;
+  width: 14px;
+  height: 20px;
+  line-height: 20px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--flip-card-text, #fff);
+  border-radius: 3px;
+}
+
+.flip-card {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  overflow: hidden;
+  background: var(--flip-card-bg, #18181b);
+  backface-visibility: hidden;
+}
+
+.flip-card__top {
+  top: 0;
+  border-radius: 3px 3px 0 0;
+  border-bottom: 0.5px solid rgba(255, 255, 255, 0.05);
+}
+
+.flip-card__bottom {
+  bottom: 0;
+  border-radius: 0 0 3px 3px;
+  line-height: 0;
+}
+
+.flipper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  transform-origin: bottom;
+  transform-style: preserve-3d;
+  z-index: 2;
+}
+
+.flipper.is-flipping {
+  animation: flip-top 0.4s ease-in forwards;
+}
+
+.flipper__top {
+  top: 0;
+  border-radius: 3px 3px 0 0;
+  z-index: 2;
+}
+
+.flipper__bottom {
+  top: 100%;
+  transform: rotateX(180deg);
+  border-radius: 0 0 3px 3px;
+  line-height: 0;
+  z-index: 1;
+}
+
+@keyframes flip-top {
+  100% {
+    transform: rotateX(-180deg);
+  }
+}

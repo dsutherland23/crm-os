@@ -24,6 +24,7 @@ export const where = fs.where;
 export const orderBy = fs.orderBy;
 export const limit = fs.limit;
 export const serverTimestamp = fs.serverTimestamp;
+export const increment = fs.increment;
 
 export const onSnapshot = (q: any, cb: any, errorCb?: (error: any) => void) => 
   isMock() ? demoFs.mockOnSnapshot(q, cb) : fs.onSnapshot(q, cb, errorCb);

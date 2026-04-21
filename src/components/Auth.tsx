@@ -8,9 +8,10 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { auth, db, doc, setDoc, getDoc } from "@/lib/firebase";
+import { auth, db, doc, setDoc, getDoc, updateDoc, increment, onSnapshot } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { FlipCountdown } from "@/components/ui/flip-countdown";
 import {
   Command,
   Sparkles,
@@ -130,6 +131,35 @@ export default function Auth() {
   // Form fields
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [visitorCount, setVisitorCount] = useState<bigint>(0n);
+
+  useEffect(() => {
+    const statsRef = doc(db, "system_stats", "visitors");
+    
+    // Listen for live updates to the global count
+    const unsub = onSnapshot(statsRef, (docSnap: any) => {
+      if (docSnap.exists()) {
+        setVisitorCount(BigInt(docSnap.data().unique_count || 0));
+      } else {
+        // Initialize stats if they don't exist
+        setDoc(statsRef, { unique_count: 0 }, { merge: true });
+      }
+    });
+
+    // Handle unique visitor logic
+    const visitorKey = "orivo_unique_v1";
+    if (!localStorage.getItem(visitorKey)) {
+      localStorage.setItem(visitorKey, Date.now().toString());
+      updateDoc(statsRef, {
+        unique_count: increment(1)
+      }).catch(() => {
+        // Fallback for first-time initialization if doc doesn't exist
+        setDoc(statsRef, { unique_count: 1 }, { merge: true });
+      });
+    }
+
+    return () => unsub();
+  }, []);
   const [showPassword, setShowPassword] = useState(false);
   const [fullName, setFullName] = useState("");
   const [industry, setIndustry] = useState("");
@@ -480,12 +510,17 @@ export default function Auth() {
           </div>
         </div>
 
-        {/* Trust bar */}
         <div className="relative z-10 flex items-center gap-6 text-zinc-600 text-xs font-medium">
           <span className="flex items-center gap-1.5"><Shield className="w-3.5 h-3.5" /> 256-bit AES</span>
           <span>·</span><span>GDPR Ready</span>
           <span>·</span><span>SOC 2 Type II</span>
-          <span>·</span><span>ISO 27001</span>
+          <span>·</span>
+          <div className="flex items-center gap-2">
+            <span>ISO 27001</span>
+            <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-md px-1.5 py-0.5 shadow-sm">
+              <FlipCountdown count={visitorCount} minDigits={3} cardBgColor="transparent" textColor="#71717a" className="scale-[0.85] origin-left" />
+            </div>
+          </div>
         </div>
       </div>
 
