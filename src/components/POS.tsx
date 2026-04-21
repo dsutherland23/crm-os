@@ -126,6 +126,23 @@ export default function POS() {
   const [isDiscountDialogOpen, setIsDiscountDialogOpen] = useState(false);
   const [discountContext, setDiscountContext] = useState<"Manual" | "Campaign">("Campaign");
   const [manualDiscount, setManualDiscount] = useState({ name: "Manual Discount", type: "Percentage", value: "" });
+  const [customerUsage, setCustomerUsage] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!selectedCustomer?.id || !enterpriseId) {
+      setCustomerUsage([]);
+      return;
+    }
+    const q = query(
+      collection(db, "customer_campaign_usage"),
+      where("customer_id", "==", selectedCustomer.id),
+      where("enterprise_id", "==", enterpriseId)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setCustomerUsage(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsub();
+  }, [selectedCustomer, enterpriseId]);
 
   // Flush cart if the branch scope changes mid-transaction 
   // (we keep this in case activeBranch is forced via other means)
@@ -491,6 +508,27 @@ export default function POS() {
   const handleApplyCampaign = (campaignId: string) => {
     const campaign = campaigns.find(c => c.id === campaignId);
     if (!campaign) return;
+
+    // Check one-time restriction
+    if (campaign.one_time_per_customer) {
+      if (!selectedCustomer) {
+        toast.error("Please select a customer first to apply this one-time reward.", {
+          description: "One-time rewards require verified customer profiles."
+        });
+        return;
+      }
+      
+      const usage = customerUsage.find(u => u.campaign_id === campaignId);
+      if (usage) {
+        const timestamp = usage.used_at;
+        const date = (timestamp?.toDate ? timestamp.toDate() : new Date(timestamp)) || new Date();
+        toast.error(`${campaign.name} is a one-time reward. This customer already benefited on ${date.toLocaleDateString()} at ${date.toLocaleTimeString()}.`, {
+          duration: 8000,
+          description: "Anti-fraud: duplicate reward attempt blocked."
+        });
+        return;
+      }
+    }
     
     // Support targeted products or default to all if empty array/undefined
     const targetProducts = campaign.target_products && campaign.target_products.length > 0 ? campaign.target_products : undefined;
@@ -551,7 +589,13 @@ export default function POS() {
   
   const eligibleCampaigns = campaigns.filter(c => {
     const reqQty = Number(c.rules?.req_quantity || 1);
-    return totalItems >= reqQty;
+    // Threshold met?
+    if (totalItems < reqQty) return false;
+    
+    // Status check
+    if (c.status !== "ACTIVE") return false;
+    
+    return true;
   });
 
   let discountAmount = 0;
@@ -645,6 +689,22 @@ export default function POS() {
         user: selectedAdmin?.name || "Cashier",
         enterprise_id: enterpriseId
       });
+
+      // Record Campaign Usage for one-time rewards
+      if (cartDiscount) {
+        const campaign = campaigns.find(c => c.id === cartDiscount.id);
+        if (campaign && campaign.one_time_per_customer && selectedCustomer?.id) {
+          await addDoc(collection(db, "customer_campaign_usage"), {
+            customer_id: selectedCustomer.id,
+            customer_name: selectedCustomer.name,
+            campaign_id: campaign.id,
+            campaign_name: campaign.name,
+            used_at: serverTimestamp(),
+            transaction_id: orderRef.id,
+            enterprise_id: enterpriseId
+          });
+        }
+      }
 
       setLastTransaction({
         id: txRef.id,
@@ -1440,21 +1500,36 @@ export default function POS() {
                     <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-700">Rewards Unlocked</span>
                   </div>
                   <div className="space-y-2">
-                    {eligibleCampaigns.map(campaign => (
-                      <div key={campaign.id} className="flex items-center justify-between bg-white p-3 rounded-xl border border-indigo-100/50 shadow-sm transition-all hover:shadow-md hover:border-indigo-200">
-                        <div className="flex flex-col flex-1 min-w-0 pr-4">
-                          <span className="text-sm font-bold text-zinc-900 truncate">{campaign.name}</span>
-                          <span className="text-[10px] text-zinc-500 font-medium truncate">{campaign.description || 'Exclusive discount available'}</span>
+                    {eligibleCampaigns.map(campaign => {
+                      const isUsed = campaign.one_time_per_customer && customerUsage.some(u => u.campaign_id === campaign.id);
+                      return (
+                        <div key={campaign.id} className={cn(
+                          "flex items-center justify-between bg-white p-3 rounded-xl border shadow-sm transition-all relative overflow-hidden",
+                          isUsed ? "opacity-60 grayscale border-zinc-200" : "border-indigo-100/50 hover:shadow-md hover:border-indigo-200"
+                        )}>
+                          <div className="flex flex-col flex-1 min-w-0 pr-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-bold text-zinc-900 truncate">{campaign.name}</span>
+                              {isUsed && <Badge variant="outline" className="h-4 text-[8px] font-black uppercase text-rose-600 border-rose-200 bg-rose-50">Already Used</Badge>}
+                            </div>
+                            <span className="text-[10px] text-zinc-500 font-medium truncate">
+                              {isUsed ? `Claimed on ${customerUsage.find(u => u.campaign_id === campaign.id)?.used_at?.toDate ? customerUsage.find(u => u.campaign_id === campaign.id).used_at.toDate().toLocaleDateString() : 'N/A'}` : (campaign.description || 'Exclusive discount available')}
+                            </span>
+                          </div>
+                          <Button 
+                            size="sm" 
+                            className={cn(
+                              "h-8 text-xs font-bold rounded-lg shadow-sm",
+                              isUsed ? "bg-zinc-100 text-zinc-400 hover:bg-zinc-100" : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                            )}
+                            onClick={() => handleApplyCampaign(campaign.id)}
+                            disabled={isUsed}
+                          >
+                            {isUsed ? "Locked" : "Apply"}
+                          </Button>
                         </div>
-                        <Button 
-                          size="sm" 
-                          className="h-8 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm"
-                          onClick={() => handleApplyCampaign(campaign.id)}
-                        >
-                          Apply
-                        </Button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </motion.div>

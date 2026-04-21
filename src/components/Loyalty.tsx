@@ -56,7 +56,8 @@ export default function Loyalty() {
     },
     applies_to: "All Products (same product rule applies)",
     selected_products: [] as string[],
-    target_customers: "All Customers"
+    target_customers: "All Customers",
+    oneTimePerCustomer: false
   });
 
   useEffect(() => {
@@ -100,7 +101,8 @@ export default function Loyalty() {
       },
       applies_to: "All Products (same product rule applies)",
       selected_products: [],
-      target_customers: "All Customers"
+      target_customers: "All Customers",
+      oneTimePerCustomer: false
     });
     setIsDialogOpen(true);
   };
@@ -124,6 +126,7 @@ export default function Loyalty() {
         branches: formData.selected_branches,
         target_products: formData.selected_products,
         target_customers: formData.target_customers,
+        one_time_per_customer: formData.oneTimePerCustomer,
         status: "ACTIVE",
         created_at: serverTimestamp(),
         enterprise_id: enterpriseId
@@ -731,6 +734,27 @@ export default function Loyalty() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Reward Constraints */}
+              <Card className="shadow-sm border-zinc-200 overflow-hidden rounded-2xl bg-white">
+                <div className="p-6 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <Key className="w-5 h-5 text-amber-600" />
+                    <h3 className="text-lg font-bold text-zinc-900">Reward Constraints</h3>
+                  </div>
+                  <div className="flex items-center justify-between p-4 rounded-xl bg-amber-50/50 border border-amber-100">
+                    <div className="space-y-0.5">
+                      <Label className="text-sm font-bold text-zinc-900">One-Time Reward per Customer</Label>
+                      <p className="text-xs text-zinc-500">If enabled, customers can only benefit from this campaign once in their lifetime.</p>
+                    </div>
+                    <Checkbox 
+                      checked={formData.oneTimePerCustomer}
+                      onCheckedChange={(checked) => setFormData({...formData, oneTimePerCustomer: !!checked})}
+                      className="w-5 h-5"
+                    />
                   </div>
                 </div>
               </Card>
