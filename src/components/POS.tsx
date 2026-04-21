@@ -127,6 +127,7 @@ export default function POS() {
   const [discountContext, setDiscountContext] = useState<"Manual" | "Campaign">("Campaign");
   const [manualDiscount, setManualDiscount] = useState({ name: "Manual Discount", type: "Percentage", value: "" });
   const [customerUsage, setCustomerUsage] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
 
   useEffect(() => {
     if (!selectedCustomer?.id || !enterpriseId) {
@@ -242,11 +243,10 @@ export default function POS() {
 
   const [globalTaxRate, setGlobalTaxRate] = useState(15.0); // Fallback to 15%
 
-  // Data Fetching: Global Config & Products
+  // Core Data Listeners (Required for login screen)
   useEffect(() => {
     if (!enterpriseId) return;
 
-    // ── Pre-Auth Listeners (Required for login screen) ────────────────
     const unsubStaff = onSnapshot(
       query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
       (snapshot) => {
@@ -262,41 +262,57 @@ export default function POS() {
       (err) => console.error("sessions sync error:", err)
     );
 
-    // ── Post-Auth Listeners (Operational data) ─────────────────────
-    let unsubProducts: any, unsubInventory: any, unsubCustomers: any, unsubCampaigns: any;
-
-    if (isAuthorized) {
-      unsubProducts = onSnapshot(
-        query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
-        (snapshot) => {
-          setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-          setLoading(false);
-        },
-        (err) => { console.error("products sync error:", err); setLoading(false); }
-      );
-
-      unsubInventory = onSnapshot(
-        query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
-        (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-        (err) => console.error("inventory sync error:", err)
-      );
-
-      unsubCustomers = onSnapshot(
-        query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived")),
-        (snapshot) => setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-        (err) => console.error("customers sync error:", err)
-      );
-
-      unsubCampaigns = onSnapshot(
-        query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
-        (snapshot) => setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-        (err) => console.error("campaigns sync error:", err)
-      );
-    }
-
     return () => {
       unsubStaff();
       unsubSessions();
+    };
+  }, [enterpriseId]);
+
+  // Operational Data Listeners (Post-Auth)
+  useEffect(() => {
+    if (!enterpriseId || !isAuthorized) {
+      if (!isAuthorized) {
+        // Optionally clear data when de-authorized
+        setLoading(false);
+      }
+      return;
+    }
+
+    const unsubBranches = onSnapshot(
+      query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)),
+      (snapshot) => setBranches(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("branches sync error:", err)
+    );
+
+    const unsubProducts = onSnapshot(
+      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
+      (snapshot) => {
+        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => { console.error("products sync error:", err); setLoading(false); }
+    );
+
+    const unsubInventory = onSnapshot(
+      query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
+      (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("inventory sync error:", err)
+    );
+
+    const unsubCustomers = onSnapshot(
+      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived")),
+      (snapshot) => setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("customers sync error:", err)
+    );
+
+    const unsubCampaigns = onSnapshot(
+      query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
+      (snapshot) => setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (err) => console.error("campaigns sync error:", err)
+    );
+
+    return () => {
+      unsubBranches?.();
       unsubProducts?.();
       unsubInventory?.();
       unsubCustomers?.();
@@ -616,9 +632,8 @@ export default function POS() {
       if (c.status !== "ACTIVE") return false;
 
       // 2. Branch Check (Multi-select support)
-      if (c.branches && c.branches.length > 0) {
-        const resolvedBranch = activeBranch === "all" ? "main" : activeBranch;
-        if (!c.branches.includes(resolvedBranch)) return false;
+      if (activeBranch !== "all" && c.branches && c.branches.length > 0) {
+        if (!c.branches.includes(activeBranch)) return false;
       }
 
       // 3. Customer Group Check
@@ -1562,7 +1577,7 @@ export default function POS() {
         <div className="p-8 bg-zinc-50 border-t border-zinc-200 space-y-6">
           
           <AnimatePresence>
-            {eligibleCampaigns.length > 0 && !cartDiscount && (
+            {eligibleCampaigns.length > 0 && (activeBranch === "all" || !cartDiscount) && (
               <motion.div 
                 initial={{ opacity: 0, y: 10, height: 0 }}
                 animate={{ opacity: 1, y: 0, height: "auto" }}
@@ -1577,6 +1592,7 @@ export default function POS() {
                   <div className="space-y-2">
                     {eligibleCampaigns.map(campaign => {
                       const isUsed = campaign.one_time_per_customer && customerUsage.some(u => u.campaign_id === campaign.id);
+                      const isApplied = cartDiscount && cartDiscount.id === campaign.id;
                       return (
                         <div key={campaign.id} className={cn(
                           "flex items-center justify-between bg-white p-3 rounded-xl border shadow-sm transition-all relative overflow-hidden",
@@ -1590,17 +1606,35 @@ export default function POS() {
                             <span className="text-[10px] text-zinc-500 font-medium truncate">
                               {isUsed ? `Claimed on ${customerUsage.find(u => u.campaign_id === campaign.id)?.used_at?.toDate ? customerUsage.find(u => u.campaign_id === campaign.id).used_at.toDate().toLocaleDateString() : 'N/A'}` : (campaign.description || 'Exclusive discount available')}
                             </span>
+                            {activeBranch === "all" && (
+                              <div className="flex flex-wrap gap-1 mt-1.5">
+                                {!campaign.branches || campaign.branches.length === 0 ? (
+                                  <Badge variant="outline" className="text-[8px] font-black uppercase text-blue-600 border-blue-100 bg-blue-50/50">All Branches</Badge>
+                                ) : (
+                                  campaign.branches.map((bId: string) => {
+                                    const bName = branches.find(b => b.id === bId)?.name || bId;
+                                    return (
+                                      <Badge key={bId} variant="outline" className="text-[8px] font-black uppercase text-zinc-500 border-zinc-200">
+                                        {bName}
+                                      </Badge>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
                           </div>
                           <Button 
                             size="sm" 
                             className={cn(
                               "h-8 text-xs font-bold rounded-lg shadow-sm",
-                              isUsed ? "bg-zinc-100 text-zinc-400 hover:bg-zinc-100" : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                              isUsed ? "bg-zinc-100 text-zinc-400 hover:bg-zinc-100" : 
+                              isApplied ? "bg-emerald-600 hover:bg-emerald-700 text-white" : 
+                              "bg-indigo-600 hover:bg-indigo-700 text-white"
                             )}
                             onClick={() => handleApplyCampaign(campaign.id)}
-                            disabled={isUsed}
+                            disabled={isUsed || isApplied}
                           >
-                            {isUsed ? "Locked" : "Apply"}
+                            {isUsed ? "Locked" : isApplied ? "Applied" : "Apply"}
                           </Button>
                         </div>
                       );
