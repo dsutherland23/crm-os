@@ -1502,6 +1502,8 @@ export default function Settings() {
                       <SelectItem value="XCD">XCD - East Caribbean Dollar (EC$)</SelectItem>
                       <SelectItem value="BBD">BBD - Barbadian Dollar (Bds$)</SelectItem>
                       <SelectItem value="BSD">BSD - Bahamian Dollar (B$)</SelectItem>
+                      <SelectItem value="BZD">BZD - Belize Dollar (BZ$)</SelectItem>
+                      <SelectItem value="KYD">KYD - Cayman Islands Dollar (CI$)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

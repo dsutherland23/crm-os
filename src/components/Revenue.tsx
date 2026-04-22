@@ -119,7 +119,7 @@ import {
 import { PrintableInvoice } from "./PrintableInvoice";
 
 export default function Revenue() {
-  const { activeBranch, formatCurrency, enterpriseId, branding } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId, branding, currency } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -386,7 +386,7 @@ export default function Revenue() {
     payment_terms: "Due on Receipt",
     start_date: new Date().toISOString().split('T')[0],
     end_date: "",
-    currency: "USD",
+    currency: currency || "USD",
     auto_send: true,
     notes: ""
   });
@@ -651,7 +651,7 @@ export default function Revenue() {
         payment_terms: "Due on Receipt",
         start_date: new Date().toISOString().split('T')[0],
         end_date: "",
-        currency: "USD",
+        currency: currency || "USD",
         auto_send: true,
         notes: ""
       });
@@ -2159,12 +2159,31 @@ export default function Revenue() {
                   </div>
                   <div className="space-y-2">
                     <Label className="text-sm font-medium text-zinc-700">Currency</Label>
-                    <Input 
-                      placeholder="USD" 
-                      className="rounded-lg h-11 border-zinc-200" 
-                      value={recurringFormData.currency}
-                      onChange={(e) => setRecurringFormData({...recurringFormData, currency: e.target.value})}
-                    />
+                    <Select value={recurringFormData.currency} onValueChange={(v) => setRecurringFormData({...recurringFormData, currency: v})}>
+                      <SelectTrigger className="rounded-lg h-11 border-zinc-200 bg-white">
+                        <SelectValue placeholder="Select currency" />
+                      </SelectTrigger>
+                      <SelectContent className="rounded-xl">
+                        <SelectItem value="USD">USD ($)</SelectItem>
+                        <SelectItem value="EUR">EUR (€)</SelectItem>
+                        <SelectItem value="GBP">GBP (£)</SelectItem>
+                        <SelectItem value="CAD">CAD ($)</SelectItem>
+                        <SelectItem value="AUD">AUD ($)</SelectItem>
+                        <SelectItem value="JMD">JMD (J$)</SelectItem>
+                        <SelectItem value="XCD">XCD (EC$)</SelectItem>
+                        <SelectItem value="BBD">BBD (Bds$)</SelectItem>
+                        <SelectItem value="TTD">TTD (TT$)</SelectItem>
+                        <SelectItem value="BSD">BSD (B$)</SelectItem>
+                        <SelectItem value="BZD">BZD (BZ$)</SelectItem>
+                        <SelectItem value="KYD">KYD (CI$)</SelectItem>
+                        <SelectItem value="JPY">JPY (¥)</SelectItem>
+                        <SelectItem value="CHF">CHF (Fr)</SelectItem>
+                        <SelectItem value="CNY">CNY (¥)</SelectItem>
+                        <SelectItem value="NZD">NZD ($)</SelectItem>
+                        <SelectItem value="INR">INR (₹)</SelectItem>
+                        <SelectItem value="SGD">SGD ($)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 pt-2">
