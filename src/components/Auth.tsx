@@ -144,6 +144,8 @@ export default function Auth() {
         // Initialize stats if they don't exist
         setDoc(statsRef, { unique_count: 0 }, { merge: true });
       }
+    }, (err: any) => {
+      console.error("Visitor count snapshot error:", err);
     });
 
     // Handle unique visitor logic
