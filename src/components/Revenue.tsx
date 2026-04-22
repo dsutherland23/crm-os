@@ -523,20 +523,19 @@ export default function Revenue() {
   const grandTotal = useMemo(() => subtotal + taxTotal - discountAmount, [subtotal, taxTotal, discountAmount]);
 
   const payrollObligation = useMemo(() => {
-    // Mock salaries per role for 2026 enterprise baseline
-    const roleSalaries: Record<string, number> = {
-      "Cashier": 2850,
-      "Manager": 4200,
-      "Business Admin": 5800,
-      "Sales Lead": 3500,
-      "Technician": 3200
-    };
-
-    return staff.reduce((acc, member) => {
-      const salary = roleSalaries[member.role] || 3000;
-      return acc + salary;
+    return staff.reduce((acc, s) => {
+      const staffSessions = sessions.filter(sess => sess.staffId === s.id);
+      const totalSales = staffSessions.reduce((sum, sess) => sum + (sess.totalSales || 0), 0);
+      const commission = totalSales * (commissionRate / 100);
+      
+      let basePay = s.baseRate || 2200;
+      if (s.salaryType === 'HOURLY') {
+        const hours = staffSessions.length * 8 || 160;
+        basePay = hours * (s.baseRate || 25);
+      }
+      return acc + basePay + commission;
     }, 0);
-  }, [staff]);
+  }, [staff, sessions, commissionRate]);
 
   const payrollCoverageStatus = useMemo(() => {
     const reserve = bankAccounts.find(a => a.id === "2")?.balance || 0;
@@ -823,6 +822,29 @@ export default function Revenue() {
     }
   };
 
+  const handleGenerateStatement = () => {
+    setIsSubmitting(true);
+    toast.info("Synthesizing financial statement...");
+    setTimeout(() => {
+      const csvContent = [
+        ["Date", "Entity/Details", "Type", "Amount", "Status"],
+        ...invoices.filter(i => i.status === "PAID").map(i => [new Date(i.timestamp?.toDate() || i.date || Date.now()).toLocaleDateString(), `Invoice #${i.invoice_number?.slice(0,6) || i.id.slice(0,6)}`, "Credit", (i.amount || 0).toFixed(2), "Verified"]),
+        ...expenses.filter(e => e.status === "PAID").map(e => [new Date(e.timestamp?.toDate() || e.date || Date.now()).toLocaleDateString(), e.description || e.category, "Debit", (e.amount || 0).toFixed(2), "Verified"])
+      ].map(e => e.join(",")).join("\n");
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `financial_statement_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setIsStatementDialogOpen(false);
+      setIsSubmitting(false);
+      toast.success("Statement generated and downloaded successfully");
+    }, 1500);
+  };
+
   const totalRevenue = invoices.filter(inv => inv.status === "PAID").reduce((acc, curr) => acc + (curr.total || 0), 0);
   const totalExpenses = expenses.reduce((acc, curr) => acc + (curr.amount || 0), 0);
   const netProfit = totalRevenue - totalExpenses;
@@ -839,7 +861,7 @@ export default function Revenue() {
     for (let i = 5; i >= 0; i--) {
       const monthDate = new Date(d.getFullYear(), d.getMonth() - i, 1);
       const key = `${monthDate.getFullYear()}-${monthDate.getMonth()}`;
-      dataMap.set(key, { name: months[monthDate.getMonth()], inflow: 0, outflow: 0, year: monthDate.getFullYear(), month: monthDate.getMonth() });
+      dataMap.set(key, { name: months[monthDate.getMonth()], inflow: 0, outflow: 0, payroll: 0, year: monthDate.getFullYear(), month: monthDate.getMonth() });
     }
 
     invoices.forEach(inv => {
@@ -857,6 +879,9 @@ export default function Revenue() {
       const key = `${date.getFullYear()}-${date.getMonth()}`;
       if (dataMap.has(key)) {
         dataMap.get(key).outflow += exp.amount || 0;
+        if (exp.category === "Payroll") {
+          dataMap.get(key).payroll += exp.amount || 0;
+        }
       }
     });
 
@@ -1688,7 +1713,7 @@ export default function Revenue() {
                 </CardHeader>
                 <CardContent className="h-[250px] pt-4">
                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={cashFlowData.map(d => ({ ...d, payroll: d.outflow * 0.4 }))}>
+                      <BarChart data={cashFlowData}>
                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
@@ -2784,7 +2809,9 @@ export default function Revenue() {
           </div>
           <DialogFooter className="p-8 lg:p-10 bg-white border-t border-zinc-100 flex-none gap-4">
             <Button variant="ghost" className="rounded-xl h-14 px-8 font-bold text-zinc-400 hover:text-rose-500 hover:bg-rose-50 flex-1 md:flex-none" onClick={() => setIsStatementDialogOpen(false)}>Abort</Button>
-            <Button className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 h-16 px-14 font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-zinc-900/40 hover:scale-[1.02] transition-all flex-1 md:flex-none" onClick={() => toast.success("Drafting Statement...")}>Initialize Generation</Button>
+            <Button className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 h-16 px-14 font-black uppercase tracking-[0.2em] text-xs shadow-2xl shadow-zinc-900/40 hover:scale-[1.02] transition-all flex-1 md:flex-none" onClick={handleGenerateStatement} disabled={isSubmitting}>
+              {isSubmitting ? "Generating..." : "Initialize Generation"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2954,7 +2981,7 @@ export default function Revenue() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest">Active Ledger Entries</h4>
-                    <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs font-bold text-blue-600">Download CSV</Button>
+                    <Button variant="ghost" size="sm" className="h-8 rounded-lg text-xs font-bold text-blue-600" onClick={handleGenerateStatement}>Download CSV</Button>
                   </div>
 
                   <div className="rounded-3xl border border-zinc-100 bg-white overflow-hidden shadow-sm">
@@ -2968,12 +2995,25 @@ export default function Revenue() {
                       </TableHeader>
                       <TableBody>
                         {[
-                          { date: "Apr 18, 2026", name: "Inventory restock", type: "Debit", amt: 1250.00, verified: true },
-                          { date: "Apr 17, 2026", name: "Alice Johnson (Sale #TXER)", type: "Credit", amt: 2450.00, verified: true },
-                          { date: "Apr 16, 2026", name: "Monthly Office Rent", type: "Debit", amt: 3200.00, verified: true },
-                          { date: "Apr 15, 2026", name: "Stripe Payout", type: "Credit", amt: 12450.50, verified: true },
-                          { date: "Apr 14, 2026", name: "Electricity Utility", type: "Debit", amt: 450.25, verified: true },
-                        ].map((tx, i) => (
+                          ...invoices.filter(i => i.status === "PAID").map(i => ({
+                            id: i.id,
+                            date: new Date(i.timestamp?.toDate() || i.date || Date.now()).toLocaleDateString(),
+                            timestamp: i.timestamp?.toMillis() || Date.now(),
+                            name: `Invoice #${i.invoice_number?.slice(0,6) || i.id.slice(0,6)}`,
+                            type: "Credit",
+                            amt: i.amount || 0,
+                            verified: true
+                          })),
+                          ...expenses.filter(e => e.status === "PAID").map(e => ({
+                            id: e.id,
+                            date: new Date(e.timestamp?.toDate() || e.date || Date.now()).toLocaleDateString(),
+                            timestamp: e.timestamp?.toMillis() || Date.now(),
+                            name: e.description || e.category,
+                            type: "Debit",
+                            amt: e.amount || 0,
+                            verified: true
+                          }))
+                        ].sort((a, b) => b.timestamp - a.timestamp).map((tx, i) => (
                           <TableRow key={i} className="hover:bg-zinc-50 transition-colors border-b border-zinc-50/50 last:border-0 border-dashed">
                             <TableCell className="py-4 pl-6 text-xs font-bold text-zinc-400">{tx.date}</TableCell>
                             <TableCell className="py-4">
