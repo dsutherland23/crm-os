@@ -131,7 +131,11 @@ export default function Auth() {
   // Form fields
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [visitorCount, setVisitorCount] = useState<bigint>(0n);
+  const [visitorCount, setVisitorCount] = useState<bigint>(() => {
+    // Persistent cache to prevent visual reset to 0 on refresh
+    const cached = localStorage.getItem("orivo_visitor_count_cache");
+    return cached ? BigInt(cached) : 0n;
+  });
 
   useEffect(() => {
     const statsRef = doc(db, "system_stats", "visitors");
@@ -139,7 +143,9 @@ export default function Auth() {
     // Listen for live updates to the global count
     const unsub = onSnapshot(statsRef, (docSnap: any) => {
       if (docSnap.exists()) {
-        setVisitorCount(BigInt(docSnap.data().unique_count || 0));
+        const count = BigInt(docSnap.data().unique_count || 0);
+        setVisitorCount(count);
+        localStorage.setItem("orivo_visitor_count_cache", count.toString());
       } else {
         // Initialize stats if they don't exist
         setDoc(statsRef, { unique_count: 0 }, { merge: true });
@@ -149,9 +155,11 @@ export default function Auth() {
     });
 
     // Handle unique visitor logic
-    const visitorKey = "orivo_unique_v1";
+    const visitorKey = "orivo_unique_visitor_id";
     if (!localStorage.getItem(visitorKey)) {
-      localStorage.setItem(visitorKey, Date.now().toString());
+      localStorage.setItem(visitorKey, `v_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+      
+      // Attempt to increment the global unique counter
       updateDoc(statsRef, {
         unique_count: increment(1)
       }).catch(() => {
