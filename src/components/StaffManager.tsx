@@ -330,9 +330,15 @@ export default function StaffManager() {
                      <SelectContent className="rounded-xl">
                         {roles.length === 0 ? (
                            <>
-                             <SelectItem value="Cashier">Cashier</SelectItem>
                              <SelectItem value="Manager">Manager</SelectItem>
+                             <SelectItem value="Supervisor">Supervisor</SelectItem>
+                             <SelectItem value="Cashier">Cashier</SelectItem>
+                             <SelectItem value="Sales Rep">Sales Rep</SelectItem>
+                             <SelectItem value="Technician">Technician</SelectItem>
                              <SelectItem value="Business Admin">Business Admin</SelectItem>
+                             <SelectItem value="Customer Support">Customer Support</SelectItem>
+                             <SelectItem value="Security">Security</SelectItem>
+                             <SelectItem value="Executive">Executive</SelectItem>
                            </>
                         ) : (
                           roles.map(r => (
@@ -396,8 +402,10 @@ export default function StaffManager() {
                              <SelectValue />
                            </SelectTrigger>
                            <SelectContent className="rounded-xl">
-                              <SelectItem value="MONTHLY">Monthly Retainer</SelectItem>
                               <SelectItem value="HOURLY">Hourly Productivity</SelectItem>
+                              <SelectItem value="WEEKLY">Weekly Payment</SelectItem>
+                              <SelectItem value="FORTNIGHTLY">Fortnightly (Bi-Weekly)</SelectItem>
+                              <SelectItem value="MONTHLY">Monthly Retainer</SelectItem>
                            </SelectContent>
                         </Select>
                      </div>

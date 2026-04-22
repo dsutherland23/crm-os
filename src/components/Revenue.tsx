@@ -167,6 +167,10 @@ export default function Revenue() {
         if (s.salaryType === 'HOURLY') {
           const hours = staffSessions.length * 8 || 160;
           basePay = hours * (s.baseRate || 25);
+        } else if (s.salaryType === 'WEEKLY') {
+          basePay = s.baseRate || 500;
+        } else if (s.salaryType === 'FORTNIGHTLY') {
+          basePay = s.baseRate || 1000;
         }
         const totalDue = basePay + commission;
 
@@ -413,11 +417,8 @@ export default function Revenue() {
 
 
   // Bank Accounts (Real Treasury Accounts from Firestore)
-  const [bankAccounts, setBankAccounts] = useState<any[]>([
-    { id: "1", name: "Operating Account", bank: "Silicon Valley Bank", balance: 142500.25, type: "Checking", status: "Active" },
-    { id: "2", name: "Payroll Reserve", bank: "Chase Manhattan", balance: 65000.00, type: "Savings", status: "Active" },
-    { id: "3", name: "Tax Vault", bank: "Goldman Sachs", balance: 28400.50, type: "Escrow", status: "Pending" },
-  ]);
+  // Bank Accounts (Real Treasury Accounts from Firestore)
+  const [bankAccounts, setBankAccounts] = useState<any[]>([]);
 
   useEffect(() => {
     if (!enterpriseId) return;
@@ -466,6 +467,10 @@ export default function Revenue() {
       setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => console.error("sessions:", error));
 
+    const unsubBankAccounts = onSnapshot(query(collection(db, "bankAccounts"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      setBankAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => console.error("bankAccounts:", error));
+
     return () => {
       unsubInvoices();
       unsubExpenses();
@@ -475,6 +480,8 @@ export default function Revenue() {
       unsubProducts();
       unsubSettings();
       unsubStaff();
+      unsubSessions();
+      unsubBankAccounts();
     };
   }, [enterpriseId]);
 
@@ -532,6 +539,10 @@ export default function Revenue() {
       if (s.salaryType === 'HOURLY') {
         const hours = staffSessions.length * 8 || 160;
         basePay = hours * (s.baseRate || 25);
+      } else if (s.salaryType === 'WEEKLY') {
+        basePay = (s.baseRate || 500) * 4.33; // Normalize to monthly
+      } else if (s.salaryType === 'FORTNIGHTLY') {
+        basePay = (s.baseRate || 1000) * 2.16; // Normalize to monthly
       }
       return acc + basePay + commission;
     }, 0);
