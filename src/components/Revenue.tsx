@@ -976,14 +976,16 @@ export default function Revenue() {
       {/* Invoices Table */}
       <Tabs defaultValue="invoices" className="space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <TabsList className="bg-zinc-100 p-1 rounded-xl w-fit">
-            <TabsTrigger value="invoices" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Invoices</TabsTrigger>
-            <TabsTrigger value="quotes" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Quotes</TabsTrigger>
-            <TabsTrigger value="recurring" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Recurring</TabsTrigger>
-            <TabsTrigger value="expenses" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Expenses</TabsTrigger>
-            <TabsTrigger value="payroll" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Payroll & Commissions</TabsTrigger>
-            <TabsTrigger value="tax" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Compliance</TabsTrigger>
-          </TabsList>
+          <div className="w-full overflow-x-auto pb-1 scrollbar-none">
+            <TabsList className="bg-zinc-100 p-1 rounded-xl w-fit flex-nowrap min-w-max">
+              <TabsTrigger value="invoices" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Invoices</TabsTrigger>
+              <TabsTrigger value="quotes" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Quotes</TabsTrigger>
+              <TabsTrigger value="recurring" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Recurring</TabsTrigger>
+              <TabsTrigger value="expenses" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Expenses</TabsTrigger>
+              <TabsTrigger value="payroll" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm whitespace-nowrap">Payroll & Commissions</TabsTrigger>
+              <TabsTrigger value="tax" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Compliance</TabsTrigger>
+            </TabsList>
+          </div>
           
           <div className="flex flex-wrap items-center gap-3">
              <div className="relative w-full md:w-64 group">
