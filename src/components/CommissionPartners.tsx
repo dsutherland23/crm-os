@@ -95,12 +95,16 @@ export default function CommissionPartners() {
       const q = query(
         collection(db, "commission_settlements"), 
         where("partnerId", "==", partnerId),
-        where("enterprise_id", "==", enterpriseId),
-        orderBy("timestamp", "desc"),
-        limit(10)
+        where("enterprise_id", "==", enterpriseId)
       );
       const snapshot = await getDocs(q);
-      setHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => {
+        const tA = a.timestamp?.toDate?.()?.getTime() || new Date(a.timestamp || 0).getTime();
+        const tB = b.timestamp?.toDate?.()?.getTime() || new Date(b.timestamp || 0).getTime();
+        return tB - tA;
+      });
+      setHistory(docs.slice(0, 10));
     } catch (error) {
       console.error("Error fetching history:", error);
     }

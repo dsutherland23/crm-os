@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
+import { initializeFirestore } from 'firebase/firestore';
 import * as fs from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { getMockUser } from './auth-mock';
@@ -8,9 +8,28 @@ import * as demoFs from './firebase-demo';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({})
-}, firebaseConfig.firestoreDatabaseId);
+// ── Firestore initialization ─────────────────────────────────────────
+// We use in-memory Firestore (no local persistence cache) deliberately:
+//  - Firebase Auth has its OWN persistence (localStorage/IndexedDB) that keeps users logged in.
+//  - Firestore's IndexedDB persistence layer causes "INTERNAL ASSERTION FAILED: Unexpected state"
+//    errors when the cache becomes corrupted (common after switching between persistence modes).
+//  - Without persistence, data loads fresh on each session — which is correct behavior for a CRM.
+export const db = initializeFirestore(app, {});
+
+// Proactively clean up any stale Firestore IndexedDB databases left from previous sessions.
+// This prevents "Unexpected state" assertion errors from corrupted cache on page load.
+(async () => {
+  try {
+    const dbs = await indexedDB.databases();
+    for (const { name } of dbs) {
+      if (name && name.startsWith('firestore/')) {
+        indexedDB.deleteDatabase(name);
+      }
+    }
+  } catch {
+    // indexedDB.databases() not supported in all browsers — silently skip
+  }
+})();
 
 // Toggle this to switch between Live and Mock databases
 const USE_LIVE_DB = true; 
@@ -74,21 +93,21 @@ import * as storageFs from 'firebase/storage';
 // ── STORAGE ENGINE ──────────────────────────────────────────
 export const getStorage = () => storageFs.getStorage(app);
 export const ref = (storage: any, path: string) => storageFs.ref(storage, path);
-export const uploadBytes = (ref: any, data: any) => storageFs.uploadBytes(ref, data);
+export const uploadBytes = (ref: any, data: any, metadata?: any) => storageFs.uploadBytes(ref, data, metadata);
 export const getDownloadURL = (ref: any) => storageFs.getDownloadURL(ref);
 
 async function testConnection() {
   try {
-    const testDoc = await getDocFromServer(doc(db, 'system_stats', 'visitors'));
-    console.log("Orivo Engine: Firestore connection established", {
-      dbId: firebaseConfig.firestoreDatabaseId,
-      source: testDoc.metadata.fromCache ? 'cache' : 'server'
-    });
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    console.log("Firestore connection successful");
   } catch (error) {
-    console.warn("Orivo Engine: Operating in Offline/Cache mode", error);
+    if(error instanceof Error && error.message.includes('the client is offline')) {
+      console.error("Please check your Firebase configuration. The client is offline.");
+    }
+    // Skip logging for other errors, as this is simply a connection test.
   }
 }
-testConnection();
+// testConnection();
 
 export enum OperationType {
   CREATE = 'create',

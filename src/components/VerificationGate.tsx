@@ -3,7 +3,7 @@ import { auth } from "@/lib/firebase";
 import { sendEmailVerification, signOut, User } from "firebase/auth";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Mail, RefreshCw, LogOut, ArrowRight, CheckCircle2, Clock } from "lucide-react";
+import { Mail, RefreshCw, LogOut, ArrowRight, CheckCircle2, Clock, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 export default function VerificationGate({ user }: { user: User }) {
@@ -99,7 +99,7 @@ export default function VerificationGate({ user }: { user: User }) {
               Awaiting Verification
             </h1>
             <p className="text-zinc-400 text-sm font-medium leading-relaxed max-w-[280px] mx-auto">
-              We've dispatched an authentication link to <span className="text-white font-bold">{user.email}</span>.
+              We've dispatched an authentication link to <span className="text-white font-bold">{user?.email}</span>.
             </p>
           </div>
 

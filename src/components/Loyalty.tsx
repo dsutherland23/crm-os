@@ -73,7 +73,15 @@ export default function Loyalty() {
     const unsubGroups = onSnapshot(query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId)), (snap) => setGroups(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "customer_groups"));
     const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)), (snap) => setProducts(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "products"));
     const unsubCampaigns = onSnapshot(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId)), (snap) => setCampaigns(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "campaigns"));
-    const unsubUsage = onSnapshot(query(collection(db, "customer_campaign_usage"), where("enterprise_id", "==", enterpriseId), orderBy("used_at", "desc"), limit(50)), (snap) => setUtilizationLogs(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => console.error("usage logs error:", e));
+    const unsubUsage = onSnapshot(query(collection(db, "customer_campaign_usage"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      const docs = snapshot.docs.map(d => ({id:d.id, ...d.data()} as any));
+      docs.sort((a, b) => {
+        const tA = a.used_at?.toDate?.()?.getTime() || new Date(a.used_at || 0).getTime();
+        const tB = b.used_at?.toDate?.()?.getTime() || new Date(b.used_at || 0).getTime();
+        return tB - tA;
+      });
+      setUtilizationLogs(docs.slice(0, 50));
+    }, (e) => console.error("usage logs error:", e));
     
     const unsubSettings = onSnapshot(doc(db, "loyalty_settings", enterpriseId), (docSnap) => {
       if (docSnap.exists()) {
@@ -84,7 +92,11 @@ export default function Loyalty() {
           rewardValue: data.rewardValue || 5
         });
       }
-    }, (e) => console.error("loyalty settings error:", e));
+      // If doc doesn't exist, silently keep defaults — it will be created on first save
+    }, () => {
+      // Silently ignore permission errors — loyalty settings will use defaults
+      // until the user sets up their workspace
+    });
 
     return () => { unsubBranches(); unsubGroups(); unsubProducts(); unsubCampaigns(); unsubUsage(); unsubSettings(); };
   }, [enterpriseId]);

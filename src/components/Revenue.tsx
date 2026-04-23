@@ -423,24 +423,36 @@ export default function Revenue() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    const unsubInvoices = onSnapshot(query(collection(db, "invoices"), where("enterprise_id", "==", enterpriseId), orderBy("due_date", "desc")), (snapshot) => {
-      setInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubInvoices = onSnapshot(query(collection(db, "invoices"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => new Date(b.due_date || 0).getTime() - new Date(a.due_date || 0).getTime());
+      setInvoices(docs);
       setLoading(false);
     }, (error) => {
       console.error("invoices:", error);
       setLoading(false);
     });
 
-    const unsubExpenses = onSnapshot(query(collection(db, "expenses"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc")), (snapshot) => {
-      setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubExpenses = onSnapshot(query(collection(db, "expenses"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => {
+        const tA = new Date(a.date || a.timestamp || 0).getTime();
+        const tB = new Date(b.date || b.timestamp || 0).getTime();
+        return tB - tA;
+      });
+      setExpenses(docs);
     }, (error) => console.error("expenses:", error));
 
-    const unsubQuotes = onSnapshot(query(collection(db, "quotes"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc")), (snapshot) => {
-      setQuotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubQuotes = onSnapshot(query(collection(db, "quotes"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setQuotes(docs);
     }, (error) => console.error("quotes:", error));
 
-    const unsubRecurring = onSnapshot(query(collection(db, "recurring_billing"), where("enterprise_id", "==", enterpriseId), orderBy("next_billing_date", "asc")), (snapshot) => {
-      setRecurring(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubRecurring = onSnapshot(query(collection(db, "recurring_billing"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => new Date(a.next_billing_date || 0).getTime() - new Date(b.next_billing_date || 0).getTime());
+      setRecurring(docs);
     }, (error) => console.error("recurring:", error));
 
     const unsubCustomers = onSnapshot(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
@@ -1101,7 +1113,7 @@ export default function Revenue() {
           </CardHeader>
           <CardContent className="pt-10">
             <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <AreaChart data={cashFlowData}>
                   <defs>
                     <linearGradient id="colorIn" x1="0" y1="0" x2="0" y2="1">
@@ -1133,7 +1145,7 @@ export default function Revenue() {
           </CardHeader>
           <CardContent className="pt-6">
             <div className="h-[250px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <PieChart>
                   <Pie
                     data={expenseCategories}
@@ -1723,7 +1735,7 @@ export default function Revenue() {
                    <CardDescription>Payroll expenses vs. net revenue generation.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[250px] pt-4">
-                   <ResponsiveContainer width="100%" height="100%">
+                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <BarChart data={cashFlowData}>
                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />

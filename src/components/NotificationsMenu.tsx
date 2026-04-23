@@ -25,9 +25,12 @@ export default function NotificationsMenu() {
 
   useEffect(() => {
     if (!enterpriseId) return;
-    const q = query(collection(db, "notifications"), where("enterprise_id", "==", enterpriseId), orderBy("createdAt", "desc"), limit(50));
+    const q = query(collection(db, "notifications"), where("enterprise_id", "==", enterpriseId), limit(100));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setNotifications(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as SystemNotification)));
+      const docs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as SystemNotification));
+      // Sort locally to avoid index requirement
+      docs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setNotifications(docs.slice(0, 50));
     });
     return () => unsubscribe();
   }, [enterpriseId]);

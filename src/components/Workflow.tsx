@@ -378,9 +378,16 @@ export default function Workflow() {
     if (!enterpriseId) return;
 
     const unsubscribeWf = onSnapshot(
-      query(collection(db, "workflows"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc")),
+      query(collection(db, "workflows"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
-        setWorkflows(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as WorkflowDoc)));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as WorkflowDoc));
+        // Sort locally to avoid index requirement
+        docs.sort((a, b) => {
+          const tA = a.created_at?.toDate?.()?.getTime() || 0;
+          const tB = b.created_at?.toDate?.()?.getTime() || 0;
+          return tB - tA;
+        });
+        setWorkflows(docs);
         setLoading(false);
       },
       (error) => {
@@ -391,9 +398,16 @@ export default function Workflow() {
     );
 
     const unsubscribeLogs = onSnapshot(
-      query(collection(db, "workflow_logs"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc")),
+      query(collection(db, "workflow_logs"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
-        setWorkflowLogs(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LogDoc)));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LogDoc));
+        // Sort locally to avoid index requirement
+        docs.sort((a, b) => {
+          const tA = a.timestamp?.toDate?.()?.getTime() || 0;
+          const tB = b.timestamp?.toDate?.()?.getTime() || 0;
+          return tB - tA;
+        });
+        setWorkflowLogs(docs);
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, "workflow_logs");

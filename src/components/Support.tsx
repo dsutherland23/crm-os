@@ -857,11 +857,16 @@ function TicketCenter() {
     if (!auth.currentUser?.email) return;
     const q = query(
       collection(db, "support_tickets"),
-      where("user_email", "==", auth.currentUser.email),
-      orderBy("createdAt", "desc")
+      where("user_email", "==", auth.currentUser.email)
     );
     return onSnapshot(q, (snap) => {
-      setTickets(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      docs.sort((a, b) => {
+        const tA = a.createdAt?.toDate?.()?.getTime() || 0;
+        const tB = b.createdAt?.toDate?.()?.getTime() || 0;
+        return tB - tA;
+      });
+      setTickets(docs);
       setLoading(false);
     });
   }, []);
@@ -869,11 +874,16 @@ function TicketCenter() {
   useEffect(() => {
     if (!selected) { setReplies([]); return; }
     const q = query(
-      collection(db, `support_tickets/${selected.id}/replies`),
-      orderBy("createdAt", "asc")
+      collection(db, `support_tickets/${selected.id}/replies`)
     );
     return onSnapshot(q, (snap) => {
-      setReplies(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      docs.sort((a, b) => {
+        const tA = a.createdAt?.toDate?.()?.getTime() || 0;
+        const tB = b.createdAt?.toDate?.()?.getTime() || 0;
+        return tA - tB;
+      });
+      setReplies(docs);
     });
   }, [selected?.id]);
 

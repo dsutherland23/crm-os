@@ -422,9 +422,16 @@ export default function Groups() {
   useEffect(() => {
     if (!enterpriseId) return;
     const unsub = onSnapshot(
-      query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc")),
+      query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId)),
       (snapshot) => {
-        setGroups(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as GroupDoc)));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as GroupDoc));
+        // Sort locally to avoid index requirement
+        docs.sort((a, b) => {
+          const tA = a.created_at?.toDate?.()?.getTime() || 0;
+          const tB = b.created_at?.toDate?.()?.getTime() || 0;
+          return tB - tA;
+        });
+        setGroups(docs);
         setLoading(false);
       },
       (error) => {

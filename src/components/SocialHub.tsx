@@ -11,7 +11,7 @@ import {
   Sparkles
 } from "lucide-react";
 import { useModules } from "@/context/ModuleContext";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import { Button } from "./ui/button";
 
 export const SocialHub: React.FC = () => {

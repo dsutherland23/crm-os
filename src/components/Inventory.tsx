@@ -47,7 +47,7 @@ import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import BarcodeScanner from './BarcodeScanner';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'motion/react';
 import { useModules } from "@/context/ModuleContext";
 
 const formatCurrency = (amount: number) => {
@@ -1978,7 +1978,7 @@ export default function Inventory() {
                     <TrendingUp className="w-4 h-4 text-indigo-500" /> Performance History (14 Days)
                   </h3>
                   <div className="h-80 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <AreaChart data={productAnalytics}>
                         <defs>
                           <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
@@ -2013,7 +2013,7 @@ export default function Inventory() {
                     <Truck className="w-4 h-4 text-emerald-500" /> Sourcing Reliability Index
                   </h3>
                   <div className="h-80 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <BarChart data={supplierMetrics}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
                         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#3f3f46', fontWeight: 'black' }} dy={10} />

@@ -334,14 +334,19 @@ export default function CRM() {
     if (!enterpriseId) return;
     const q = query(
       collection(db, "customers"), 
-      where("enterprise_id", "==", enterpriseId),
-      where("status", "!=", "Archived"),
-      orderBy("status"),
-      orderBy("name", "asc")
+      where("enterprise_id", "==", enterpriseId)
     );
     const path = "customers";
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      let docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      
+      // Filter and sort locally to avoid composite index requirement
+      docs = docs.filter(d => d.status !== "Archived");
+      docs.sort((a, b) => {
+        if (a.status !== b.status) return a.status.localeCompare(b.status);
+        return a.name.localeCompare(b.name);
+      });
+      
       setCustomers(docs);
       if (docs.length > 0 && !selectedCustomer) {
         setSelectedCustomer(docs[0]);
@@ -570,7 +575,7 @@ export default function CRM() {
         type: file.type,
         size: file.size,
         url: url,
-        path: storageRef.path,
+        path: storageRef.fullPath,
         uploadedAt: new Date().toISOString(),
         timestamp: serverTimestamp(),
         author: auth.currentUser?.displayName || "System"

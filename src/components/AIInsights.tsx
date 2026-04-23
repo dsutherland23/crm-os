@@ -387,7 +387,7 @@ export default function AIInsights() {
                       
                       {msg.type === "chart" && (
                         <div className="mt-8 h-[200px] w-full bg-zinc-50 rounded-2xl p-4 border border-zinc-100">
-                          <ResponsiveContainer width="100%" height="100%">
+                          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                             <BarChart data={msg.data}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                               <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />

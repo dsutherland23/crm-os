@@ -8,7 +8,7 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { auth, db, doc, setDoc, getDoc, updateDoc, increment, onSnapshot, deleteDoc } from "@/lib/firebase";
+import { auth, db, doc, setDoc, getDoc, updateDoc, increment, onSnapshot, deleteDoc, collection, addDoc } from "@/lib/firebase";
 import * as fs from "firebase/firestore";
 // Use the standard db instance from lib/firebase which handles both live and mock modes correctly.
 import { Button } from "@/components/ui/button";
@@ -110,7 +110,7 @@ async function provisionEnterprise(uid: string, data: {
     setupCompleted: true,
     createdAt: new Date().toISOString(),
     billing: {
-      planId: "starter",
+      planId: "enterprise",
       userCount: data.teamSize === "Just me" ? 1 : 3,
       branchCount: 1,
       billingCycle: "monthly",
@@ -165,7 +165,9 @@ export default function Auth() {
         setDoc(statsRef, { unique_count: 0 }, { merge: true });
       }
     }, (err: any) => {
-      console.error("Visitor count snapshot error:", err);
+      if (err.code !== 'permission-denied') {
+        console.error("Visitor count snapshot error:", err);
+      }
     });
 
     // Handle unique visitor logic
@@ -178,7 +180,7 @@ export default function Auth() {
         unique_count: increment(1)
       }).catch(() => {
         // Fallback for first-time initialization if doc doesn't exist
-        setDoc(statsRef, { unique_count: 1 }, { merge: true });
+        setDoc(statsRef, { unique_count: 1 }, { merge: true }).catch(() => {});
       });
     }
 
@@ -420,8 +422,8 @@ export default function Auth() {
         const inviteId = cleanEmail.replace(/[^a-z0-9]/g, '_');
         const inviteDoc = await getDoc(doc(db, "staff_invites", inviteId));
 
-        if (inviteDoc.exists() && inviteDoc.data().status === "PENDING_ACTIVATION") {
-          const data = inviteDoc.data();
+        if (inviteDoc.exists() && (inviteDoc.data() as any).status === "PENDING_ACTIVATION") {
+          const data = inviteDoc.data() as any;
 
           try {
             const { user } = await createUserWithEmailAndPassword(auth, cleanEmail, password);

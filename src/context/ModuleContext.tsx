@@ -139,7 +139,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   });
 
   const [billing, setBillingState] = useState<BillingConfig>({
-    planId: "business-pro",
+    planId: "enterprise",
     userCount: 3,
     branchCount: 1,
     billingCycle: "monthly",

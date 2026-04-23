@@ -122,8 +122,14 @@ export default function Analytics() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    const unsubTx = onSnapshot(query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "asc")), (snapshot) => {
-      setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubTx = onSnapshot(query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => {
+        const tA = a.timestamp?.toDate?.()?.getTime() || new Date(a.timestamp || 0).getTime();
+        const tB = b.timestamp?.toDate?.()?.getTime() || new Date(b.timestamp || 0).getTime();
+        return tA - tB;
+      });
+      setTransactions(docs);
     });
     const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -499,7 +505,7 @@ export default function Analytics() {
               </CardHeader>
               <CardContent className="pt-10">
                 <div className="h-[400px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <AreaChart data={performanceData}>
                       <defs>
                         <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
@@ -586,7 +592,7 @@ export default function Analytics() {
               </CardHeader>
               <CardContent className="pt-6">
                 <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <PieChart>
                       <Pie
                         data={categoryDistribution}
@@ -747,7 +753,7 @@ export default function Analytics() {
                 </div>
                 
                 <div className="h-[250px] w-full bg-zinc-50 rounded-[2rem] border border-zinc-100 p-6">
-                   <ResponsiveContainer width="100%" height="100%">
+                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <AreaChart data={performanceData.map((d, i) => {
                         const multiplier = 1 + ((simulationParams.adSpend * 0.01) * (i / performanceData.length)) + (simulationParams.newBranch ? 0.3 * (i/performanceData.length) : 0);
                         return { 

@@ -4,7 +4,8 @@ import { Toaster } from "@/components/ui/sonner";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import NetworkIndicator from "@/components/NetworkIndicator";
 import { onAuthStateChanged, User } from "firebase/auth";
-import { auth, db, doc, onSnapshot } from "@/lib/firebase";
+import { auth, db, doc, onSnapshot, setDoc, addDoc, collection } from "@/lib/firebase";
+import { toast } from "sonner";
 import { getMockUser } from "./lib/auth-mock";
 
 import Dashboard from "./components/Dashboard";
@@ -28,12 +29,12 @@ import { SocialHub } from "./components/SocialHub";
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
-import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import AuthActionHandler from "./components/AuthActionHandler";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { TrialBanner } from "@/components/ui/trial-banner";
+import { motion, AnimatePresence } from "motion/react";
 
 function AppContent() {
   // Navigate to /#/admin or append ?admin=1 to access the portal
@@ -59,6 +60,82 @@ function AppContent() {
   const [user, setUser] = useState<User | null | undefined>(undefined); // undefined = still loading
   const [enterpriseLoading, setEnterpriseLoading] = useState(true);
   const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId, setUserRole, hasPermission, userRole } = useModules();
+
+  const [isProvisioning, setIsProvisioning] = useState(false);
+
+  const handleCompleteSetup = async () => {
+    if (!user) return;
+    setIsProvisioning(true);
+    try {
+      // 1. Check if a user profile already exists (may have enterprise_id already)
+      const { getDoc } = await import("firebase/firestore");
+      const existingDoc = await getDoc(doc(db, "users", user.uid));
+      const existingData = existingDoc.exists() ? existingDoc.data() : null;
+
+      // Reuse existing enterprise_id if present, otherwise derive a new one
+      const slug = user.email?.split("@")[0].replace(/[^a-zA-Z0-9]/g, "-") || user.uid.substring(0, 8);
+      const newEnterpriseId = existingData?.enterprise_id || `ent-${slug}`;
+
+      const profileData = {
+        fullName: existingData?.fullName || user.displayName || slug,
+        email: existingData?.email || user.email || "",
+        enterprise_id: newEnterpriseId,
+        enterpriseName: existingData?.enterpriseName || `${user.displayName || slug}'s Organization`,
+        industry: existingData?.industry || "Other",
+        teamSize: existingData?.teamSize || "Just me",
+        role: existingData?.role || "Owner",
+        status: existingData?.status || "ACTIVE",
+        createdAt: existingData?.createdAt || new Date().toISOString(),
+      };
+
+      // 2. Write/repair the user profile
+      await setDoc(doc(db, "users", user.uid), profileData, { merge: true });
+
+      // 3. Ensure enterprise_settings exists
+      const entSettingsRef = doc(db, "enterprise_settings", newEnterpriseId);
+      const entSettingsSnap = await getDoc(entSettingsRef);
+      if (!entSettingsSnap.exists()) {
+        await setDoc(entSettingsRef, {
+          enterpriseName: profileData.enterpriseName,
+          industry: profileData.industry,
+          teamSize: profileData.teamSize,
+          enterprise_id: newEnterpriseId,
+          setupCompleted: true,
+          createdAt: new Date().toISOString(),
+          billing: {
+            planId: "enterprise",
+            userCount: profileData.teamSize === "Just me" ? 1 : 3,
+            branchCount: 1,
+            billingCycle: "monthly",
+            status: "trialing",
+            trialEndsAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+            renewalDate: new Date(Date.now() + 44 * 86400000).toISOString(),
+            paymentMethod: { type: "Visa", last4: "—", expiry: "—" }
+          }
+        });
+
+        // 4. Provision a default branch
+        await addDoc(collection(db, "branches"), {
+          name: "Main Headquarters",
+          status: "ACTIVE",
+          enterprise_id: newEnterpriseId,
+          parish: "Head Office",
+          address: "Primary Business Location",
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      // 5. Clear cached enterprise_id so it re-resolves from Firestore
+      localStorage.removeItem("crm_enterprise_id");
+      toast.success("Workspace ready! Loading your dashboard...");
+      setTimeout(() => window.location.reload(), 1000);
+    } catch (error: any) {
+      console.error("Failed to complete setup", error);
+      toast.error("Failed to create workspace: " + (error.message || "Unknown error"));
+    } finally {
+      setIsProvisioning(false);
+    }
+  };
 
   // ── Step 1: Auth State Listener ─────────────────────────────────
   useEffect(() => {
@@ -214,31 +291,50 @@ function AppContent() {
             <VerificationGate user={user} />
           ) : !enterpriseId ? (
             /* ── Guard 4: Verified but no enterprise profile yet ─────────── */
-            <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
-              <Card className="max-w-md w-full card-modern p-6 sm:p-10 text-center space-y-6">
-                <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto text-amber-500">
-                  <Sparkles className="w-8 h-8" />
+            <div className="min-h-screen flex items-center justify-center bg-zinc-950 p-6">
+              {/* Background gradient */}
+              <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-amber-600/5 rounded-full blur-[120px]" />
+                <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-600/5 rounded-full blur-[100px]" />
+              </div>
+              <Card className="relative max-w-md w-full bg-zinc-900 border-zinc-800 p-6 sm:p-10 text-center space-y-6 rounded-3xl shadow-2xl">
+                <div className="w-16 h-16 bg-amber-500/10 rounded-2xl flex items-center justify-center mx-auto">
+                  <Sparkles className="w-8 h-8 text-amber-400" />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-zinc-900">Workspace not found</h2>
-                  <p className="text-sm text-zinc-500 mt-2">
-                    We couldn't find an enterprise profile linked to <strong>{user.email}</strong>.
-                    This can happen if setup didn't complete. Please try signing out and signing back in,
-                    or contact support.
+                  <h2 className="text-2xl font-bold text-white">Workspace Setup Required</h2>
+                  <p className="text-sm text-zinc-400 mt-3 leading-relaxed">
+                    No enterprise profile was found for <strong className="text-zinc-200">{user.email}</strong>.
+                    Click <strong className="text-amber-400">Complete Setup</strong> to create your workspace now — this only takes a second.
                   </p>
                 </div>
                 <div className="space-y-3">
-                  <Button 
-                    variant="outline" 
-                    className="w-full h-12 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-all"
+                  <Button
+                    className="w-full h-12 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-900 font-bold transition-all active:scale-95 shadow-lg shadow-amber-500/20"
+                    onClick={handleCompleteSetup}
+                    disabled={isProvisioning}
+                  >
+                    {isProvisioning ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-zinc-900/40 border-t-zinc-900 rounded-full animate-spin" />
+                        Creating Workspace...
+                      </span>
+                    ) : "Complete Setup"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="w-full h-10 rounded-xl text-zinc-500 hover:text-zinc-300 font-medium text-sm transition-all"
                     onClick={() => window.location.reload()}
                   >
                     Retry
                   </Button>
-                  <Button 
-                    variant="ghost" 
-                    className="w-full text-zinc-400 text-xs font-medium"
-                    onClick={() => auth.signOut()}
+                  <Button
+                    variant="ghost"
+                    className="w-full text-zinc-600 text-xs font-medium hover:text-zinc-400"
+                    onClick={() => {
+                      localStorage.removeItem("crm_enterprise_id");
+                      auth.signOut();
+                    }}
                   >
                     Sign Out
                   </Button>

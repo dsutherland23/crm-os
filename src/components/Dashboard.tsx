@@ -271,19 +271,24 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
     // 1. Transactions - Limit to most recent 50 for performance
     const txQuery = activeBranch === "all"
-        ? query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(50))
+        ? query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), limit(50))
         : query(
             collection(db, "transactions"),
             where("enterprise_id", "==", enterpriseId),
             where("branch_id", "==", activeBranch),
-            orderBy("timestamp", "desc"),
             limit(50)
           );
 
     const unsubTx = onSnapshot(
       txQuery,
       (snap) => {
-        setTransactions(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        docs.sort((a: any, b: any) => {
+          const tA = a.timestamp?.seconds || 0;
+          const tB = b.timestamp?.seconds || 0;
+          return tB - tA;
+        });
+        setTransactions(docs);
         setLoadingMap((p) => ({ ...p, transactions: false }));
       },
       (err) => {
@@ -329,9 +334,15 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
     // 4. Audit Logs
     const unsubLogs = onSnapshot(
-      query(collection(db, "audit_logs"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(5)),
+      query(collection(db, "audit_logs"), where("enterprise_id", "==", enterpriseId), limit(5)),
       (snap) => {
-        setAuditLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        docs.sort((a: any, b: any) => {
+          const tA = new Date(a.timestamp).getTime() || 0;
+          const tB = new Date(b.timestamp).getTime() || 0;
+          return tB - tA;
+        });
+        setAuditLogs(docs);
         setLoadingMap((p) => ({ ...p, logs: false }));
       },
       (err) => {
@@ -638,7 +649,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                   </div>
                 ) : (
                   <div className="h-[240px] sm:h-[320px] w-full">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 4 }}>
                         <defs>
                           <linearGradient id="colorSalesDash" x1="0" y1="0" x2="0" y2="1">
@@ -725,7 +736,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
         </div>
 
         {/* ── System Activity ──────────────────────────────────── */}
-        {hasPermission("audit_logs") && (
+        {hasPermission("audit") && (
           <Card className="card-modern">
             <CardHeader className="border-b border-zinc-100 p-6 md:p-8">
               <div className="flex items-center justify-between">

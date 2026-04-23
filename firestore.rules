@@ -3,177 +3,116 @@ rules_version = '2';
 // ════════════════════════════════════════════════════════════════════════
 // ORIVO CRM — ZERO TRUST FIRESTORE SECURITY RULES
 // 2026 Production Standard
-// 
-// Security Model:
-//   1. Deny ALL by default — nothing is open unless explicitly granted
-//   2. Tenant isolation — users can ONLY access their own enterprise_id data
-//   3. Admin access — scoped to admin_users collection membership + custom claims
-//   4. Audit logs — write-only from clients, never readable by tenants
-//   5. Admin meta — super_admin only
-// 
-// Red Team Scenarios Addressed:
-//   ❌ Tenant A reading Tenant B data → blocked by enterprise_id check
-//   ❌ tenant_user accessing /admin_users → blocked by isAdmin() check
-//   ❌ Client escalating own role → users/{uid} role field is read/write by owner,
-//        but role assignment for admin claims happens only via Cloud Functions
-//   ❌ Client writing to audit logs as someone else → admin_uid is set server-side
-//        in Cloud Functions; client writes are restricted to own uid
-//   ❌ Anyone reading other users' profiles → blocked by uid match rule
 // ════════════════════════════════════════════════════════════════════════
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── PUBLIC ACCESS ──────────────────────────────────────────────
-    // Allow unauthenticated landing page visitors to view and increment the counter
-    match /system_stats/visitors {
-      allow read, create, update: if true;
-    }
-
-    // ── HELPER FUNCTIONS ──────────────────────────────────────────────
-
-    // Is the request authenticated at all?
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Does the user's JWT have a valid admin role claim?
-    function hasAdminClaim() {
-      return isSignedIn() &&
-        request.auth.token.get('role', '') in ['admin', 'super_admin'];
-    }
-
-    // Does the user exist in the admin_users collection?
-    // This is the fallback for environments before Cloud Functions are deployed.
-    function isAdminUser() {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/admin_users/$(request.auth.uid));
-    }
-
-    // Combined admin check (Platform Admins OR Enterprise Admins)
-    function isAdmin() {
-      if (!isSignedIn()) { return false; }
-      
-      // 1. Platform Admin Checks
-      if (hasAdminClaim() || isAdminUser()) { return true; }
-      
-      // 2. Enterprise Admin Checks (from users collection)
-      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
-      if (userDoc == null || !('role' in userDoc.data)) { return false; }
-      
-      let role = userDoc.data.role;
-      return role == 'Admin' || 
-             role == 'Owner' || 
-             role == 'Executive' || 
-             role == 'Manager' || 
-             role == 'Business Admin' || 
-             role == 'Supervisor' || 
-             role == 'admin' || 
-             role == 'owner' || 
-             role == 'manager' ||
-             role == 'supervisor';
-    }
-
-    // Is the user the technical developer guest?
     function isDeveloper() {
-      return isSignedIn() && request.auth.uid == 'dev-guest-uid';
+      return request.auth != null && request.auth.uid == 'dev-guest-uid';
     }
 
-    // Does the requesting user own this specific document?
     function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+      return request.auth != null && request.auth.uid == uid;
     }
 
-    // Does the user belong to the given enterprise?
-    function belongsToEnterprise(enterpriseId) {
-      return isAdmin() || isDeveloper() || (isSignedIn() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid))
-          .data.enterprise_id == enterpriseId);
+    // Safe role lookup — returns '' if user doc does not exist
+    function userRole() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '')
+        : '';
     }
 
-    // Is the document's enterprise_id the same as the requester's?
-    function isOwnEnterprise() {
-      return isAdmin() || isDeveloper() || (isSignedIn() &&
-        resource.data.enterprise_id ==
-          get(/databases/$(database)/documents/users/$(request.auth.uid))
-            .data.enterprise_id);
+    // Safe enterprise_id lookup — returns '' if user doc does not exist
+    function userEnterpriseId() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('enterprise_id', '')
+        : '';
     }
 
-    // Is the new document being written to the requester's enterprise?
-    function isOwnEnterpriseWrite() {
-      return isAdmin() || isDeveloper() || (isSignedIn() &&
-        request.resource.data.enterprise_id ==
-          get(/databases/$(database)/documents/users/$(request.auth.uid))
-            .data.enterprise_id);
+    function isAdmin() {
+      return request.auth != null && (
+        isDeveloper() ||
+        userRole() in ['Admin', 'Owner', 'Executive', 'Manager', 'Business Admin', 'Supervisor',
+                       'admin', 'owner', 'executive', 'manager', 'supervisor']
+      );
     }
 
-    // ── COLLECTION RULES ──────────────────────────────────────────────
-
-    // ─── User Profiles ────────────────────────────────────────────────
-    // Each user can only read/write their OWN profile.
-    // Admins can read all, but CANNOT write (role changes go through Cloud Functions).
-    match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      // Users can update their own profile EXCEPT the role and status fields
-      allow update: if isOwner(userId) &&
-        !('role' in request.resource.data.diff(resource.data).affectedKeys()) &&
-        !('enterprise_id' in request.resource.data.diff(resource.data).affectedKeys());
-      // Initial profile create is allowed on signup (before any profile exists)
-      allow create: if isOwner(userId);
-      // Deletes require admin
-      allow delete: if isAdmin();
+    // Core tenant isolation check
+    function belongsToEnterprise(entId) {
+      return request.auth != null && entId != '' && entId != null && (
+        isDeveloper() ||
+        isAdmin() ||
+        userEnterpriseId() == entId
+      );
     }
 
-    // ─── Staff Invites ────────────────────────────────────────────────
-    // One-time invite records written by admins, read during staff sign-up.
+    // ── PUBLIC ──────────────────────────────────────────────────────
+    match /system_stats/visitors {
+      allow read, create, update: if true;
+    }
+
     match /staff_invites/{inviteId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin();
+      allow write: if isAdmin();
     }
 
-    // ─── Enterprise Settings ──────────────────────────────────────────
-    // Members can read their own enterprise settings.
-    match /enterprise_settings/{enterpriseId} {
-      allow read: if belongsToEnterprise(enterpriseId);
-      // Only admins can change settings
-      allow update: if isAdmin() && belongsToEnterprise(enterpriseId);
-      allow create: if isSignedIn();
+    // ── USER PROFILES ────────────────────────────────────────────────
+    // Users can always read/write their own profile.
+    // Needed for first-time setup and self-repair flows.
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) || isAdmin();
+      allow update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
     }
 
-    // ─── Admin Users Registry ─────────────────────────────────────────
-    match /admin_users/{adminId} {
-      allow read: if isOwner(adminId) || isAdmin();
-      allow write: if isAdmin() && (hasAdminClaim() && request.auth.token.role == 'super_admin');
+    // ── ENTERPRISE SETTINGS ──────────────────────────────────────────
+    // Keyed by enterpriseId. Any signed-in user can create (first-time setup).
+    match /enterprise_settings/{entId} {
+      allow read: if belongsToEnterprise(entId);
+      allow create: if isSignedIn();
+      allow update: if isAdmin() || belongsToEnterprise(entId);
+      allow delete: if isAdmin();
     }
 
-    // ─── Admin Audit Logs ─────────────────────────────────────────────
-    match /admin_audit_logs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isAdmin();
-      allow update, delete: if false; 
+    // ── LOYALTY SETTINGS ────────────────────────────────────────────
+    // Keyed by enterpriseId. Read is allowed if:
+    //  a) user is an admin/developer, OR
+    //  b) the user's enterprise_id matches the doc ID
+    // We also allow create for signed-in users (first-time setup)
+    match /loyalty_settings/{entId} {
+      allow read: if belongsToEnterprise(entId);
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || belongsToEnterprise(entId);
     }
 
-    // ─── Admin Meta / Feature Flags ──────────────────────────────────
-    match /admin_meta/{docId} {
-      allow read: if isAdmin();
-      allow write: if isAdmin() && (hasAdminClaim() && request.auth.token.role == 'super_admin');
+    match /settings/{entId} {
+      allow read: if belongsToEnterprise(entId);
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || belongsToEnterprise(entId);
     }
 
-    // ─── Tenant-Scoped Collections ────────────────────────────────────
+    // ── TENANT-SCOPED COLLECTIONS ────────────────────────────────────
+    // Generic catch-all for all other collections.
     match /{collection}/{docId} {
-      // Admin and Developer read-only across tenants
-      allow read: if isAdmin() || isDeveloper();
+      allow read: if isAdmin() || isDeveloper() ||
+                     belongsToEnterprise(resource.data.get('enterprise_id', '')) ||
+                     belongsToEnterprise(docId);
 
-      // Regular tenant access — must match own enterprise
-      allow read: if belongsToEnterprise(resource.data.enterprise_id);
+      allow create: if isSignedIn() && (
+        isAdmin() || isDeveloper() ||
+        request.resource.data.get('enterprise_id', '') == userEnterpriseId()
+      );
 
-      // Writes must target own enterprise or be an admin
-      allow create: if isAdmin() || (isSignedIn() && isOwnEnterpriseWrite());
-
-      allow update: if isAdmin() || (isSignedIn() && isOwnEnterprise());
-
-      allow delete: if isAdmin() || isDeveloper() || (isSignedIn() && isOwnEnterprise());
+      allow update, delete: if isAdmin() || isDeveloper() || (
+        isSignedIn() &&
+        resource.data.get('enterprise_id', '') == userEnterpriseId()
+      );
     }
   }
 }

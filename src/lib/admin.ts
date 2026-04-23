@@ -32,7 +32,7 @@ export async function getAdminClaims(): Promise<AdminClaims | null> {
     // (used during development before Cloud Functions are deployed)
     const adminDoc = await getDoc(doc(db, "admin_users", user.uid));
     if (adminDoc.exists()) {
-      const data = adminDoc.data();
+      const data = adminDoc.data() as any;
       if (data.role === "super_admin" || data.role === "admin") {
         return {
           role: data.role as AdminRole,

@@ -184,13 +184,19 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
     const q = query(
       collection(db, "audit_logs"),
       where("enterprise_id", "==", enterpriseId),
-      orderBy("timestamp", "desc"),
-      limit(100)
+      limit(200)
     );
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        setLogs(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LogEntry)));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as LogEntry));
+        // Sort locally to avoid index requirement
+        docs.sort((a, b) => {
+          const tA = getLogDate(a.timestamp)?.getTime() || 0;
+          const tB = getLogDate(b.timestamp)?.getTime() || 0;
+          return tB - tA;
+        });
+        setLogs(docs.slice(0, 100));
         setLoading(false);
         setRetrying(false);
       },

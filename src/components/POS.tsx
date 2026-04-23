@@ -195,7 +195,7 @@ export default function POS() {
           rewardValue: data.rewardValue || 5
         });
       }
-    }, (err) => console.error("loyalty_settings sync error:", err));
+    }, () => { /* silently use defaults if loyalty_settings not accessible */ });
     return () => unsub();
   }, [enterpriseId]);
 
@@ -221,12 +221,17 @@ export default function POS() {
     const q = query(
       collection(db, "pos_sessions"),
       where("enterprise_id", "==", enterpriseId),
-      orderBy("startTime", "desc"),
-      limit(20)
+      limit(50)
     );
     
     const unsub = onSnapshot(q, (snapshot) => {
-      setShiftHistory(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      docs.sort((a, b) => {
+        const tA = new Date(a.startTime).getTime() || 0;
+        const tB = new Date(b.startTime).getTime() || 0;
+        return tB - tA;
+      });
+      setShiftHistory(docs.slice(0, 20));
     });
     
     return () => unsub();
@@ -485,7 +490,7 @@ export default function POS() {
       const existing = prev.find(item => item.product.id === product.id);
       if (existing) {
         if (existing.quantity >= stock) {
-          toast.warn("Maximum available stock reached");
+          toast.warning("Maximum available stock reached");
           return prev;
         }
         return prev.map(item => 

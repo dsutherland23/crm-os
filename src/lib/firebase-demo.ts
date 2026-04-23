@@ -82,7 +82,8 @@ export async function mockGetDocs(query: any) {
       id: d.id || "mock-id", 
       ref: { id: d.id || "mock-id", path: `${colName}/${d.id || 'mock-id'}` },
       data: () => d 
-    }))
+    })),
+    forEach: function(cb: any) { this.docs.forEach(cb); }
   };
 }
 
