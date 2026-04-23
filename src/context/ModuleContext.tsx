@@ -196,10 +196,6 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     setBrandingState(prev => ({ ...prev, ...update }));
   };
 
-  const setBranding = (update: Partial<BrandingConfig>) => {
-    setBrandingState(prev => ({ ...prev, ...update }));
-  };
-
   useEffect(() => {
     localStorage.setItem("crm_os_modules", JSON.stringify(config));
   }, [config]);
