@@ -181,6 +181,13 @@ export default function Auth() {
   const [enterpriseSlug, setEnterpriseSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isShaking, setIsShaking] = useState(false);
+
+  const triggerError = (newErrors: Record<string, string>) => {
+    setErrors(newErrors);
+    setIsShaking(true);
+    setTimeout(() => setIsShaking(false), 500);
+  };
 
   const strength = getPasswordStrength(password);
 
@@ -205,8 +212,10 @@ export default function Auth() {
       if (!enterpriseName.trim()) errs.enterpriseName = "Enterprise name is required";
       if (!enterpriseSlug.trim()) errs.enterpriseSlug = "Workspace ID is required";
     }
-    setErrors(errs);
-    return Object.keys(errs).length === 0;
+    const valid = Object.keys(errs).length === 0;
+    if (!valid) triggerError(errs);
+    else setErrors({});
+    return valid;
   };
 
   // ─── Google Sign-In ─────────────────────────────────────────────
@@ -254,11 +263,11 @@ export default function Auth() {
     } catch (error: any) {
       const code = error.code;
       if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
-        toast.error("Invalid email or password. Please try again.");
+        triggerError({ auth: "Invalid email or password. Please try again." });
       } else if (code === "auth/too-many-requests") {
-        toast.error("Too many attempts. Please wait a few minutes.");
+        triggerError({ auth: "Too many attempts. Please wait a few minutes." });
       } else {
-        toast.error(error.message || "Sign in failed.");
+        triggerError({ auth: error.message || "Sign in failed." });
       }
     } finally {
       setLoading(false);
@@ -705,7 +714,10 @@ export default function Auth() {
       <div className="flex-1 flex flex-col items-center justify-start lg:justify-center p-6 sm:p-10 lg:p-16 bg-zinc-50 relative overflow-y-auto">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#f0f0f0_1px,transparent_1px),linear-gradient(to_bottom,#f0f0f0_1px,transparent_1px)] bg-[size:40px_40px] opacity-50 pointer-events-none" />
 
-        <div className="w-full max-w-[420px] relative z-10 space-y-6 pt-4 pb-12 lg:py-8">
+        <div className={cn(
+          "w-full max-w-[420px] relative z-10 space-y-6 pt-4 pb-12 lg:py-8",
+          isShaking && "animate-shake"
+        )}>
 
           {/* Mobile logo */}
           <div className="flex items-center gap-3 lg:hidden">
@@ -750,6 +762,14 @@ export default function Auth() {
               >
                 Staff Portal
               </button>
+            </div>
+          )}
+
+          {/* Global Auth Error */}
+          {errors.auth && (
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-100 flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+              <XCircle className="w-4 h-4 text-rose-500 shrink-0" />
+              <p className="text-[11px] font-bold text-rose-700 leading-tight">{errors.auth}</p>
             </div>
           )}
 
