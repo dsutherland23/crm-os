@@ -106,7 +106,13 @@ const JAMAICA_PARISHES = [
 import { ScrollArea } from "@/components/ui/scroll-area";
 import AuditLogs from "./AuditLogs";
 
-export default function Settings() {
+export default function Settings({ defaultTab = "modules" }: { defaultTab?: string }) {
+  const [activeTab, setActiveTab] = useState(defaultTab);
+
+  useEffect(() => {
+    setActiveTab(defaultTab);
+  }, [defaultTab]);
+
   const { 
     config, 
     toggleModule, 
@@ -689,7 +695,7 @@ export default function Settings() {
         <p className="text-zinc-500">Global preferences, branch management, and enterprise-grade security controls.</p>
       </div>
 
-      <Tabs defaultValue="modules" className="space-y-8">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
         <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
           <TabsList className="bg-zinc-100 p-1 rounded-2xl border border-zinc-200 flex w-max gap-1">
             <TabsTrigger value="modules" className="rounded-xl px-4 py-2 data-[state=active]:bg-white data-[state=active]:shadow-sm font-bold text-xs shrink-0">Modules</TabsTrigger>

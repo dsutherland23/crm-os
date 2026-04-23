@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Sidebar, Header } from "./components/Layout";
 import { Toaster } from "@/components/ui/sonner";
+import PWAInstallPrompt from "@/components/PWAInstallPrompt";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, db, doc, onSnapshot } from "@/lib/firebase";
 import { getMockUser } from "./lib/auth-mock";
@@ -51,6 +52,7 @@ function AppContent() {
   if (isAdminRoute) return <AdminPortal />;
   if (isSocialRoute) return <SocialHub />;
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [settingsTab, setSettingsTab] = useState("modules");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null | undefined>(undefined); // undefined = still loading
   const [enterpriseLoading, setEnterpriseLoading] = useState(true);
@@ -143,7 +145,7 @@ function AppContent() {
       case "workflow":  return hasPermission("workflow")  ? <Workflow />  : fallback;
       case "audit":     return hasPermission("audit")     ? <AuditLogs /> : fallback;
       case "ai":        return hasPermission("ai")        ? <AIInsights /> : fallback;
-      case "settings":  return hasPermission("settings", "admin") ? <Settings /> : fallback;
+      case "settings":  return hasPermission("settings", "admin") ? <Settings defaultTab={settingsTab} /> : fallback;
       case "staff":     return hasPermission("staff", "admin")    ? <StaffManager /> : fallback;
       case "support":   return <Support />;
       default:          return fallback;
@@ -251,7 +253,10 @@ function AppContent() {
       <div className="lg:pl-72 flex flex-col h-screen">
         <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} />
 
-        <TrialBanner onUpgrade={() => { setActiveTab("settings"); }} />
+        <TrialBanner onUpgrade={() => { 
+          setSettingsTab("billing");
+          setActiveTab("settings"); 
+        }} />
 
         <main className="flex-1 overflow-x-hidden overflow-y-auto">
           {renderContent()}
@@ -273,6 +278,7 @@ function AppContent() {
       )}
 
       <Toaster position="top-right" />
+      <PWAInstallPrompt />
     </div>
   );
 }
