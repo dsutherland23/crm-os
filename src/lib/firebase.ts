@@ -10,7 +10,7 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-});
+}, firebaseConfig.firestoreDatabaseId);
 
 // Toggle this to switch between Live and Mock databases
 const USE_LIVE_DB = true; 
