@@ -46,7 +46,24 @@ interface ModuleContextType {
   userRole: string | null;
   rolePermissions: Record<string, string | boolean> | null;
   hasPermission: (moduleId: string, level?: "viewer" | "editor" | "admin") => boolean;
+  billing: BillingConfig;
+  updateBilling: (update: Partial<BillingConfig>) => Promise<void>;
   logout: () => Promise<void>;
+}
+
+export interface BillingConfig {
+  planId: string;
+  userCount: number;
+  branchCount: number;
+  billingCycle: "monthly" | "yearly";
+  renewalDate: string;
+  paymentMethod: {
+    type: string;
+    last4: string;
+    expiry: string;
+  };
+  status: "active" | "past_due" | "canceled" | "trialing";
+  trialEndsAt?: string;
 }
 
 export interface BrandingConfig {
@@ -118,6 +135,17 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     return saved ? JSON.parse(saved) : DEFAULT_BRANDING;
   });
 
+  const [billing, setBillingState] = useState<BillingConfig>({
+    planId: "business-pro",
+    userCount: 3,
+    branchCount: 1,
+    billingCycle: "monthly",
+    renewalDate: new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString(),
+    paymentMethod: { type: "Visa", last4: "4242", expiry: "08/27" },
+    status: "trialing",
+    trialEndsAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+  });
+
   const [enterpriseId, setEnterpriseId] = useState<string | null>(() => {
     return localStorage.getItem("crm_enterprise_id") || null;
   });
@@ -132,6 +160,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
          if (data.branding) setBrandingState(data.branding);
          if (data.topSpenderThreshold !== undefined) setTopSpenderThreshold(Number(data.topSpenderThreshold));
          if (data.currency) setCurrency(data.currency);
+         if (data.billing) setBillingState(data.billing);
        }
     });
 
@@ -322,6 +351,23 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     }).format(amount);
   };
 
+  const updateBilling = async (update: Partial<BillingConfig>) => {
+    const newBilling = { ...billing, ...update };
+    setBillingState(newBilling);
+    
+    if (enterpriseId) {
+      try {
+        const { setDoc, doc, serverTimestamp } = await import("@/lib/firebase");
+        await setDoc(doc(db, "enterprise_settings", enterpriseId), {
+          billing: newBilling,
+          billingUpdated: serverTimestamp()
+        }, { merge: true });
+      } catch (err) {
+        console.error("Failed to sync billing:", err);
+      }
+    }
+  };
+
   return (
     <ModuleContext.Provider value={{ 
       config, 
@@ -356,6 +402,8 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       setUserRole,
       rolePermissions,
       hasPermission,
+      billing,
+      updateBilling,
       logout
     }}>
       {children}

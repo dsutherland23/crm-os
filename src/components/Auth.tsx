@@ -77,9 +77,9 @@ const INDUSTRIES = [
 ];
 const TEAM_SIZES = ["Just me", "2–10", "11–50", "51–200", "200+"];
 const STEPS = [
-  { label: "Access", desc: "Secure your account" },
-  { label: "Profile", desc: "Tell us about yourself" },
-  { label: "Enterprise", desc: "Set up your workspace" },
+  { label: "Account", desc: "Start your 14-day free trial" },
+  { label: "Identity", desc: "Personalize your experience" },
+  { label: "Workspace", desc: "Build your enterprise engine" },
 ];
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -109,6 +109,16 @@ async function provisionEnterprise(uid: string, data: {
     enterprise_id: data.enterpriseId,
     setupCompleted: true,
     createdAt: new Date().toISOString(),
+    billing: {
+      planId: "starter",
+      userCount: data.teamSize === "Just me" ? 1 : 3,
+      branchCount: 1,
+      billingCycle: "monthly",
+      status: "trialing",
+      trialEndsAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+      renewalDate: new Date(Date.now() + 44 * 86400000).toISOString(), // 14 days trial + 30 days
+      paymentMethod: { type: "Visa", last4: "—", expiry: "—" }
+    }
   }, { merge: true });
 
   // Provision an initial branch so the system is functional immediately
@@ -239,8 +249,7 @@ export default function Auth() {
         });
       }
       toast.success("Welcome to Orivo CRM!");
-      // App.tsx onSnapshot listener will pick up profile and navigate automatically
-      window.location.reload();
+      // The onAuthStateChanged listener in App.tsx will handle the state transition
     } catch (error: any) {
       if (error.code === "auth/popup-blocked") {
         toast.error("Popup blocked. Please allow popups for this site.");
@@ -260,7 +269,6 @@ export default function Auth() {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       toast.success("Welcome back!");
-      window.location.reload();
     } catch (error: any) {
       const code = error.code;
       if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
@@ -286,7 +294,6 @@ export default function Auth() {
       try {
         await signInWithEmailAndPassword(auth, cleanEmail, password);
         toast.success("Welcome back!");
-        window.location.reload();
         return;
       } catch (signInErr: any) {
         // Only continue to activation if it's a "not found" error
@@ -434,7 +441,6 @@ export default function Auth() {
             await deleteDoc(doc(db, "staff_invites", inviteId));
 
             toast.success(`Welcome, ${data.fullName}! Access granted to ${data.enterpriseName}.`);
-            window.location.reload();
             return;
           } catch (authErr: any) {
             if (authErr.code === "auth/email-already-in-use") {
@@ -668,9 +674,9 @@ export default function Auth() {
         {/* Hero */}
         <div className="relative z-10 space-y-8">
           <div className="space-y-4">
-            <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5 text-[10px] font-bold text-white/70 uppercase tracking-widest">
-              <Sparkles className="w-3 h-3 text-blue-400" />
-              AI-Native Enterprise Platform
+            <div className="inline-flex items-center gap-2 bg-emerald-500/20 border border-emerald-500/30 rounded-full px-4 py-1.5 text-[10px] font-black text-emerald-300 uppercase tracking-widest">
+              <Zap className="w-3 h-3 text-emerald-400" />
+              14-Day Free Trial · Full Access
             </div>
             <h2 className="text-5xl xl:text-6xl font-black text-white leading-[1.05] tracking-tight">
               The CRM that<br />
@@ -679,7 +685,7 @@ export default function Auth() {
               </span>
             </h2>
             <p className="text-zinc-400 text-lg leading-relaxed max-w-sm">
-              Unified intelligence across sales, inventory, revenue, and operations — built for modern enterprises.
+              Unified intelligence across sales, inventory, revenue, and operations — and it starts with a two-week free run.
             </p>
           </div>
 
@@ -1066,7 +1072,7 @@ export default function Auth() {
                   {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : step < STEPS.length ? (
                     <>Continue <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-0.5 transition-transform" /></>
                   ) : (
-                    <>Launch Enterprise <Sparkles className="w-4 h-4 ml-2" /></>
+                    <>Activate 14-Day Free Trial <Sparkles className="w-4 h-4 ml-2" /></>
                   )}
                 </Button>
               </div>
@@ -1081,7 +1087,7 @@ export default function Auth() {
               className="text-sm text-zinc-500 hover:text-zinc-900 font-medium transition-colors"
             >
               {isLogin ? (
-                <span>Don't have an account? <span className="font-bold text-zinc-900 underline underline-offset-2">Create one free</span></span>
+                <span>Don't have an account? <span className="font-bold text-zinc-900 underline underline-offset-2">Start your 14-day free trial</span></span>
               ) : (
                 <span>Already have an account? <span className="font-bold text-zinc-900 underline underline-offset-2">Sign in</span></span>
               )}

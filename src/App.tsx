@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import AuthActionHandler from "./components/AuthActionHandler";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { TrialBanner } from "@/components/ui/trial-banner";
 
 function AppContent() {
   // Navigate to /#/admin or append ?admin=1 to access the portal
@@ -67,10 +68,17 @@ function AppContent() {
     }
 
     const unsub = onAuthStateChanged(auth, (fbUser) => {
-      setUser(fbUser); // null = logged out, User = logged in
+      setUser(fbUser);
       if (!fbUser) {
         setEnterpriseId(null);
         setEnterpriseLoading(false);
+      } else {
+        // Optimistic Hydration: If we have a cached ID, stop the loader early
+        const cachedId = localStorage.getItem("crm_enterprise_id");
+        if (cachedId) {
+          setEnterpriseId(cachedId);
+          setEnterpriseLoading(false);
+        }
       }
     });
     return () => unsub();
@@ -242,6 +250,8 @@ function AppContent() {
 
       <div className="lg:pl-72 flex flex-col h-screen">
         <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} />
+
+        <TrialBanner onUpgrade={() => { setActiveTab("settings"); }} />
 
         <main className="flex-1 overflow-x-hidden overflow-y-auto">
           {renderContent()}

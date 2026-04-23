@@ -269,15 +269,15 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     setLoadingMap({ transactions: true, customers: true, inventory: true, logs: true });
     setErrorMap({ transactions: null, customers: null, inventory: null, logs: null });
 
-    // 1. Transactions
+    // 1. Transactions - Limit to most recent 50 for performance
     const txQuery = activeBranch === "all"
-        ? query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(100))
+        ? query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(50))
         : query(
             collection(db, "transactions"),
             where("enterprise_id", "==", enterpriseId),
             where("branch_id", "==", activeBranch),
             orderBy("timestamp", "desc"),
-            limit(100)
+            limit(50)
           );
 
     const unsubTx = onSnapshot(
@@ -293,9 +293,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
       }
     );
 
-    // 2. Customers
+    // 2. Customers - Limit to 10 for "Recent" visibility only (Dashboard doesn't need all)
+    // Note: Real-time total counts should ideally come from a stats document
     const unsubCustomers = onSnapshot(
-      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId)),
+      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(10)),
       (snap) => {
         setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
         setLoadingMap((p) => ({ ...p, customers: false }));
@@ -307,11 +308,11 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
       }
     );
 
-    // 3. Inventory
+    // 3. Inventory - Limit to 50 for "Low Stock" visibility
     const invQuery =
       activeBranch === "all"
-        ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId))
-        : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch));
+        ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(50))
+        : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch), limit(50));
 
     const unsubInv = onSnapshot(
       invQuery,
