@@ -9,7 +9,7 @@ import * as demoFs from './firebase-demo';
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = initializeFirestore(app, {
-  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+  localCache: persistentLocalCache({})
 }, firebaseConfig.firestoreDatabaseId);
 
 // Toggle this to switch between Live and Mock databases
@@ -79,16 +79,16 @@ export const getDownloadURL = (ref: any) => storageFs.getDownloadURL(ref);
 
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Firestore connection successful");
+    const testDoc = await getDocFromServer(doc(db, 'system_stats', 'visitors'));
+    console.log("Orivo Engine: Firestore connection established", {
+      dbId: firebaseConfig.firestoreDatabaseId,
+      source: testDoc.metadata.fromCache ? 'cache' : 'server'
+    });
   } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. The client is offline.");
-    }
-    // Skip logging for other errors, as this is simply a connection test.
+    console.warn("Orivo Engine: Operating in Offline/Cache mode", error);
   }
 }
-// testConnection();
+testConnection();
 
 export enum OperationType {
   CREATE = 'create',
