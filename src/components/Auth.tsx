@@ -8,7 +8,9 @@ import {
   sendEmailVerification,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import { auth, db, doc, setDoc, getDoc, updateDoc, increment, onSnapshot } from "@/lib/firebase";
+import { auth, db, doc, setDoc, getDoc, updateDoc, increment, onSnapshot, deleteDoc } from "@/lib/firebase";
+import * as fs from "firebase/firestore";
+// Use the standard db instance from lib/firebase which handles both live and mock modes correctly.
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FlipCountdown } from "@/components/ui/flip-countdown";
@@ -127,6 +129,7 @@ export default function Auth() {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [signedUpEmail, setSignedUpEmail] = useState("");
+  const [isStaffMode, setIsStaffMode] = useState(false);
 
   // Form fields
   const [email, setEmail] = useState("");
@@ -262,6 +265,107 @@ export default function Auth() {
     }
   };
 
+  // ─── Staff Login (handles both first-time activation and returning logins) ──
+  const handleStaffLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateStep(1)) return;
+    setLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      // 1. Try signing in directly (works for returning staff who already activated)
+      try {
+        await signInWithEmailAndPassword(auth, cleanEmail, password);
+        toast.success("Welcome back!");
+        window.location.reload();
+        return;
+      } catch (signInErr: any) {
+        // Only continue to activation if it's a "not found" error
+        if (signInErr.code !== "auth/user-not-found" && signInErr.code !== "auth/invalid-credential") {
+          // Wrong password, too many attempts, etc.
+          toast.error(signInErr.message || "Login failed.");
+          return;
+        }
+      }
+
+      // 2. No Firebase account yet — check for a pending staff invite
+      const inviteId = cleanEmail.replace(/[^a-z0-9]/g, '_');
+      const inviteSnap = await fs.getDoc(fs.doc(db, "staff_invites", inviteId));
+
+      if (!inviteSnap.exists()) {
+        toast.error("Access Denied", { 
+          description: "No invitation found for this email. Please ask your administrator to 'Provision Portal Identity' in the Staff Manager." 
+        });
+        return;
+      }
+
+      const inviteData = inviteSnap.data();
+      if (inviteData.status !== "PENDING_ACTIVATION") {
+        toast.error("Invite already used or expired.");
+        return;
+      }
+
+      // 3. Create the Firebase Auth account
+      const { user } = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+
+      // 4. Write the final user profile (for Web Portal access)
+      await fs.setDoc(fs.doc(db, "users", user.uid), {
+        fullName: inviteData.fullName,
+        email: cleanEmail,
+        role: inviteData.role,
+        enterprise_id: inviteData.enterprise_id,
+        enterpriseName: inviteData.enterpriseName,
+        status: "ACTIVE",
+        activatedAt: new Date().toISOString(),
+      });
+
+      // 5. Link/Create the Staff record (for POS Terminal access)
+      // Check if a staff record already exists for this email
+      const staffQuery = fs.query(
+        fs.collection(db, "staff"), 
+        fs.where("email", "==", cleanEmail),
+        fs.where("enterprise_id", "==", inviteData.enterprise_id)
+      );
+      const staffSnap = await fs.getDocs(staffQuery);
+
+      if (!staffSnap.empty) {
+        // Update existing record with the new UID
+        await fs.updateDoc(fs.doc(db, "staff", staffSnap.docs[0].id), {
+          id: user.uid,
+          status: "ACTIVE",
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        // Create new staff record
+        await fs.addDoc(fs.collection(db, "staff"), {
+          id: user.uid,
+          name: inviteData.fullName,
+          email: cleanEmail,
+          role: inviteData.role,
+          status: "ACTIVE",
+          enterprise_id: inviteData.enterprise_id,
+          createdAt: new Date().toISOString(),
+          pin: "0000" // Default PIN, staff should change this in settings
+        });
+      }
+
+      // 6. Clean up the one-time invite
+      await fs.deleteDoc(fs.doc(db, "staff_invites", inviteId));
+
+      toast.success(`Welcome, ${inviteData.fullName}! Your account is now active.`);
+      window.location.reload();
+    } catch (error: any) {
+      if (error.code === "auth/email-already-in-use") {
+        toast.error("Account exists. Please check your password and try again.");
+      } else if (error.code === "auth/weak-password") {
+        toast.error("Password must be at least 6 characters.");
+      } else {
+        toast.error(error.message || "Staff login failed.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ─── Forgot Password ─────────────────────────────────────────────
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,8 +375,12 @@ export default function Auth() {
     }
     setLoading(true);
     try {
-      await sendPasswordResetEmail(auth, email);
-      toast.success("Password reset email sent! Check your inbox.");
+      const actionCodeSettings = {
+        url: window.location.origin,
+        handleCodeInApp: true,
+      };
+      await sendPasswordResetEmail(auth, email, actionCodeSettings);
+      toast.success("Reset link sent! Check your email.");
       setScreen("login");
     } catch (error: any) {
       toast.error("Couldn't send reset email. Check the address and try again.");
@@ -286,7 +394,62 @@ export default function Auth() {
     e.preventDefault();
     if (!validateStep(step)) return;
 
-    // Steps 1 & 2: advance wizard
+    // Step 1 transition: Check for pre-provisioned staff accounts
+    if (step === 1) {
+      setLoading(true);
+      try {
+        const cleanEmail = email.trim().toLowerCase();
+        // Match the exact same ID formula used in StaffManager.handleInviteToPortal
+        const inviteId = cleanEmail.replace(/[^a-z0-9]/g, '_');
+        const inviteDoc = await getDoc(doc(db, "staff_invites", inviteId));
+
+        if (inviteDoc.exists() && inviteDoc.data().status === "PENDING_ACTIVATION") {
+          const data = inviteDoc.data();
+
+          try {
+            const { user } = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+
+            // Write the final active profile under the real Firebase UID
+            await setDoc(doc(db, "users", user.uid), {
+              fullName: data.fullName,
+              email: cleanEmail,
+              role: data.role,
+              enterprise_id: data.enterprise_id,
+              enterpriseName: data.enterpriseName,
+              status: "ACTIVE",
+              activatedAt: new Date().toISOString(),
+            });
+
+            // Delete the one-time invite record
+            await deleteDoc(doc(db, "staff_invites", inviteId));
+
+            toast.success(`Welcome, ${data.fullName}! Access granted to ${data.enterpriseName}.`);
+            window.location.reload();
+            return;
+          } catch (authErr: any) {
+            if (authErr.code === "auth/email-already-in-use") {
+              toast.error("This email is already registered. Please sign in instead.");
+              setScreen("login");
+            } else if (authErr.code === "auth/weak-password") {
+              toast.error("Password must be at least 6 characters.");
+            } else {
+              toast.error(authErr.message || "Failed to activate staff account.");
+            }
+            return;
+          }
+        }
+      } catch (err) {
+        // Firestore read failed — fall through to normal signup
+        console.warn("Staff invite lookup failed:", err);
+      } finally {
+        setLoading(false);
+      }
+
+      setStep(step + 1);
+      return;
+    }
+
+    // Step 2 transition
     if (step < STEPS.length) {
       setStep(step + 1);
       return;
@@ -309,10 +472,14 @@ export default function Auth() {
         teamSize,
       });
 
-      // 3. Send verification email
+      // 3. Send verification email with custom redirect
       try {
-        await sendEmailVerification(user);
-      } catch {
+        const actionCodeSettings = {
+          url: window.location.origin,
+          handleCodeInApp: true,
+        };
+        await sendEmailVerification(user, actionCodeSettings);
+      } catch (error: any) {
         // Non-fatal — profile was already written, user can resend later
         console.warn("Verification email failed to send (non-fatal)");
       }
@@ -560,13 +727,43 @@ export default function Auth() {
             </div>
           </div>
 
+          {/* Admin / Staff tab toggle — login screen only */}
+          {isLogin && (
+            <div className="flex items-center bg-zinc-200/80 rounded-xl p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => { setIsStaffMode(false); setErrors({}); }}
+                className={cn(
+                  "flex-1 h-9 rounded-lg text-xs font-bold transition-all",
+                  !isStaffMode ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
+                )}
+              >
+                Admin / Owner
+              </button>
+              <button
+                type="button"
+                onClick={() => { setIsStaffMode(true); setErrors({}); }}
+                className={cn(
+                  "flex-1 h-9 rounded-lg text-xs font-bold transition-all",
+                  isStaffMode ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
+                )}
+              >
+                Staff Portal
+              </button>
+            </div>
+          )}
+
           {/* Heading */}
           <div className="space-y-2 text-center">
             <h1 className="text-3xl sm:text-4xl font-black text-zinc-900 tracking-tight leading-tight uppercase">
-              {isLogin ? "Welcome back" : STEPS[step - 1].label}
+              {isLogin ? (isStaffMode ? "Staff Login" : "Welcome back") : STEPS[step - 1].label}
             </h1>
             <p className="text-zinc-500 text-sm font-medium">
-              {isLogin ? "Sign in to access your enterprise dashboard." : STEPS[step - 1].desc}
+              {isLogin
+                ? isStaffMode
+                  ? "Sign in with your provisioned staff credentials."
+                  : "Sign in to access your enterprise dashboard."
+                : STEPS[step - 1].desc}
             </p>
           </div>
 
@@ -599,7 +796,7 @@ export default function Auth() {
 
           {/* ── LOGIN FORM ────────────────────────────────── */}
           {isLogin && (
-            <form onSubmit={handleSignIn} className="space-y-4" noValidate>
+            <form onSubmit={isStaffMode ? handleStaffLogin : handleSignIn} className="space-y-4" noValidate>
               <div className="space-y-1.5">
                 <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">Email Address</label>
                 <div className="relative">
@@ -644,28 +841,42 @@ export default function Auth() {
                 {errors.password && <p className="text-[11px] text-rose-500 font-medium">{errors.password}</p>}
               </div>
 
-              <Button type="submit" disabled={loading} className="w-full h-12 rounded-xl bg-zinc-900 text-white font-bold hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 hover:scale-[1.01] active:scale-[0.99] transition-all group">
-                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <>Access Dashboard <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-0.5 transition-transform" /></>}
+              <Button type="submit" disabled={loading} className={cn("w-full h-12 rounded-xl font-bold shadow-lg hover:scale-[1.01] active:scale-[0.99] transition-all group", isStaffMode ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20" : "bg-zinc-900 hover:bg-zinc-800 text-white shadow-zinc-900/20")}>
+                {loading
+                  ? <RefreshCw className="w-4 h-4 animate-spin" />
+                  : isStaffMode
+                    ? <><Shield className="w-4 h-4 mr-2" />Sign In to Staff Portal<ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-0.5 transition-transform" /></>
+                    : <>Access Dashboard <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-0.5 transition-transform" /></>}
               </Button>
 
-              <div className="relative my-1">
-                <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-200" /></div>
-                <div className="relative flex justify-center"><span className="bg-zinc-50 px-4 text-[10px] font-bold text-zinc-400 uppercase tracking-[0.15em]">or continue with</span></div>
-              </div>
+              {isStaffMode && (
+                <p className="text-center text-[11px] text-zinc-400 font-medium">
+                  First time? Your admin must <span className="font-bold text-zinc-600">Provision Portal Identity</span> for you first.
+                </p>
+              )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <Button type="button" variant="outline" onClick={handleGoogleLogin} disabled={loading} className="h-11 rounded-xl border-zinc-200 bg-white font-bold text-zinc-700 hover:bg-zinc-50 transition-all">
-                  <svg className="w-4 h-4 mr-2 shrink-0" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-                  Google
-                </Button>
-                <Button type="button" variant="outline" onClick={() => toast.info("Microsoft SSO coming soon.")} className="h-11 rounded-xl border-zinc-200 bg-white font-bold text-zinc-700 hover:bg-zinc-50 transition-all">
-                  <div className="grid grid-cols-2 gap-[2px] w-4 h-4 mr-2 shrink-0">
-                    <div className="bg-[#f25022]" /><div className="bg-[#7fba00]" />
-                    <div className="bg-[#00a4ef]" /><div className="bg-[#ffb900]" />
+              {!isStaffMode && (
+                <>
+                  <div className="relative my-1">
+                    <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-zinc-200" /></div>
+                    <div className="relative flex justify-center"><span className="bg-zinc-50 px-4 text-[10px] font-bold text-zinc-400 uppercase tracking-[0.15em]">or continue with</span></div>
                   </div>
-                  Microsoft
-                </Button>
-              </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button type="button" variant="outline" onClick={handleGoogleLogin} disabled={loading} className="h-11 rounded-xl border-zinc-200 bg-white font-bold text-zinc-700 hover:bg-zinc-50 transition-all">
+                      <svg className="w-4 h-4 mr-2 shrink-0" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                      Google
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => toast.info("Microsoft SSO coming soon.")} className="h-11 rounded-xl border-zinc-200 bg-white font-bold text-zinc-700 hover:bg-zinc-50 transition-all">
+                      <div className="grid grid-cols-2 gap-[2px] w-4 h-4 mr-2 shrink-0">
+                        <div className="bg-[#f25022]" /><div className="bg-[#7fba00]" />
+                        <div className="bg-[#00a4ef]" /><div className="bg-[#ffb900]" />
+                      </div>
+                      Microsoft
+                    </Button>
+                  </div>
+                </>
+              )}
             </form>
           )}
 

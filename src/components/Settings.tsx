@@ -147,6 +147,7 @@ export default function Settings() {
   };
   const [branches, setBranches] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
+  const [staff, setStaff] = useState<any[]>([]);
   const [isSeeding, setIsSeeding] = useState(false);
   const [isBranchDialogOpen, setIsBranchDialogOpen] = useState(false);
   const [isEditBranchDialogOpen, setIsEditBranchDialogOpen] = useState(false);
@@ -343,6 +344,39 @@ export default function Settings() {
     }
   };
 
+  const handleSeedDefaultRoles = async () => {
+    if (!enterpriseId) return;
+    const loadingToast = toast.loading("Seeding enterprise-grade roles...");
+    try {
+      const defaultRoles = [
+        { name: "Executive", tier: "tier4", permissions: { crm: "admin", pos: "admin", inventory: "admin", finance: "admin", analytics: "admin", workflow: "admin", ai: "admin", audit_logs: "admin", settings: "admin" } },
+        { name: "Business Admin", tier: "tier3", permissions: { crm: "admin", pos: "admin", inventory: "admin", finance: "editor", analytics: "editor", workflow: "admin", ai: "editor", audit_logs: "viewer" } },
+        { name: "Manager", tier: "tier3", permissions: { crm: "admin", pos: "admin", inventory: "admin", finance: "editor", analytics: "editor", workflow: "admin", ai: "editor", audit_logs: "viewer" } },
+        { name: "Supervisor", tier: "tier2", permissions: { crm: "editor", pos: "admin", inventory: "editor", finance: "none", analytics: "viewer", workflow: "editor", ai: "none", audit_logs: "none" } },
+        { name: "Cashier", tier: "tier1", permissions: { crm: "viewer", pos: "editor", inventory: "none", finance: "none", analytics: "none", workflow: "none", ai: "none", audit_logs: "none" } },
+        { name: "Sales Rep", tier: "tier1", permissions: { crm: "editor", pos: "editor", inventory: "none", finance: "none", analytics: "none", workflow: "none", ai: "none", audit_logs: "none" } },
+        { name: "Technician", tier: "tier1", permissions: { crm: "viewer", pos: "editor", inventory: "editor", finance: "none", analytics: "none", workflow: "none", ai: "none", audit_logs: "none" } },
+        { name: "Customer Support", tier: "tier1", permissions: { crm: "editor", pos: "none", inventory: "none", finance: "none", analytics: "none", workflow: "none", ai: "none", audit_logs: "none" } },
+        { name: "Security", tier: "tier1", permissions: { crm: "viewer", pos: "none", inventory: "none", finance: "none", analytics: "none", workflow: "none", ai: "none", audit_logs: "viewer" } },
+      ];
+
+      const batch = writeBatch(db);
+      for (const role of defaultRoles) {
+        const docRef = doc(collection(db, "roles"));
+        batch.set(docRef, {
+          ...role,
+          users: 0,
+          enterprise_id: enterpriseId,
+          createdAt: serverTimestamp()
+        });
+      }
+      await batch.commit();
+      toast.success("System roles successfully provisioned.", { id: loadingToast });
+    } catch (err: any) {
+      toast.error("Role seeding failed: " + err.message, { id: loadingToast });
+    }
+  };
+
   const handleUpdateRole = async () => {
     if (!editingRole || !editingRole.name) {
       toast.error("Please provide a role name.");
@@ -472,6 +506,10 @@ export default function Settings() {
       console.error("Error fetching roles:", error);
     });
 
+    const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     const unsubSettings = onSnapshot(doc(db, "enterprise_settings", enterpriseId), (docSnapshot) => {
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
@@ -506,6 +544,7 @@ export default function Settings() {
     return () => {
       unsubBranches();
       unsubRoles();
+      unsubStaff();
       unsubSettings();
     };
   }, [enterpriseId]);
@@ -1256,15 +1295,24 @@ export default function Settings() {
          <TabsContent value="roles" className="space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-zinc-900">Role-Based Access Control</h3>
-            <Dialog open={isRoleDialogOpen} onOpenChange={setIsRoleDialogOpen}>
-              <DialogTrigger
-                render={
-                  <Button className="rounded-xl bg-zinc-900 text-white h-11 px-8 font-bold text-xs shadow-xl shadow-zinc-900/10 hover:scale-[1.02] active:scale-95 transition-all">
-                    <ShieldCheck className="w-4 h-4 mr-2" />
-                    New Role
-                  </Button>
-                }
-              />
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="outline" 
+                className="rounded-xl h-11 px-6 font-bold text-xs border-zinc-200 hover:bg-zinc-50"
+                onClick={handleSeedDefaultRoles}
+              >
+                <Zap className="w-4 h-4 mr-2 text-amber-500" />
+                Seed System Roles
+              </Button>
+              <Dialog open={isRoleDialogOpen} onOpenChange={setIsRoleDialogOpen}>
+                <DialogTrigger
+                  render={
+                    <Button className="rounded-xl bg-zinc-900 text-white h-11 px-8 font-bold text-xs shadow-xl shadow-zinc-900/10 hover:scale-[1.02] active:scale-95 transition-all">
+                      <ShieldCheck className="w-4 h-4 mr-2" />
+                      New Role
+                    </Button>
+                  }
+                />
               <DialogContent className="rounded-[2rem] border-zinc-100 p-0 overflow-hidden sm:max-w-xl shadow-2xl">
                 <div className="bg-zinc-900 p-8 text-white relative overflow-hidden">
                   <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
@@ -1435,6 +1483,7 @@ export default function Settings() {
               </DialogContent>
             </Dialog>
           </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {roles.map((role) => (
               <Card key={role.id} className="card-modern p-6 space-y-4 group hover:border-blue-500/50 transition-all">
@@ -1442,7 +1491,9 @@ export default function Settings() {
                   <div className={cn("p-3 rounded-2xl shadow-sm ring-1", getTierInfo(role.tier).color)}>
                     <Users className="w-5 h-5" />
                   </div>
-                  <Badge variant="outline" className="text-[10px] font-bold uppercase border-zinc-100">{role.users || 0} Users</Badge>
+                  <Badge variant="outline" className="text-[10px] font-bold uppercase border-zinc-100">
+                    {staff.filter(s => s.role?.toString().trim().toLowerCase() === role.name?.toString().trim().toLowerCase()).length} Users
+                  </Badge>
                 </div>
                 <div>
                   <h4 className="font-bold text-zinc-900">{role.name}</h4>
@@ -1456,7 +1507,45 @@ export default function Settings() {
                         permissions: role.permissions || {}
                       });
                       setIsEditRoleDialogOpen(true);
-                    }}>Permissions</Button>
+                    }}>Edit Permissions</Button>
+                    
+                    <Dialog>
+                      <DialogTrigger 
+                        render={
+                          <Button variant="ghost" size="sm" className="text-[10px] font-bold text-zinc-500 hover:bg-zinc-100 rounded-lg h-8">
+                            View Staff
+                          </Button>
+                        }
+                      />
+                      <DialogContent className="rounded-3xl border-zinc-100 p-6 max-w-md">
+                        <DialogHeader>
+                          <DialogTitle className="font-bold text-xl">Staff Assigned to {role.name}</DialogTitle>
+                          <DialogDescription>Current personnel authorized under this role designation.</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-3 py-4">
+                          {staff.filter(s => s.role?.toString().trim().toLowerCase() === role.name?.toString().trim().toLowerCase()).length > 0 ? (
+                            staff.filter(s => s.role?.toString().trim().toLowerCase() === role.name?.toString().trim().toLowerCase()).map(s => (
+                              <div key={s.id} className="flex items-center gap-3 p-3 rounded-xl border border-zinc-100 bg-zinc-50/50">
+                                <div className="w-10 h-10 rounded-full bg-white border border-zinc-100 flex items-center justify-center text-zinc-900 font-bold text-xs shadow-sm">
+                                  {s.name?.[0] || "?"}
+                                </div>
+                                <div>
+                                  <p className="text-sm font-bold text-zinc-900">{s.name}</p>
+                                  <p className="text-[10px] text-zinc-500 font-medium">{s.email}</p>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="text-center py-8 space-y-2">
+                              <div className="w-12 h-12 rounded-2xl bg-zinc-50 flex items-center justify-center mx-auto text-zinc-300">
+                                <Users className="w-6 h-6" />
+                              </div>
+                              <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">No staff assigned</p>
+                            </div>
+                          )}
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-zinc-400 hover:text-rose-600" onClick={() => handleDeleteRole(role.id)}>
                     <Trash2 className="w-4 h-4" />

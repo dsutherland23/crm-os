@@ -70,7 +70,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen }: SidebarProps) {
-  const { isModuleEnabled, branding, posSession, enterpriseId, grantedOverrides, addOverride, logout, userRole } = useModules();
+  const { isModuleEnabled, branding, posSession, enterpriseId, grantedOverrides, addOverride, logout, userRole, hasPermission } = useModules();
   const [supportOpen, setSupportOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [lastInteraction, setLastInteraction] = useState(Date.now());
@@ -145,15 +145,17 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
 
   const handleProtectedLogout = async () => {
     if (posSession && posSession.payGrade !== "EXECUTIVE" && posSession.payGrade !== "SUPERVISOR") {
-      toast.error("Register Still Active", {
-        description: "You must close your register and end your shift on the POS page before signing out."
-      });
-      setActiveTab("pos");
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
-      }, 300);
-      setIsMobileOpen(false);
-      return;
+      if (hasPermission("pos")) {
+        toast.error("Register Still Active", {
+          description: "You must close your register and end your shift on the POS page before signing out."
+        });
+        setActiveTab("pos");
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
+        }, 300);
+        setIsMobileOpen(false);
+        return;
+      }
     }
     await logout();
   };
@@ -166,30 +168,35 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
 
   const menuItems = [
     { id: "dashboard", label: "Overview", icon: LayoutDashboard, enabled: true },
-    { id: "crm", label: "Customers", icon: Users, enabled: isModuleEnabled("crm") },
-    { id: "pos", label: "Point of Sale", icon: ShoppingCart, enabled: isModuleEnabled("pos") },
-    { id: "inventory", label: "Stock Management", icon: Package, enabled: isModuleEnabled("inventory") },
-    { id: "revenue", label: "Revenue", icon: Wallet, enabled: isModuleEnabled("finance") },
-    { id: "workflow", label: "Workflows", icon: Zap, enabled: isModuleEnabled("workflow") },
-    { id: "groups", label: "Groups", icon: Command, enabled: true },
-    { id: "loyalty", label: "Loyalty", icon: Star, enabled: true },
-    { id: "analytics", label: "Intelligence", icon: BarChart3, enabled: isModuleEnabled("analytics") },
-    { id: "ai", label: "Copilot", icon: Sparkles, enabled: isModuleEnabled("ai") },
-    { id: "audit", label: "Audit Logs", icon: History, enabled: isModuleEnabled("audit_logs") },
-    { id: "staff", label: "Staff", icon: ShieldCheck, enabled: true },
-    { id: "settings", label: "System", icon: Settings, enabled: true },
+    { id: "crm", label: "Customers", icon: Users, enabled: isModuleEnabled("crm") && hasPermission("crm") },
+    { id: "pos", label: "Point of Sale", icon: ShoppingCart, enabled: isModuleEnabled("pos") && hasPermission("pos") },
+    { id: "inventory", label: "Stock Management", icon: Package, enabled: isModuleEnabled("inventory") && hasPermission("inventory") },
+    { id: "revenue", label: "Revenue", icon: Wallet, enabled: isModuleEnabled("finance") && hasPermission("finance") },
+    { id: "workflow", label: "Workflows", icon: Zap, enabled: isModuleEnabled("workflow") && hasPermission("workflow") },
+    { id: "groups", label: "Groups", icon: Command, enabled: hasPermission("crm") },
+    { id: "loyalty", label: "Loyalty", icon: Star, enabled: hasPermission("pos") },
+    { id: "analytics", label: "Intelligence", icon: BarChart3, enabled: isModuleEnabled("analytics") && hasPermission("analytics") },
+    { id: "ai", label: "Copilot", icon: Sparkles, enabled: isModuleEnabled("ai") && hasPermission("ai") },
+    { id: "audit", label: "Audit Logs", icon: History, enabled: isModuleEnabled("audit_logs") && hasPermission("audit_logs") },
+    { id: "staff", label: "Staff", icon: ShieldCheck, enabled: hasPermission("staff") },
+    { id: "settings", label: "System", icon: Settings, enabled: hasPermission("settings") },
   ].filter(item => item.enabled);
 
-  // ── Pay Grade Access Control ─────────────────────────────────────
-  const STANDARD_ALLOWED = ["crm", "inventory", "pos"];
-  const isStandardSession = posSession?.payGrade === "STANDARD";
-
-  // Auto-redirect if STANDARD user somehow lands on a restricted page
+  // ── Dynamic Access Control ───────────────────────────────────────
+  // Auto-redirect if user lands on a restricted page or loses access dynamically
   useEffect(() => {
-    if (isStandardSession && !STANDARD_ALLOWED.includes(activeTab) && !grantedOverrides.includes(activeTab)) {
-      setActiveTab("pos");
+    if (activeTab === "dashboard" || activeTab.startsWith("support:")) return;
+    
+    // special case for settings which requires admin
+    if (activeTab === "settings" && !hasPermission("settings", "admin")) {
+      setActiveTab("dashboard");
+      return;
     }
-  }, [isStandardSession, activeTab, grantedOverrides]);
+    
+    if (!hasPermission(activeTab) && !grantedOverrides.includes(activeTab)) {
+      setActiveTab("dashboard");
+    }
+  }, [activeTab, hasPermission, grantedOverrides]);
 
   return (
     <>
@@ -243,16 +250,14 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                       if (isExecutive || userRole === "Owner") return false;
                       if (grantedOverrides.includes(item.id)) return false;
                       
-                      // System is Executive ONLY
-                      if (item.id === "settings") return true;
+                      // Check if they have at least viewer access to even see the button
+                      // If they have NO access, it's filtered out by .filter(item.enabled) above.
+                      // If they have viewer access, they can see it.
+                      // If it's a critical area like settings, we might still want to show it as locked for lower tiers.
                       
-                      // Supervisor gets everything else
-                      if (isSupervisor) return false;
+                      if (item.id === "settings") return !hasPermission("settings", "admin");
                       
-                      // Standard is limited to core modules
-                      if (isStandardSession) return !STANDARD_ALLOWED.includes(item.id);
-                      
-                      return false;
+                      return !hasPermission(item.id);
                     })();
 
                     const requiredGrade = item.id === "settings" ? "EXECUTIVE" : "SUPERVISOR";

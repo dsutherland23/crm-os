@@ -1543,11 +1543,13 @@ export default function Inventory() {
                                 </TableCell>
                                 <TableCell className="text-right py-5 pr-6">
                                   <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
-                                      <MoreHorizontal className="w-5 h-5" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
+                                  <DropdownMenuTrigger 
+                                    render={
+                                      <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
+                                        <MoreHorizontal className="w-5 h-5" />
+                                      </Button>
+                                    }
+                                  />
                                     <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
                                       <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs" onClick={() => openProductSheet(item)}>
                                         <Box className="w-4 h-4 text-zinc-400" /> Edit Product Profile
@@ -1664,32 +1666,34 @@ export default function Inventory() {
                         <TableCell className="py-5 text-[10px] font-bold text-zinc-400 uppercase">{m.date}</TableCell>
                         <TableCell className="py-5 pr-6">
                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                <div className={cn(
-                                  "flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer hover:opacity-80 transition-all shadow-sm",
-                                  m.status === "COMPLETED" ? "bg-emerald-50 border-emerald-100/50" :
-                                  m.status === "CANCELLED" ? "bg-rose-50 border-rose-100/50" :
-                                  m.status === "IN_TRANSIT" ? "bg-blue-50 border-blue-100/50" :
-                                  "bg-amber-50 border-amber-100/50"
-                                )}>
-                                  <div className={cn(
-                                    "w-1.5 h-1.5 rounded-full",
-                                    m.status === "COMPLETED" ? "bg-emerald-500" : 
-                                    m.status === "CANCELLED" ? "bg-rose-500" :
-                                    m.status === "IN_TRANSIT" ? "bg-blue-500 animate-pulse" :
-                                    "bg-amber-500"
-                                  )} />
-                                  <span className={cn(
-                                    "text-[9px] font-black uppercase tracking-[0.2em]",
-                                    m.status === "COMPLETED" ? "text-emerald-600" : 
-                                    m.status === "CANCELLED" ? "text-rose-600" :
-                                    m.status === "IN_TRANSIT" ? "text-blue-600" :
-                                    "text-amber-600"
-                                  )}>
-                                    {m.status}
-                                  </span>
-                                </div>
-                              </DropdownMenuTrigger>
+                                <DropdownMenuTrigger 
+                                  render={
+                                    <div className={cn(
+                                      "flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer hover:opacity-80 transition-all shadow-sm",
+                                      m.status === "COMPLETED" ? "bg-emerald-50 border-emerald-100/50" :
+                                      m.status === "CANCELLED" ? "bg-rose-50 border-rose-100/50" :
+                                      m.status === "IN_TRANSIT" ? "bg-blue-50 border-blue-100/50" :
+                                      "bg-amber-50 border-amber-100/50"
+                                    )}>
+                                      <div className={cn(
+                                        "w-1.5 h-1.5 rounded-full",
+                                        m.status === "COMPLETED" ? "bg-emerald-500" : 
+                                        m.status === "CANCELLED" ? "bg-rose-500" :
+                                        m.status === "IN_TRANSIT" ? "bg-blue-500 animate-pulse" :
+                                        "bg-amber-500"
+                                      )} />
+                                      <span className={cn(
+                                        "text-[9px] font-black uppercase tracking-[0.2em]",
+                                        m.status === "COMPLETED" ? "text-emerald-600" : 
+                                        m.status === "CANCELLED" ? "text-rose-600" :
+                                        m.status === "IN_TRANSIT" ? "text-blue-600" :
+                                        "text-amber-600"
+                                      )}>
+                                        {m.status}
+                                      </span>
+                                    </div>
+                                  }
+                                />
                               <DropdownMenuContent align="end" className="rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white">
                                 <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "COMPLETED")} className="rounded-xl font-bold text-xs py-2.5">Set Completed</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleUpdateMovementStatus(m, "IN_TRANSIT")} className="rounded-xl font-bold text-xs py-2.5">Set In Transit</DropdownMenuItem>

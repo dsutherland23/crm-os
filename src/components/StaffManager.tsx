@@ -17,10 +17,11 @@ import { useModules } from "@/context/ModuleContext";
 import { cn } from "@/lib/utils";
 
 export default function StaffManager() {
-  const { formatCurrency, enterpriseId } = useModules();
+  const { formatCurrency, enterpriseId, branding } = useModules();
   const [staff, setStaff] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
+  const [availableBranches, setAvailableBranches] = useState<any[]>([]);
   const [isAddUserOpen, setIsAddUserOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedStaffMember, setSelectedStaffMember] = useState<any>(null);
@@ -57,12 +58,49 @@ export default function StaffManager() {
       }
     });
 
+    const unsubBranchesList = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      setAvailableBranches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
     return () => {
       unsubStaff();
       unsubSessions();
       unsubRoles();
+      unsubBranchesList();
     };
   }, [enterpriseId]);
+
+  const handleInviteToPortal = async () => {
+    const email = newUser.email?.trim().toLowerCase();
+    if (!email) {
+      toast.error("Email Required", { description: "Please save the staff record with a valid email first." });
+      return;
+    }
+
+    const loadingToast = toast.loading(`Provisioning portal access for ${newUser.name}...`);
+    try {
+      // Write to a dedicated 'staff_invites' collection — cleaner and more auditable
+      // The doc ID is the sanitized email so it's easy to look up on sign-up
+      const inviteId = email.replace(/[^a-z0-9]/g, '_');
+
+      await setDoc(doc(db, "staff_invites", inviteId), {
+        fullName: newUser.name,
+        email: email,
+        role: newUser.role,
+        enterprise_id: enterpriseId,
+        status: "PENDING_ACTIVATION",
+        provisionedAt: new Date().toISOString(),
+        enterpriseName: branding?.name || enterpriseId
+      }, { merge: true });
+
+      toast.success("Portal access provisioned!", { 
+        description: `${newUser.name} can now sign up using ${email}.`,
+        id: loadingToast 
+      });
+    } catch (error: any) {
+      toast.error("Provisioning failed: " + error.message, { id: loadingToast });
+    }
+  };
 
   const handleCreateStaff = async () => {
     if (!newUser.name || newUser.pin.length !== 4) {
@@ -73,6 +111,7 @@ export default function StaffManager() {
       if (isEditing && selectedStaffMember) {
         await updateDoc(doc(db, "staff", selectedStaffMember.id), {
           ...newUser,
+          enterprise_id: enterpriseId,
           updatedAt: new Date().toISOString()
         });
         toast.success("Staff profile updated");
@@ -119,7 +158,6 @@ export default function StaffManager() {
         payGrade: "STANDARD",
         productivityTarget: 2500
       });
-      toast.success("Staff profile created");
     } catch (error: any) {
       toast.error("Operation failed: " + error.message);
     }
@@ -131,7 +169,7 @@ export default function StaffManager() {
       name: member.name,
       role: member.role,
       pin: member.pin,
-      branches: member.branches || ["all"],
+      branches: Array.isArray(member.branches) ? member.branches : [member.branches || "all"],
       email: member.email || "",
       phone: member.phone || "",
       salaryType: member.salaryType || "HOURLY",
@@ -260,29 +298,31 @@ export default function StaffManager() {
           <p className="text-sm text-zinc-500 font-medium max-w-md">Manage POS PIN codes, track sessions, and monitor enterprise register closures.</p>
         </div>
         <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
-          <DialogTrigger asChild>
-            <Button 
-              className="rounded-2xl px-8 h-14 bg-zinc-900 text-white hover:bg-zinc-800 font-black shadow-2xl shadow-zinc-900/20 text-xs uppercase tracking-widest w-full md:w-auto"
-              onClick={() => {
-                setIsEditing(false);
-                setNewUser({ 
-                  name: "", 
-                  role: "Cashier", 
-                  pin: "", 
-                  branches: ["all"],
-                  email: "",
-                  phone: "",
-                  salaryType: "HOURLY",
-                  baseRate: 25,
-                  payGrade: "STANDARD",
-                  productivityTarget: 2500
-                });
-                setIsAddUserOpen(true);
-              }}
-            >
-              <Plus className="w-4 h-4 mr-2" /> Provision Access
-            </Button>
-          </DialogTrigger>
+          <DialogTrigger 
+            render={
+              <Button 
+                className="rounded-2xl px-8 h-14 bg-zinc-900 text-white hover:bg-zinc-800 font-black shadow-2xl shadow-zinc-900/20 text-xs uppercase tracking-widest w-full md:w-auto"
+                onClick={() => {
+                  setIsEditing(false);
+                  setNewUser({ 
+                    name: "", 
+                    role: "Cashier", 
+                    pin: "", 
+                    branches: ["all"],
+                    email: "",
+                    phone: "",
+                    salaryType: "HOURLY",
+                    baseRate: 25,
+                    payGrade: "STANDARD",
+                    productivityTarget: 2500
+                  });
+                  setIsAddUserOpen(true);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" /> Provision Access
+              </Button>
+            }
+          />
           <DialogContent className="rounded-3xl border-zinc-100 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-3">
@@ -302,8 +342,9 @@ export default function StaffManager() {
                   <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Full Name</Label>
                   <Input 
                     className="rounded-xl border-zinc-200 h-12 font-bold bg-white" 
-                    placeholder="e.g., Sarah Jenkins"
+                    placeholder="Enter Staff Name"
                     value={newUser.name}
+                    autoComplete="new-password"
                     onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
                   />
                 </div>
@@ -352,14 +393,17 @@ export default function StaffManager() {
                   <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Primary Branch</Label>
                   <Select value={newUser.branches?.[0] || "all"} onValueChange={(v) => setNewUser({...newUser, branches: [v]})}>
                      <SelectTrigger className="rounded-xl border-zinc-200 bg-white h-12">
-                       <SelectValue />
+                       <SelectValue>
+                          {availableBranches.find(b => b.id === (newUser.branches?.[0] || "all"))?.name || 
+                           (newUser.branches?.[0] === 'all' || !newUser.branches?.[0] ? "All Locations (Global Access)" : newUser.branches[0])}
+                       </SelectValue>
                      </SelectTrigger>
-                     <SelectContent className="rounded-xl">
+                      <SelectContent className="rounded-xl">
                         <SelectItem value="all">All Locations (Global Access)</SelectItem>
-                        <SelectItem value="main">Main Branch</SelectItem>
-                        <SelectItem value="uptown">Uptown Office</SelectItem>
-                        <SelectItem value="downtown">Downtown Hub</SelectItem>
-                     </SelectContent>
+                        {availableBranches.map(b => (
+                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                        ))}
+                      </SelectContent>
                   </Select>
                 </div>
               </div>
@@ -369,8 +413,9 @@ export default function StaffManager() {
                   <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Email (Optional)</Label>
                   <Input 
                     className="rounded-xl border-zinc-200 h-12 bg-white" 
-                    placeholder="sarah@example.com"
+                    placeholder="staff@enterprise.com"
                     value={newUser.email}
+                    autoComplete="new-password"
                     onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                   />
                 </div>
@@ -453,6 +498,28 @@ export default function StaffManager() {
                      </div>
                   </div>
                </div>
+
+              {isEditing && (
+                <div className="pt-6 border-t border-zinc-100 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                      <ShieldAlert className="w-4 h-4" />
+                    </div>
+                    <h4 className="font-bold text-sm text-zinc-900">Web Portal Access</h4>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 font-medium leading-relaxed">
+                    Allow this staff member to log into the Orivo Cloud portal using their email. 
+                    Their access will be restricted based on their assigned role: <span className="text-blue-600 font-black">{newUser.role}</span>.
+                  </p>
+                  <Button 
+                    variant="outline" 
+                    className="w-full rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 h-12 font-bold text-xs"
+                    onClick={() => handleInviteToPortal()}
+                  >
+                    Provision Portal Identity
+                  </Button>
+                </div>
+              )}
 
               <Button className="w-full rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 h-14 font-bold shadow-xl shadow-zinc-900/10 mt-4 group" onClick={handleCreateStaff}>
                 {isEditing ? "Update Staff Record" : "Grant Access & Lock Contract"}
@@ -592,7 +659,13 @@ export default function StaffManager() {
                              <div className="flex items-center gap-2 mt-1">
                                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{s.role}</span>
                                <span className="w-1 h-1 rounded-full bg-zinc-300" />
-                               <span className="text-[10px] text-zinc-500 font-medium">Branch: {s.branches?.[0]?.toUpperCase() || 'ALL'}</span>
+                               <span className="text-[10px] text-zinc-500 font-medium">
+                                 Branch: {
+                                   s.branches?.[0] === 'all' 
+                                     ? 'ALL' 
+                                     : (availableBranches.find(b => b.id === s.branches?.[0])?.name || s.branches?.[0] || 'ALL').toUpperCase()
+                                 }
+                               </span>
                              </div>
                            </div>
                         </div>

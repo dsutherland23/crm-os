@@ -232,7 +232,7 @@ const CustomChartTooltip = ({ active, payload, label, formatCurrency }: any) => 
 // MAIN DASHBOARD COMPONENT
 // ─────────────────────────────────────────────────────────────
 export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: string) => void }) {
-  const { activeBranch, formatCurrency, enterpriseId } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId, hasPermission } = useModules();
 
   // ── State ──────────────────────────────────────────────────
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -545,12 +545,12 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
         <div>
           <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">Quick Actions</p>
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-            <QuickAction icon={Plus} label="New Sale" onClick={() => dispatchAction("pos", "NEW_SALE")} />
-            <QuickAction icon={Users} label="Add Customer" onClick={() => dispatchAction("crm", "ADD_CUSTOMER")} />
-            <QuickAction icon={FileText} label="Invoice" onClick={() => dispatchAction("revenue", "CREATE_INVOICE")} />
-            <QuickAction icon={Package} label="Add Product" onClick={() => dispatchAction("inventory", "ADD_PRODUCT")} />
-            <QuickAction icon={ArrowRightLeft} label="Transfer" onClick={() => dispatchAction("inventory", "TRANSFER_STOCK")} />
-            <QuickAction icon={Sparkles} label="AI Report" onClick={() => dispatchAction("ai", "AI_REPORT")} />
+            <QuickAction icon={Plus} label="New Sale" onClick={() => dispatchAction("pos", "NEW_SALE")} disabled={!hasPermission("pos", "editor")} />
+            <QuickAction icon={Users} label="Add Customer" onClick={() => dispatchAction("crm", "ADD_CUSTOMER")} disabled={!hasPermission("crm", "editor")} />
+            {hasPermission("finance") && <QuickAction icon={FileText} label="Invoice" onClick={() => dispatchAction("revenue", "CREATE_INVOICE")} />}
+            {hasPermission("inventory") && <QuickAction icon={Package} label="Add Product" onClick={() => dispatchAction("inventory", "ADD_PRODUCT")} />}
+            {hasPermission("inventory") && <QuickAction icon={ArrowRightLeft} label="Transfer" onClick={() => dispatchAction("inventory", "TRANSFER_STOCK")} />}
+            {hasPermission("ai") && <QuickAction icon={Sparkles} label="AI Report" onClick={() => dispatchAction("ai", "AI_REPORT")} />}
           </div>
         </div>
 
@@ -560,14 +560,24 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
             Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
           ) : (
             <>
-              <StatCard
-                title="Gross Revenue"
-                value={formatCurrency(metrics.revenue)}
-                change="0%"
-                icon={TrendingUp}
-                trend="up"
-                onClick={() => setActiveTab?.("revenue")}
-              />
+              {hasPermission("finance") ? (
+                <StatCard
+                  title="Gross Revenue"
+                  value={formatCurrency(metrics.revenue)}
+                  change="0%"
+                  icon={TrendingUp}
+                  trend="up"
+                  onClick={() => setActiveTab?.("revenue")}
+                />
+              ) : (
+                <StatCard
+                  title="Sales Performance"
+                  value={metrics.orders.toLocaleString()}
+                  change="Live"
+                  icon={ShoppingCart}
+                  trend="up"
+                />
+              )}
               <StatCard
                 title="Customers"
                 value={metrics.customers.toLocaleString()}
@@ -584,14 +594,16 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                 trend="up"
                 onClick={() => setActiveTab?.("pos")}
               />
-              <StatCard
-                title="Inventory Value"
-                value={formatCurrency(metrics.inventory)}
-                change="0%"
-                icon={Package}
-                trend="up"
-                onClick={() => setActiveTab?.("inventory")}
-              />
+              {hasPermission("inventory") && (
+                <StatCard
+                  title="Inventory Value"
+                  value={formatCurrency(metrics.inventory)}
+                  change="0%"
+                  icon={Package}
+                  trend="up"
+                  onClick={() => setActiveTab?.("inventory")}
+                />
+              )}
             </>
           )}
         </div>
@@ -600,70 +612,72 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* Performance Chart */}
-          <Card className="lg:col-span-2 card-modern overflow-hidden">
-            <CardHeader className="border-b border-zinc-100 bg-zinc-50/30">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base lg:text-xl font-bold">Performance Trajectory</CardTitle>
-                  <CardDescription>Revenue over the last 7 days</CardDescription>
+          {hasPermission("finance") && (
+            <Card className="lg:col-span-2 card-modern overflow-hidden">
+              <CardHeader className="border-b border-zinc-100 bg-zinc-50/30">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base lg:text-xl font-bold">Performance Trajectory</CardTitle>
+                    <CardDescription>Revenue over the last 7 days</CardDescription>
+                  </div>
+                  <Badge variant="secondary" className="bg-blue-50 text-blue-600 border-blue-100">
+                    <Activity className="w-3 h-3 mr-1" /> Live
+                  </Badge>
                 </div>
-                <Badge variant="secondary" className="bg-blue-50 text-blue-600 border-blue-100">
-                  <Activity className="w-3 h-3 mr-1" /> Live
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="pt-6 pb-4 px-2 sm:px-6">
-              {loadingMap.transactions ? (
-                <Skeleton className="h-[240px] sm:h-[320px] w-full rounded-2xl" />
-              ) : errorMap.transactions ? (
-                <WidgetError onRetry={subscribe} />
-              ) : chartData.every((d) => d.sales === 0) ? (
-                <div className="h-[240px] sm:h-[320px] flex flex-col items-center justify-center gap-2 text-zinc-400">
-                  <BarChart3 className="w-10 h-10 opacity-30" />
-                  <span className="text-sm font-medium">No transaction data yet</span>
-                </div>
-              ) : (
-                <div className="h-[240px] sm:h-[320px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 4 }}>
-                      <defs>
-                        <linearGradient id="colorSalesDash" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.12} />
-                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis
-                        dataKey="name"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: "#94a3b8", fontSize: 11 }}
-                        dy={8}
-                      />
-                      <YAxis
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: "#94a3b8", fontSize: 11 }}
-                        tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
-                        width={48}
-                      />
-                      <Tooltip content={<CustomChartTooltip formatCurrency={formatCurrency} />} />
-                      <Area
-                        type="monotone"
-                        dataKey="sales"
-                        stroke="#3b82f6"
-                        strokeWidth={2.5}
-                        fillOpacity={1}
-                        fill="url(#colorSalesDash)"
-                        dot={false}
-                        activeDot={{ r: 5, strokeWidth: 0, fill: "#3b82f6" }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="pt-6 pb-4 px-2 sm:px-6">
+                {loadingMap.transactions ? (
+                  <Skeleton className="h-[240px] sm:h-[320px] w-full rounded-2xl" />
+                ) : errorMap.transactions ? (
+                  <WidgetError onRetry={subscribe} />
+                ) : chartData.every((d) => d.sales === 0) ? (
+                  <div className="h-[240px] sm:h-[320px] flex flex-col items-center justify-center gap-2 text-zinc-400">
+                    <BarChart3 className="w-10 h-10 opacity-30" />
+                    <span className="text-sm font-medium">No transaction data yet</span>
+                  </div>
+                ) : (
+                  <div className="h-[240px] sm:h-[320px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 4 }}>
+                        <defs>
+                          <linearGradient id="colorSalesDash" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.12} />
+                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis
+                          dataKey="name"
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: "#94a3b8", fontSize: 11 }}
+                          dy={8}
+                        />
+                        <YAxis
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: "#94a3b8", fontSize: 11 }}
+                          tickFormatter={(v) => `$${v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v}`}
+                          width={48}
+                        />
+                        <Tooltip content={<CustomChartTooltip formatCurrency={formatCurrency} />} />
+                        <Area
+                          type="monotone"
+                          dataKey="sales"
+                          stroke="#3b82f6"
+                          strokeWidth={2.5}
+                          fillOpacity={1}
+                          fill="url(#colorSalesDash)"
+                          dot={false}
+                          activeDot={{ r: 5, strokeWidth: 0, fill: "#3b82f6" }}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Morning Briefing */}
           <Card className="card-modern flex flex-col">
@@ -710,110 +724,112 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
         </div>
 
         {/* ── System Activity ──────────────────────────────────── */}
-        <Card className="card-modern">
-          <CardHeader className="border-b border-zinc-100 p-6 md:p-8">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-1.5 bg-zinc-100 text-zinc-900 rounded-lg">
-                  <Activity className="w-4 h-4" />
+        {hasPermission("audit_logs") && (
+          <Card className="card-modern">
+            <CardHeader className="border-b border-zinc-100 p-6 md:p-8">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-1.5 bg-zinc-100 text-zinc-900 rounded-lg">
+                    <Activity className="w-4 h-4" />
+                  </div>
+                  <CardTitle className="text-xl md:text-2xl font-bold font-display">System Activity</CardTitle>
                 </div>
-                <CardTitle className="text-xl md:text-2xl font-bold font-display">System Activity</CardTitle>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest hover:bg-zinc-100 rounded-xl px-3 shrink-0"
-                  onClick={() => setIsActivityCollapsed(!isActivityCollapsed)}
-                >
-                  <div className="flex items-center gap-2">
-                    <div className={cn(
-                      "w-1.5 h-1.5 rounded-full",
-                      isActivityCollapsed ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
-                    )} />
-                    <span className="hidden sm:inline">{isActivityCollapsed ? "Expand Protocol" : "Collapse Feed"}</span>
-                    <span className="sm:hidden">{isActivityCollapsed ? "Expand" : "Collapse"}</span>
-                  </div>
-                </Button>
-                <div className="w-px h-6 bg-zinc-100 mx-1 shrink-0" />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-blue-600 font-bold text-[10px] uppercase tracking-widest hover:bg-blue-50 rounded-xl px-3 shrink-0"
-                  onClick={() => setActiveTab?.("audit")}
-                >
-                  <span className="hidden sm:inline">Full Audit</span>
-                  <span className="sm:hidden">Audit</span>
-                  <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-            {!isActivityCollapsed && <CardDescription className="mt-2 text-zinc-500">Propagating events across enterprise infrastructure</CardDescription>}
-          </CardHeader>
-          {!isActivityCollapsed && (
-            <CardContent className="p-0 animate-in slide-in-from-top-2 fade-in duration-300">
-            {loadingMap.logs ? (
-              <div className="divide-y divide-zinc-50">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className="p-5 flex items-center gap-4">
-                    <Skeleton className="w-9 h-9 rounded-xl shrink-0" />
-                    <div className="flex-1 space-y-1.5">
-                      <Skeleton className="h-3.5 w-48 rounded" />
-                      <Skeleton className="h-3 w-32 rounded" />
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-zinc-500 font-bold text-[10px] uppercase tracking-widest hover:bg-zinc-100 rounded-xl px-3 shrink-0"
+                    onClick={() => setIsActivityCollapsed(!isActivityCollapsed)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className={cn(
+                        "w-1.5 h-1.5 rounded-full",
+                        isActivityCollapsed ? "bg-amber-500 animate-pulse" : "bg-emerald-500"
+                      )} />
+                      <span className="hidden sm:inline">{isActivityCollapsed ? "Expand Protocol" : "Collapse Feed"}</span>
+                      <span className="sm:hidden">{isActivityCollapsed ? "Expand" : "Collapse"}</span>
                     </div>
-                    <Skeleton className="h-3 w-16 rounded" />
-                  </div>
-                ))}
+                  </Button>
+                  <div className="w-px h-6 bg-zinc-100 mx-1 shrink-0" />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-blue-600 font-bold text-[10px] uppercase tracking-widest hover:bg-blue-50 rounded-xl px-3 shrink-0"
+                    onClick={() => setActiveTab?.("audit")}
+                  >
+                    <span className="hidden sm:inline">Full Audit</span>
+                    <span className="sm:hidden">Audit</span>
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
               </div>
-            ) : errorMap.logs ? (
-              <WidgetError onRetry={subscribe} />
-            ) : auditLogs.length === 0 ? (
-              <div className="p-10 text-center text-zinc-400">
-                <Clock className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm font-medium">No activity recorded yet</p>
-                <p className="text-xs mt-1 opacity-70">Actions across the CRM will appear here</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-zinc-50">
-                {auditLogs.map((log, i) => {
-                  const ts = log.timestamp?.toDate
-                    ? log.timestamp.toDate()
-                    : log.timestamp
-                    ? new Date(log.timestamp)
-                    : null;
-                  const timeStr = ts
-                    ? ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-                    : "Just now";
-                  const dateStr = ts
-                    ? ts.toLocaleDateString([], { month: "short", day: "numeric" })
-                    : "";
+              {!isActivityCollapsed && <CardDescription className="mt-2 text-zinc-500">Propagating events across enterprise infrastructure</CardDescription>}
+            </CardHeader>
+            {!isActivityCollapsed && (
+              <CardContent className="p-0 animate-in slide-in-from-top-2 fade-in duration-300">
+              {loadingMap.logs ? (
+                <div className="divide-y divide-zinc-50">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="p-5 flex items-center gap-4">
+                      <Skeleton className="w-9 h-9 rounded-xl shrink-0" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-3.5 w-48 rounded" />
+                        <Skeleton className="h-3 w-32 rounded" />
+                      </div>
+                      <Skeleton className="h-3 w-16 rounded" />
+                    </div>
+                  ))}
+                </div>
+              ) : errorMap.logs ? (
+                <WidgetError onRetry={subscribe} />
+              ) : auditLogs.length === 0 ? (
+                <div className="p-10 text-center text-zinc-400">
+                  <Clock className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm font-medium">No activity recorded yet</p>
+                  <p className="text-xs mt-1 opacity-70">Actions across the CRM will appear here</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-zinc-50">
+                  {auditLogs.map((log, i) => {
+                    const ts = log.timestamp?.toDate
+                      ? log.timestamp.toDate()
+                      : log.timestamp
+                      ? new Date(log.timestamp)
+                      : null;
+                    const timeStr = ts
+                      ? ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                      : "Just now";
+                    const dateStr = ts
+                      ? ts.toLocaleDateString([], { month: "short", day: "numeric" })
+                      : "";
 
-                  return (
-                    <div
-                      key={log.id || i}
-                      className="p-4 sm:p-5 flex items-center gap-4 hover:bg-zinc-50/50 transition-colors"
-                    >
-                      <div className="p-2 rounded-xl bg-zinc-100 text-blue-500 shrink-0">
-                        <Clock className="w-4 h-4" />
+                    return (
+                      <div
+                        key={log.id || i}
+                        className="p-4 sm:p-5 flex items-center gap-4 hover:bg-zinc-50/50 transition-colors"
+                      >
+                        <div className="p-2 rounded-xl bg-zinc-100 text-blue-500 shrink-0">
+                          <Clock className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-zinc-900 truncate">{log.action}</p>
+                          <p className="text-xs text-zinc-500 truncate">{log.details}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs font-bold text-zinc-700">{log.user_id || log.user || "System"}</p>
+                          <p className="text-[10px] text-zinc-400 font-mono">
+                            {dateStr} {timeStr}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-zinc-900 truncate">{log.action}</p>
-                        <p className="text-xs text-zinc-500 truncate">{log.details}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-xs font-bold text-zinc-700">{log.user_id || log.user || "System"}</p>
-                        <p className="text-[10px] text-zinc-400 font-mono">
-                          {dateStr} {timeStr}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
             )}
-          </CardContent>
-          )}
-        </Card>
+          </Card>
+        )}
 
       </div>
     </ScrollArea>

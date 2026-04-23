@@ -50,9 +50,28 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/admin_users/$(request.auth.uid));
     }
 
-    // Combined admin check (claims OR admin_users membership)
+    // Combined admin check (Platform Admins OR Enterprise Admins)
     function isAdmin() {
-      return hasAdminClaim() || isAdminUser();
+      if (!isSignedIn()) { return false; }
+      
+      // 1. Platform Admin Checks
+      if (hasAdminClaim() || isAdminUser()) { return true; }
+      
+      // 2. Enterprise Admin Checks (from users collection)
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      if (userDoc == null || !('role' in userDoc.data)) { return false; }
+      
+      let role = userDoc.data.role;
+      return role == 'Admin' || 
+             role == 'Owner' || 
+             role == 'Executive' || 
+             role == 'Manager' || 
+             role == 'Business Admin' || 
+             role == 'Supervisor' || 
+             role == 'admin' || 
+             role == 'owner' || 
+             role == 'manager' ||
+             role == 'supervisor';
     }
 
     // Is the user the technical developer guest?
@@ -67,14 +86,14 @@ service cloud.firestore {
 
     // Does the user belong to the given enterprise?
     function belongsToEnterprise(enterpriseId) {
-      return isDeveloper() || (isSignedIn() &&
+      return isAdmin() || isDeveloper() || (isSignedIn() &&
         get(/databases/$(database)/documents/users/$(request.auth.uid))
           .data.enterprise_id == enterpriseId);
     }
 
     // Is the document's enterprise_id the same as the requester's?
     function isOwnEnterprise() {
-      return isDeveloper() || (isSignedIn() &&
+      return isAdmin() || isDeveloper() || (isSignedIn() &&
         resource.data.enterprise_id ==
           get(/databases/$(database)/documents/users/$(request.auth.uid))
             .data.enterprise_id);
@@ -82,7 +101,7 @@ service cloud.firestore {
 
     // Is the new document being written to the requester's enterprise?
     function isOwnEnterpriseWrite() {
-      return isDeveloper() || (isSignedIn() &&
+      return isAdmin() || isDeveloper() || (isSignedIn() &&
         request.resource.data.enterprise_id ==
           get(/databases/$(database)/documents/users/$(request.auth.uid))
             .data.enterprise_id);
@@ -105,42 +124,30 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ─── Staff Invites ────────────────────────────────────────────────
+    // One-time invite records written by admins, read during staff sign-up.
+    match /staff_invites/{inviteId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
     // ─── Enterprise Settings ──────────────────────────────────────────
     // Members can read their own enterprise settings.
-    // Only admins can write to non-own enterprise settings.
     match /enterprise_settings/{enterpriseId} {
-      allow read: if isSignedIn() && (
-        belongsToEnterprise(enterpriseId) || isAdmin()
-      );
-      // Members can update their OWN enterprise settings (non-critical fields)
-      allow update: if isSignedIn() &&
-        belongsToEnterprise(enterpriseId) &&
-        !('status' in request.resource.data.diff(resource.data).affectedKeys());
-      // Only admins can change status (suspend/activate)
-      allow update: if isAdmin();
-      // Signup provisioning — allow create if the data references the creator's uid
+      allow read: if belongsToEnterprise(enterpriseId);
+      // Only admins can change settings
+      allow update: if isAdmin() && belongsToEnterprise(enterpriseId);
       allow create: if isSignedIn();
       allow delete: if isAdmin();
     }
 
     // ─── Admin Users Registry ─────────────────────────────────────────
-    // Any signed-in user can read THEIR OWN admin_users document.
-    // This breaks the chicken-and-egg read loop: to check if you're admin
-    // you must first be able to read admin_users/{your_uid} without being admin.
-    // Full list reads are restricted to confirmed admins only.
     match /admin_users/{adminId} {
-      // Self-read: any authenticated user can check their own doc
-      allow read: if isOwner(adminId);
-      // Peer-reads: confirmed admins can read all admin docs
-      allow read, list: if isAdmin();
-      // Writes require super_admin claim OR existing super_admin doc (bootstrap fallback)
-      allow write: if hasAdminClaim() && request.auth.token.role == 'super_admin';
-      allow write: if isOwner(adminId) == false
-        && get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin';
+      allow read: if isOwner(adminId) || isAdmin();
+      allow write: if isAdmin() && (hasAdminClaim() && request.auth.token.role == 'super_admin');
     }
 
     // ─── Admin Audit Logs ─────────────────────────────────────────────
-    // Immutable trail. Only admins can read. Only admins can create.
     match /admin_audit_logs/{logId} {
       allow read: if isAdmin();
       allow create: if isAdmin();
@@ -148,46 +155,25 @@ service cloud.firestore {
     }
 
     // ─── Admin Meta / Feature Flags ──────────────────────────────────
-    // Only super_admin can modify. Admins can read.
     match /admin_meta/{docId} {
       allow read: if isAdmin();
-      allow write: if hasAdminClaim() && request.auth.token.role == 'super_admin';
-      allow write: if get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin';
+      allow write: if isAdmin() && (hasAdminClaim() && request.auth.token.role == 'super_admin');
     }
 
     // ─── Tenant-Scoped Collections ────────────────────────────────────
-    // Every document in these collections MUST have an enterprise_id field.
-    // Users can only access documents matching their own enterprise_id.
-    // Admins have read-only cross-tenant access.
     match /{collection}/{docId} {
       // Admin and Developer read-only across tenants
       allow read: if isAdmin() || isDeveloper();
 
       // Regular tenant access — must match own enterprise
-      allow read: if isSignedIn() &&
-        resource != null &&
-        resource.data.enterprise_id != null &&
-        isOwnEnterprise();
+      allow read: if belongsToEnterprise(resource.data.enterprise_id);
 
       // Writes must target own enterprise or be an admin
-      allow create: if (isSignedIn() &&
-        request.resource.data.enterprise_id != null &&
-        isOwnEnterpriseWrite()) || isAdmin();
+      allow create: if isAdmin() || (isSignedIn() && isOwnEnterpriseWrite());
 
-      allow update: if (isSignedIn() && (
-        (resource != null &&
-         resource.data.enterprise_id != null &&
-         isOwnEnterprise() &&
-         request.resource.data.enterprise_id == resource.data.enterprise_id) || isAdmin()
-      ));
+      allow update: if isAdmin() || (isSignedIn() && isOwnEnterprise());
 
-      allow delete: if (isSignedIn() && (
-        isAdmin() || 
-        isDeveloper() ||
-        (resource != null &&
-         resource.data.enterprise_id != null &&
-         isOwnEnterprise())
-      ));
+      allow delete: if isAdmin() || isDeveloper() || (isSignedIn() && isOwnEnterprise());
     }
   }
 }

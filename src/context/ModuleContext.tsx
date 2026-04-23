@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { ModuleConfig } from "../types";
 import { DEFAULT_MODULE_CONFIG } from "../constants";
-import { db, doc, onSnapshot } from "@/lib/firebase";
+import { db, doc, onSnapshot, query, collection, where } from "@/lib/firebase";
 
 interface ModuleContextType {
   config: ModuleConfig;
@@ -42,8 +42,10 @@ interface ModuleContextType {
   clearSession: () => void;
   grantedOverrides: string[];
   addOverride: (tabId: string) => void;
-  userRole: string | null;
   setUserRole: (role: string | null) => void;
+  userRole: string | null;
+  rolePermissions: Record<string, string | boolean> | null;
+  hasPermission: (moduleId: string, level?: "viewer" | "editor" | "admin") => boolean;
   logout: () => Promise<void>;
 }
 
@@ -144,6 +146,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const [grantedOverrides, setGrantedOverrides] = useState<string[]>([]);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string | boolean> | null>(null);
   const [shiftTimePolicies, setShiftTimePolicies] = useState({ breakDuration: 15, lunchDuration: 30, meetingDuration: 60, gracePeriod: 5 });
 
   const updateShiftStatus = (status: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING") => {
@@ -202,8 +205,75 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   }, [enterpriseId]);
 
   useEffect(() => {
-    if (!posSession) setGrantedOverrides([]);
-  }, [posSession]);
+    if (!posSession) {
+      setGrantedOverrides([]);
+      if (!userRole) setRolePermissions(null);
+      return;
+    }
+
+    // Resolve Role Permissions from Firestore for POS Session
+    const roleName = posSession.staffData?.role;
+    if (!roleName || !enterpriseId) return;
+
+    const unsub = onSnapshot(
+      query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId), where("name", "==", roleName)),
+      (snap) => {
+        if (!snap.empty) {
+          const roleData = snap.docs[0].data();
+          setRolePermissions(roleData.permissions || {});
+        }
+      }
+    );
+    return () => unsub();
+  }, [posSession, enterpriseId, userRole]);
+
+  useEffect(() => {
+    if (!userRole || !enterpriseId) {
+      if (!posSession) setRolePermissions(null);
+      return;
+    }
+
+    // Resolve Role Permissions for Web/Portal User Role
+    const unsub = onSnapshot(
+      query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId), where("name", "==", userRole)),
+      (snap) => {
+        if (!snap.empty) {
+          const roleData = snap.docs[0].data();
+          setRolePermissions(roleData.permissions || {});
+        }
+      }
+    );
+    return () => unsub();
+  }, [userRole, enterpriseId, posSession]);
+
+  const hasPermission = (moduleId: string, level: "viewer" | "editor" | "admin" = "viewer") => {
+    if (grantedOverrides.includes(moduleId)) return true;
+
+    if (posSession) {
+      // Terminal is active: Strictly enforce Staff Role permissions
+      if (posSession.payGrade === "EXECUTIVE") return true;
+      if (!rolePermissions) return false;
+
+      const perm = rolePermissions[moduleId];
+      if (perm === true || perm === "admin") return true;
+      if (level === "admin") return perm === "admin";
+      if (level === "editor") return perm === "editor" || perm === "admin";
+      if (level === "viewer") return perm === "viewer" || perm === "editor" || perm === "admin";
+      return false;
+    }
+
+    // No terminal active: Evaluate Web Portal user role
+    if (userRole === "Owner") return true;
+    if (!rolePermissions) return false;
+
+    const perm = rolePermissions[moduleId];
+    if (perm === true || perm === "admin") return true;
+    if (level === "admin") return perm === "admin";
+    if (level === "editor") return perm === "editor" || perm === "admin";
+    if (level === "viewer") return perm === "viewer" || perm === "editor" || perm === "admin";
+    
+    return false;
+  };
 
   const addOverride = (tabId: string) => {
     setGrantedOverrides(prev => [...new Set([...prev, tabId])]);
@@ -284,6 +354,8 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       clearSession,
       userRole,
       setUserRole,
+      rolePermissions,
+      hasPermission,
       logout
     }}>
       {children}

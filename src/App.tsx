@@ -28,6 +28,7 @@ import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import AuthActionHandler from "./components/AuthActionHandler";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 
 function AppContent() {
@@ -41,13 +42,18 @@ function AppContent() {
     window.location.pathname === "/connect" || 
     window.location.hash.startsWith("#/connect");
 
+  const isAuthActionRoute = 
+    new URLSearchParams(window.location.search).has("mode") && 
+    new URLSearchParams(window.location.search).has("oobCode");
+
+  if (isAuthActionRoute) return <AuthActionHandler />;
   if (isAdminRoute) return <AdminPortal />;
   if (isSocialRoute) return <SocialHub />;
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [user, setUser] = useState<User | null | undefined>(undefined); // undefined = still loading
   const [enterpriseLoading, setEnterpriseLoading] = useState(true);
-  const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId, setUserRole } = useModules();
+  const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId, setUserRole, hasPermission, userRole } = useModules();
 
   // ── Step 1: Auth State Listener ─────────────────────────────────
   useEffect(() => {
@@ -111,28 +117,28 @@ function AppContent() {
   }, [user?.uid]); // Only re-run when the user ID changes
 
   const renderContent = () => {
-    // Support sub-routes (e.g. "support:help", "support:status")
     if (activeTab.startsWith("support:")) {
       const section = activeTab.split(":")[1] as any;
       return <Support section={section} />;
     }
+    const fallback = <Dashboard setActiveTab={setActiveTab} />;
     switch (activeTab) {
-      case "dashboard": return <Dashboard setActiveTab={setActiveTab} />;
-      case "crm": return isModuleEnabled("crm") ? <CRM /> : <Dashboard setActiveTab={setActiveTab} />;
+      case "dashboard": return fallback;
+      case "crm":       return hasPermission("crm")       ? <CRM />       : fallback;
       case "revenue":
-      case "finance": return isModuleEnabled("finance") ? <Revenue /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "groups": return <Groups />;
-      case "loyalty": return <Loyalty />;
-      case "pos": return isModuleEnabled("pos") ? <POS /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "inventory": return isModuleEnabled("inventory") ? <Inventory /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "analytics": return isModuleEnabled("analytics") ? <Analytics /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "workflow": return isModuleEnabled("workflow") ? <Workflow /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "audit": return isModuleEnabled("audit_logs") ? <AuditLogs /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "ai": return isModuleEnabled("ai") ? <AIInsights /> : <Dashboard setActiveTab={setActiveTab} />;
-      case "settings": return <Settings />;
-      case "staff": return <StaffManager />;
-      case "support": return <Support />;
-      default: return <Dashboard setActiveTab={setActiveTab} />;
+      case "finance":   return hasPermission("finance")   ? <Revenue />   : fallback;
+      case "groups":    return hasPermission("groups")    ? <Groups />    : fallback;
+      case "loyalty":   return hasPermission("loyalty")   ? <Loyalty />   : fallback;
+      case "pos":       return hasPermission("pos")       ? <POS />       : fallback;
+      case "inventory": return hasPermission("inventory") ? <Inventory /> : fallback;
+      case "analytics": return hasPermission("analytics") ? <Analytics /> : fallback;
+      case "workflow":  return hasPermission("workflow")  ? <Workflow />  : fallback;
+      case "audit":     return hasPermission("audit")     ? <AuditLogs /> : fallback;
+      case "ai":        return hasPermission("ai")        ? <AIInsights /> : fallback;
+      case "settings":  return hasPermission("settings", "admin") ? <Settings /> : fallback;
+      case "staff":     return hasPermission("staff", "admin")    ? <StaffManager /> : fallback;
+      case "support":   return <Support />;
+      default:          return fallback;
     }
   };
 

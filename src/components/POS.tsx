@@ -1217,30 +1217,32 @@ export default function POS() {
                   <div className="flex items-center gap-3">
                     {/* Duty Status Dropdown */}
                     <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <div 
-                          className={cn(
-                            "rounded-xl h-11 px-4 border border-zinc-200 bg-white hover:bg-zinc-50 shadow-sm transition-all flex items-center gap-3 cursor-pointer select-none",
-                            (currentSessionData?.status === 'ON_BREAK') && "border-amber-200 bg-amber-50/30 text-amber-600",
-                            (currentSessionData?.status === 'ON_LUNCH') && "border-orange-200 bg-orange-50/30 text-orange-600",
-                            (currentSessionData?.status === 'IN_MEETING') && "border-indigo-200 bg-indigo-50/30 text-indigo-600"
-                          )}
-                        >
-                          <div className="flex items-center gap-2">
-                             {(() => {
-                               const s = currentSessionData?.status || 'ACTIVE';
-                               if (s === 'ON_BREAK') return <Coffee className="w-4 h-4" />;
-                               if (s === 'ON_LUNCH') return <Utensils className="w-4 h-4" />;
-                               if (s === 'IN_MEETING') return <Users className="w-4 h-4" />;
-                               return <Play className="w-4 h-4 text-emerald-500" />;
-                             })()}
-                             <span className="text-xs font-black uppercase tracking-widest">
-                               {currentSessionData?.status?.replace('ON_', '').replace('IN_', '') || 'On Duty'}
-                             </span>
+                      <DropdownMenuTrigger 
+                        render={
+                          <div 
+                            className={cn(
+                              "rounded-xl h-11 px-4 border border-zinc-200 bg-white hover:bg-zinc-50 shadow-sm transition-all flex items-center gap-3 cursor-pointer select-none",
+                              (currentSessionData?.status === 'ON_BREAK') && "border-amber-200 bg-amber-50/30 text-amber-600",
+                              (currentSessionData?.status === 'ON_LUNCH') && "border-orange-200 bg-orange-50/30 text-orange-600",
+                              (currentSessionData?.status === 'IN_MEETING') && "border-indigo-200 bg-indigo-50/30 text-indigo-600"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                               {(() => {
+                                 const s = currentSessionData?.status || 'ACTIVE';
+                                 if (s === 'ON_BREAK') return <Coffee className="w-4 h-4" />;
+                                 if (s === 'ON_LUNCH') return <Utensils className="w-4 h-4" />;
+                                 if (s === 'IN_MEETING') return <Users className="w-4 h-4" />;
+                                 return <Play className="w-4 h-4 text-emerald-500" />;
+                               })()}
+                               <span className="text-xs font-black uppercase tracking-widest">
+                                 {currentSessionData?.status?.replace('ON_', '').replace('IN_', '') || 'On Duty'}
+                               </span>
+                            </div>
+                            <ChevronRight className="w-4 h-4 rotate-90 text-zinc-400" />
                           </div>
-                          <ChevronRight className="w-4 h-4 rotate-90 text-zinc-400" />
-                        </div>
-                      </DropdownMenuTrigger>
+                        }
+                      />
                       <DropdownMenuContent className="w-64 rounded-2xl p-1 shadow-2xl border-none bg-white/95 backdrop-blur-xl" align="end">
                         <DropdownMenuGroup>
                           <DropdownMenuLabel className="px-3 py-3 border-b border-zinc-100 mb-1">

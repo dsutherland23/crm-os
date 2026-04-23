@@ -451,9 +451,11 @@ export default function Loyalty() {
                     <TableCell className="py-4 text-xs font-mono text-zinc-500">{c.end_date || "N/A"}</TableCell>
                     <TableCell className="py-4 text-right">
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><MoreHorizontal className="w-4 h-4" /></Button>
-                        </DropdownMenuTrigger>
+                        <DropdownMenuTrigger 
+                          render={
+                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><MoreHorizontal className="w-4 h-4" /></Button>
+                          }
+                        />
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
                           <DropdownMenuItem onClick={() => handleEditCampaign(c)} className="py-2 px-3 font-bold text-[10px] uppercase tracking-widest cursor-pointer">
                             <Edit3 className="w-3.5 h-3.5 mr-2 text-blue-600" />
