@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Sidebar, Header } from "./components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
+import NetworkIndicator from "@/components/NetworkIndicator";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth, db, doc, onSnapshot } from "@/lib/firebase";
 import { getMockUser } from "./lib/auth-mock";
@@ -153,133 +154,141 @@ function AppContent() {
   };
 
   // ── Guard 1: Auth state not yet resolved ─────────────────────────
-  if (user === undefined || (user && enterpriseLoading)) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-950 relative overflow-hidden">
-        {/* Animated Background Gradients */}
-        <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-blue-600/10 rounded-full blur-[140px] animate-pulse" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse" />
-        
-        <div className="relative z-10 flex flex-col items-center gap-8">
-          <div className="relative">
-            <RipplePulseLoader size="lg" hideLogo={true} />
-            <div className="absolute inset-0 flex items-center justify-center z-20">
-              <span className="text-zinc-950 font-black text-[11px] uppercase tracking-[0.2em] translate-x-[0.1em] animate-in fade-in zoom-in duration-1000">
-                ORIVO
-              </span>
-            </div>
-          </div>
-          
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.3em] ml-[0.3em]">
-              {user ? "Provisioning Workspace" : "Initializing Engine"}
-            </p>
-            <div className="w-32 h-[1px] bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 w-1/3 animate-[progress_2s_ease-in-out_infinite]" />
-            </div>
-          </div>
-        </div>
-
-        <style dangerouslySetInnerHTML={{ __html: `
-          @keyframes progress {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(300%); }
-          }
-        `}} />
-      </div>
-    );
-  }
-
-  // ── Guard 2: Not logged in ───────────────────────────────────────
-  if (!user) {
-    return <Auth />;
-  }
-
-  // ── Guard 3: Email not verified (only for non-mock, returning users) ─
-  // IMPORTANT: We allow unverified users through if they have no enterprise yet
-  // (they just finished signing up and are in the provisioning flow).
-  // The VerificationGate will be shown AFTER their profile is written.
-  if (!user.emailVerified && !getMockUser() && enterpriseId) {
-    return <VerificationGate user={user} />;
-  }
-
-  // ── Guard 4: Verified but no enterprise profile yet ──────────────
-  if (!enterpriseId) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
-        <Card className="max-w-md w-full card-modern p-6 sm:p-10 text-center space-y-6">
-          <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto text-amber-500">
-            <Sparkles className="w-8 h-8" />
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold text-zinc-900">Workspace not found</h2>
-            <p className="text-sm text-zinc-500 mt-2">
-              We couldn't find an enterprise profile linked to <strong>{user.email}</strong>.
-              This can happen if setup didn't complete. Please try signing out and signing back in,
-              or contact support.
-            </p>
-          </div>
-          <div className="space-y-3">
-            <Button 
-              variant="outline" 
-              className="w-full h-12 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-all"
-              onClick={() => window.location.reload()}
-            >
-              Retry
-            </Button>
-            <Button 
-              variant="ghost" 
-              className="w-full text-zinc-400 text-xs font-medium"
-              onClick={() => auth.signOut()}
-            >
-              Sign Out
-            </Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // ── Authenticated & provisioned: render the app ──────────────────
   return (
-    <div className="h-screen bg-background font-sans text-foreground antialiased transition-colors duration-300">
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        isMobileOpen={isMobileOpen}
-        setIsMobileOpen={setIsMobileOpen}
-      />
+    <AnimatePresence mode="wait">
+      {user === undefined || (user && enterpriseLoading) ? (
+        <motion.div 
+          key="splash"
+          initial={{ opacity: 1 }}
+          exit={{ opacity: 0, scale: 1.05 }}
+          transition={{ duration: 0.8, ease: [0.32, 0.72, 0, 1] }}
+          className="min-h-screen fixed inset-0 z-[100] flex flex-col items-center justify-center bg-zinc-950 overflow-hidden"
+        >
+          {/* Animated Background Gradients */}
+          <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] bg-blue-600/10 rounded-full blur-[140px] animate-pulse" />
+          <div className="absolute bottom-[-20%] right-[-10%] w-[60%] h-[60%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse" />
+          
+          <div className="relative z-10 flex flex-col items-center gap-8">
+            <div className="relative">
+              <RipplePulseLoader size="lg" hideLogo={true} />
+              <div className="absolute inset-0 flex items-center justify-center z-20">
+                <span className="text-zinc-950 font-black text-[11px] uppercase tracking-[0.2em] translate-x-[0.1em] animate-in fade-in zoom-in duration-1000">
+                  ORIVO
+                </span>
+              </div>
+            </div>
+            
+            <div className="flex flex-col items-center gap-2">
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-[0.3em] ml-[0.3em]">
+                {user ? "Provisioning Workspace" : "Initializing Engine"}
+              </p>
+              <div className="w-32 h-[1px] bg-zinc-800 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-500 w-1/3 animate-[progress_2s_ease-in-out_infinite]" />
+              </div>
+            </div>
+          </div>
 
-      <div className="lg:pl-72 flex flex-col h-screen">
-        <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} />
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes progress {
+              0% { transform: translateX(-100%); }
+              100% { transform: translateX(300%); }
+            }
+          `}} />
+        </motion.div>
+      ) : null}
 
-        <TrialBanner onUpgrade={() => { 
-          setSettingsTab("billing");
-          setActiveTab("settings"); 
-        }} />
+      {user !== undefined && !enterpriseLoading && (
+        <motion.div 
+          key="app-shell"
+          initial={{ opacity: 0, filter: "blur(10px)" }}
+          animate={{ opacity: 1, filter: "blur(0px)" }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="contents"
+        >
+          {/* ── Guard 2: Not logged in ─────────────────────────────────────── */}
+          {!user ? (
+            <Auth />
+          ) : !user.emailVerified && !getMockUser() && enterpriseId ? (
+            /* ── Guard 3: Email not verified ─────────────────────────────── */
+            <VerificationGate user={user} />
+          ) : !enterpriseId ? (
+            /* ── Guard 4: Verified but no enterprise profile yet ─────────── */
+            <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
+              <Card className="max-w-md w-full card-modern p-6 sm:p-10 text-center space-y-6">
+                <div className="w-16 h-16 bg-amber-50 rounded-2xl flex items-center justify-center mx-auto text-amber-500">
+                  <Sparkles className="w-8 h-8" />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-bold text-zinc-900">Workspace not found</h2>
+                  <p className="text-sm text-zinc-500 mt-2">
+                    We couldn't find an enterprise profile linked to <strong>{user.email}</strong>.
+                    This can happen if setup didn't complete. Please try signing out and signing back in,
+                    or contact support.
+                  </p>
+                </div>
+                <div className="space-y-3">
+                  <Button 
+                    variant="outline" 
+                    className="w-full h-12 rounded-xl text-zinc-600 font-bold hover:bg-zinc-100 transition-all"
+                    onClick={() => window.location.reload()}
+                  >
+                    Retry
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full text-zinc-400 text-xs font-medium"
+                    onClick={() => auth.signOut()}
+                  >
+                    Sign Out
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          ) : (
+            /* ── Authenticated & provisioned: render the app ────────────────── */
+            <div className="h-screen bg-background font-sans text-foreground antialiased transition-colors duration-300">
+              <Sidebar
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                isMobileOpen={isMobileOpen}
+                setIsMobileOpen={setIsMobileOpen}
+              />
 
-        <main className="flex-1 overflow-x-hidden overflow-y-auto">
-          {renderContent()}
-        </main>
-      </div>
+              <div className="lg:pl-72 flex flex-col h-screen">
+                <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} />
 
-      {/* Global AI Copilot Floating Button */}
-      {isModuleEnabled("ai") && activeTab !== "ai" && (
-        <Dialog>
-          <DialogTrigger
-            className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:scale-110 active:scale-95 transition-all duration-300 group z-50 p-0 flex items-center justify-center border-none cursor-pointer"
-          >
-            <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform text-blue-400" />
-          </DialogTrigger>
-          <DialogContent className="max-w-5xl h-[85vh] p-0 overflow-hidden rounded-[2rem] border-zinc-200/60 shadow-2xl">
-            <AIInsights />
-          </DialogContent>
-        </Dialog>
+                <TrialBanner onUpgrade={() => { 
+                  setSettingsTab("billing");
+                  setActiveTab("settings"); 
+                }} />
+
+                <main className="flex-1 overflow-x-hidden overflow-y-auto">
+                  {renderContent()}
+                </main>
+              </div>
+
+              {/* Global AI Copilot Floating Button */}
+              {isModuleEnabled("ai") && activeTab !== "ai" && (
+                <Dialog>
+                  <DialogTrigger
+                    className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white shadow-[0_20px_50px_rgba(0,0,0,0.3)] hover:scale-110 active:scale-95 transition-all duration-300 group z-50 p-0 flex items-center justify-center border-none cursor-pointer"
+                  >
+                    <Sparkles className="w-6 h-6 group-hover:rotate-12 transition-transform text-blue-400" />
+                  </DialogTrigger>
+                  <DialogContent className="max-w-5xl h-[85vh] p-0 overflow-hidden rounded-[2rem] border-zinc-200/60 shadow-2xl">
+                    <AIInsights />
+                  </DialogContent>
+                </Dialog>
+              )}
+
+              <Toaster position="top-right" />
+              <PWAInstallPrompt />
+              <NetworkIndicator />
+            </div>
+          )}
+        </motion.div>
       )}
-
-      <Toaster position="top-right" />
-      <PWAInstallPrompt />
-    </div>
+    </AnimatePresence>
   );
 }
 

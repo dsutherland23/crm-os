@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import * as fs from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { getMockUser } from './auth-mock';
@@ -8,7 +8,9 @@ import * as demoFs from './firebase-demo';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
 
 // Toggle this to switch between Live and Mock databases
 const USE_LIVE_DB = true; 

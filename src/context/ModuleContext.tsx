@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { ModuleConfig } from "../types";
 import { DEFAULT_MODULE_CONFIG } from "../constants";
 import { db, doc, onSnapshot, query, collection, where } from "@/lib/firebase";
+import { PLAN_LIMITS } from "../constants/plan-limits";
+import { toast } from "sonner";
 
 interface ModuleContextType {
   config: ModuleConfig;
@@ -42,6 +44,7 @@ interface ModuleContextType {
   clearSession: () => void;
   grantedOverrides: string[];
   addOverride: (tabId: string) => void;
+  checkLimit: (resource: "users" | "branches") => { allowed: boolean; current: number; max: number; message?: string };
   setUserRole: (role: string | null) => void;
   userRole: string | null;
   rolePermissions: Record<string, string | boolean> | null;
@@ -164,7 +167,14 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
        }
     });
 
-    return () => unsub();
+    const unsubUsers = onSnapshot(query(collection(db, "users"), where("enterprise_id", "==", enterpriseId)), (snap) => {
+      setBillingState(prev => ({ ...prev, userCount: snap.size }));
+    });
+    const unsubBranches = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snap) => {
+      setBillingState(prev => ({ ...prev, branchCount: snap.size }));
+    });
+
+    return () => { unsub(); unsubUsers(); unsubBranches(); };
   }, [enterpriseId]);
 
   const [posSession, setPosSession] = useState<{ 
@@ -180,6 +190,10 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
 
   const updateShiftStatus = (status: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING") => {
     setPosSession(prev => prev ? { ...prev, shiftStatus: status, statusSince: new Date().toISOString() } : null);
+  };
+
+  const setBranding = (update: Partial<BrandingConfig>) => {
+    setBrandingState(prev => ({ ...prev, ...update }));
   };
 
   const setBranding = (update: Partial<BrandingConfig>) => {
@@ -233,107 +247,6 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     else localStorage.removeItem("crm_enterprise_id");
   }, [enterpriseId]);
 
-  useEffect(() => {
-    if (!posSession) {
-      setGrantedOverrides([]);
-      if (!userRole) setRolePermissions(null);
-      return;
-    }
-
-    // Resolve Role Permissions from Firestore for POS Session
-    const roleName = posSession.staffData?.role;
-    if (!roleName || !enterpriseId) return;
-
-    const unsub = onSnapshot(
-      query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId), where("name", "==", roleName)),
-      (snap) => {
-        if (!snap.empty) {
-          const roleData = snap.docs[0].data();
-          setRolePermissions(roleData.permissions || {});
-        }
-      }
-    );
-    return () => unsub();
-  }, [posSession, enterpriseId, userRole]);
-
-  useEffect(() => {
-    if (!userRole || !enterpriseId) {
-      if (!posSession) setRolePermissions(null);
-      return;
-    }
-
-    // Resolve Role Permissions for Web/Portal User Role
-    const unsub = onSnapshot(
-      query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId), where("name", "==", userRole)),
-      (snap) => {
-        if (!snap.empty) {
-          const roleData = snap.docs[0].data();
-          setRolePermissions(roleData.permissions || {});
-        }
-      }
-    );
-    return () => unsub();
-  }, [userRole, enterpriseId, posSession]);
-
-  const hasPermission = (moduleId: string, level: "viewer" | "editor" | "admin" = "viewer") => {
-    if (grantedOverrides.includes(moduleId)) return true;
-
-    if (posSession) {
-      // Terminal is active: Strictly enforce Staff Role permissions
-      if (posSession.payGrade === "EXECUTIVE") return true;
-      if (!rolePermissions) return false;
-
-      const perm = rolePermissions[moduleId];
-      if (perm === true || perm === "admin") return true;
-      if (level === "admin") return perm === "admin";
-      if (level === "editor") return perm === "editor" || perm === "admin";
-      if (level === "viewer") return perm === "viewer" || perm === "editor" || perm === "admin";
-      return false;
-    }
-
-    // No terminal active: Evaluate Web Portal user role
-    if (userRole === "Owner") return true;
-    if (!rolePermissions) return false;
-
-    const perm = rolePermissions[moduleId];
-    if (perm === true || perm === "admin") return true;
-    if (level === "admin") return perm === "admin";
-    if (level === "editor") return perm === "editor" || perm === "admin";
-    if (level === "viewer") return perm === "viewer" || perm === "editor" || perm === "admin";
-    
-    return false;
-  };
-
-  const addOverride = (tabId: string) => {
-    setGrantedOverrides(prev => [...new Set([...prev, tabId])]);
-  };
-
-  const clearSession = () => {
-    setPosSession(null);
-    setGrantedOverrides([]);
-  };
-
-  const logout = async () => {
-    try {
-      clearSession();
-      // Use dynamic imports or similar if auth is not available here, 
-      // but it's imported at the top of the file normally in this project.
-      const { auth } = await import("@/lib/firebase");
-      const { signOut } = await import("firebase/auth");
-      const { clearMockUser, getMockUser } = await import("@/lib/auth-mock");
-      
-      await signOut(auth);
-      
-      if (getMockUser()) {
-        clearMockUser();
-      } else {
-        window.location.reload(); // Traditional reload for real auth logout
-      }
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
-  };
-
   const toggleModule = (moduleName: keyof ModuleConfig) => {
     setConfig(prev => ({ ...prev, [moduleName]: !prev[moduleName] }));
   };
@@ -351,10 +264,104 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     }).format(amount);
   };
 
+  const addOverride = (tabId: string) => {
+    setGrantedOverrides(prev => [...new Set([...prev, tabId])]);
+  };
+
+  const clearSession = () => {
+    setPosSession(null);
+    setGrantedOverrides([]);
+  };
+
+  const logout = async () => {
+    try {
+      clearSession();
+      const { auth } = await import("@/lib/firebase");
+      const { signOut } = await import("firebase/auth");
+      const { clearMockUser, getMockUser } = await import("@/lib/auth-mock");
+      
+      await signOut(auth);
+      
+      if (getMockUser()) {
+        clearMockUser();
+      } else {
+        window.location.reload(); 
+      }
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
+  const checkLimit = (resource: "users" | "branches") => {
+    const limits = PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS] || PLAN_LIMITS.starter;
+    const current = resource === "users" ? billing.userCount : billing.branchCount;
+    const max = resource === "users" ? limits.maxUsers : limits.maxBranches;
+    
+    return {
+      allowed: current < max,
+      current,
+      max,
+      message: current >= max 
+        ? `You've reached the limit of ${max} ${resource} for the ${limits.name} plan. Upgrade to increase your capacity.`
+        : undefined
+    };
+  };
+
+  const hasPermission = (moduleId: string, level: "viewer" | "editor" | "admin" = "viewer") => {
+    // Plan Gating: Check if feature is included in the current plan
+    const limits = PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS] || PLAN_LIMITS.starter;
+    if (!limits.features.includes(moduleId) && !["dashboard", "settings", "support", "staff", "billing"].includes(moduleId)) {
+      return false;
+    }
+
+    if (grantedOverrides.includes(moduleId)) return true;
+
+    if (posSession) {
+      if (posSession.payGrade === "EXECUTIVE") return true;
+      if (!rolePermissions) return false;
+
+      const perm = rolePermissions[moduleId];
+      if (perm === true || perm === "admin") return true;
+      if (level === "admin") return perm === "admin";
+      if (level === "editor") return perm === "editor" || perm === "admin";
+      if (level === "viewer") return perm === "viewer" || perm === "editor" || perm === "admin";
+      return false;
+    }
+
+    if (userRole === "Owner") return true;
+    if (!rolePermissions) return false;
+
+    const perm = rolePermissions[moduleId];
+    if (perm === true || perm === "admin") return true;
+    if (level === "admin") return perm === "admin";
+    if (level === "editor") return perm === "editor" || perm === "admin";
+    if (level === "viewer") return perm === "viewer" || perm === "editor" || perm === "admin";
+    
+    return false;
+  };
+
   const updateBilling = async (update: Partial<BillingConfig>) => {
+    const oldPlan = billing.planId;
     const newBilling = { ...billing, ...update };
     setBillingState(newBilling);
     
+    // Notifications for plan changes
+    if (update.planId && update.planId !== oldPlan) {
+      const oldWeight = oldPlan === "enterprise" ? 3 : oldPlan === "professional" ? 2 : 1;
+      const newWeight = update.planId === "enterprise" ? 3 : update.planId === "professional" ? 2 : 1;
+      
+      const { toast } = await import("sonner");
+      if (newWeight > oldWeight) {
+        toast.success("Account Upgraded!", {
+          description: `You are now on the ${PLAN_LIMITS[update.planId as keyof typeof PLAN_LIMITS].name} plan. New features unlocked!`
+        });
+      } else {
+        toast.warning("Plan Downgraded", {
+          description: `Your account has been moved to the ${PLAN_LIMITS[update.planId as keyof typeof PLAN_LIMITS].name} plan. Some features may be restricted.`
+        });
+      }
+    }
+
     if (enterpriseId) {
       try {
         const { setDoc, doc, serverTimestamp } = await import("@/lib/firebase");
@@ -397,6 +404,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       setShiftTimePolicies,
       grantedOverrides,
       addOverride,
+      checkLimit,
       clearSession,
       userRole,
       setUserRole,
