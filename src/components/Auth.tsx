@@ -32,6 +32,7 @@ import {
   BarChart3,
   RefreshCw,
   CheckCircle2,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { CpuArchitecture } from "@/components/ui/cpu-architecture";
