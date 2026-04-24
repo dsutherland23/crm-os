@@ -249,7 +249,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     customers: null,
     inventory: null,
     logs: null,
+    stats: null,
   });
+
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
 
   const [isActivityCollapsed, setIsActivityCollapsed] = useState(false);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -268,8 +271,24 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
     if (!enterpriseId) return;
 
-    setLoadingMap({ transactions: true, customers: true, inventory: true, logs: true });
-    setErrorMap({ transactions: null, customers: null, inventory: null, logs: null });
+    setLoadingMap({ transactions: true, customers: true, inventory: true, logs: true, stats: true });
+    setErrorMap({ transactions: null, customers: null, inventory: null, logs: null, stats: null });
+
+    // 0. Dashboard Stats (Server-side aggregated)
+    const unsubStats = onSnapshot(
+      doc(db, "dashboard_stats", enterpriseId),
+      (snap) => {
+        if (snap.exists()) {
+          setDashboardStats(snap.data());
+        }
+        setLoadingMap((p) => ({ ...p, stats: false }));
+      },
+      (err) => {
+        console.error("Dashboard stats listener:", err);
+        setErrorMap((p) => ({ ...p, stats: err.code }));
+        setLoadingMap((p) => ({ ...p, stats: false }));
+      }
+    );
 
     // 1. Transactions - Limit to most recent 50 for performance
     const txQuery = activeBranch === "all"
@@ -354,7 +373,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
       }
     );
 
-    subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs];
+    subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs, unsubStats];
   }, [activeBranch, enterpriseId]);
 
   useEffect(() => {
@@ -364,18 +383,22 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
   // ── Derived Metrics ────────────────────────────────────────
   const metrics = useMemo(() => {
+    if (dashboardStats?.metrics) return dashboardStats.metrics;
+
     const revenue = transactions.reduce((acc, tx) => acc + (Number(tx.total) || 0), 0);
     const orders = transactions.length;
     const customerCount = customers.filter((c) => c.status !== "Archived").length;
     const inventoryValue = inventory.reduce(
-      (acc, item) => acc + (Number(item.stock) || 0) * (Number(item.retail_price || item.price || item.cost) || 0),
+      (acc, item) => acc + (Number(item.quantity || item.stock) || 0) * (Number(item.retail_price || item.price || item.cost) || 0),
       0
     );
     return { revenue, orders, customers: customerCount, inventory: inventoryValue };
-  }, [transactions, customers, inventory]);
+  }, [dashboardStats, transactions, customers, inventory]);
 
   // ── Chart Data ─────────────────────────────────────────────
   const chartData = useMemo(() => {
+    if (dashboardStats?.chartData) return dashboardStats.chartData;
+
     const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const days = Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
@@ -395,7 +418,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     });
 
     return days;
-  }, [transactions]);
+  }, [dashboardStats, transactions]);
 
   // ── AI Insights ────────────────────────────────────────────
   const insights = useMemo(() => {
@@ -468,12 +491,20 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
   const handleRegenerate = useCallback(() => {
     if (isRegenerating) return;
     setIsRegenerating(true);
+    
+    // Call the background aggregator to update dashboard stats immediately
+    fetch("/api/cron/aggregate-dashboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enterpriseId })
+    }).catch(console.error);
+
     subscribe();
     setTimeout(() => {
       setIsRegenerating(false);
       toast.success("Intelligence synced with latest data");
     }, 1200);
-  }, [isRegenerating, subscribe]);
+  }, [isRegenerating, subscribe, enterpriseId]);
 
   // ── Quick Action dispatcher ────────────────────────────────
   // Sets a pending action in context so the target module consumes it safely on mount.

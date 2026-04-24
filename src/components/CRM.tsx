@@ -226,7 +226,7 @@ export default function CRM() {
         reader.readAsDataURL(file);
       });
 
-      const storageRef = ref(getStorage(), `customers/profiles/photo_${Date.now()}.jpg`);
+      const storageRef = ref(getStorage(), `enterprise/${enterpriseId}/customers/profiles/photo_${Date.now()}.jpg`);
       
       const uploadTask = (async () => {
         await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });

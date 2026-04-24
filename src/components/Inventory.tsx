@@ -42,8 +42,11 @@ import {
   ref,
   uploadBytes,
   getDownloadURL,
-  auth
+  auth,
+  increment,
+  serverTimestamp
 } from '@/lib/firebase';
+import { recordFinancialEvent } from '@/lib/ledger';
 import { toast } from 'sonner';
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
@@ -447,7 +450,7 @@ export default function Inventory() {
           });
         } else {
           batch.update(snapshot.docs[0].ref, {
-            quantity: (snapshot.docs[0].data().quantity || 0) + item.qty,
+            quantity: increment(item.qty),
             updated_at: new Date().toISOString()
           });
         }
@@ -487,6 +490,19 @@ export default function Inventory() {
       });
 
       await batch.commit();
+
+      // Log the financial event for Double-Entry Ledger (Expense / Accounts Payable)
+      if (poToReceive.total_cost && poToReceive.total_cost > 0) {
+        await recordFinancialEvent({
+          enterpriseId,
+          amount: poToReceive.total_cost,
+          sourceId: poToReceive.id,
+          sourceType: "EXPENSE",
+          description: `Inventory PO Receipt - ${poToReceive.supplier_id}`,
+          metadata: { supplier: poToReceive.supplier_id, itemsCount: poToReceive.items?.length }
+        });
+      }
+
       toast.success('Logistical reception complete. Assets deployed.');
       setIsReceiveDialogOpen(false);
       fetchData();
@@ -501,6 +517,8 @@ export default function Inventory() {
 
     try {
       const batch = writeBatch(db);
+      let totalShrinkageValue = 0;
+      let totalDiscoveryValue = 0;
       
       for (const item of st.items) {
         if (item.variance === 0) continue;
@@ -533,6 +551,14 @@ export default function Inventory() {
             enterprise_id: enterpriseId,
             reason: 'AUDIT_RECONCILIATION'
           });
+
+          // Accumulate financial impact
+          const cost = products.find(p => p.id === item.product_id)?.cost || 0;
+          if (item.variance < 0) {
+            totalShrinkageValue += (Math.abs(item.variance) * cost);
+          } else {
+            totalDiscoveryValue += (item.variance * cost);
+          }
         }
       }
 
@@ -542,6 +568,32 @@ export default function Inventory() {
       });
 
       await batch.commit();
+
+      if (totalShrinkageValue > 0) {
+        await recordFinancialEvent({
+          enterpriseId,
+          amount: totalShrinkageValue,
+          sourceId: st.id,
+          sourceType: "EXPENSE",
+          description: `Stocktake Shrinkage - Audit ${st.id.substring(0, 8)}`,
+          metadata: { audit_id: st.id, type: "SHRINKAGE" }
+        });
+      }
+      
+      if (totalDiscoveryValue > 0) {
+        // Logging discovery as a contra-expense (or revenue equivalent) in POS logic.
+        // For standard operations we can log it as an INVOICE/Sale equivalent to boost profit, 
+        // but POS_TRANSACTION is the generic revenue entry.
+        await recordFinancialEvent({
+          enterpriseId,
+          amount: totalDiscoveryValue,
+          sourceId: st.id,
+          sourceType: "POS_TRANSACTION",
+          description: `Stocktake Discovery - Audit ${st.id.substring(0, 8)}`,
+          metadata: { audit_id: st.id, type: "DISCOVERY" }
+        });
+      }
+
       toast.success('Inventory state recalibrated successfully');
       fetchData();
     } catch (error) {
@@ -567,9 +619,8 @@ export default function Inventory() {
 
       if (!snapshot.empty) {
         const invDoc = snapshot.docs[0];
-        const newQty = Math.max(0, (invDoc.data().quantity || 0) - batchItem.quantity);
         batchOp.update(invDoc.ref, {
-          quantity: newQty,
+          quantity: increment(-batchItem.quantity),
           updated_at: new Date().toISOString()
         });
       }
@@ -593,6 +644,21 @@ export default function Inventory() {
       batchOp.delete(doc(db, 'inventory_batches', batchItem.id));
 
       await batchOp.commit();
+
+      const product = products.find(p => p.id === batchItem.product_id);
+      const cost = product?.cost || 0;
+      const totalShrinkageValue = cost * batchItem.quantity;
+      if (totalShrinkageValue > 0) {
+        await recordFinancialEvent({
+          enterpriseId,
+          amount: totalShrinkageValue,
+          sourceId: batchItem.id,
+          sourceType: "EXPENSE",
+          description: `Inventory Liquidation - Batch ${batchItem.batch_number}`,
+          metadata: { batch_number: batchItem.batch_number, quantity: batchItem.quantity }
+        });
+      }
+
       toast.success('Batch liquidated and inventory recalibrated');
       fetchData();
     } catch (error) {

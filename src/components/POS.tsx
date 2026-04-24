@@ -70,9 +70,10 @@ import {
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
+import { usePendingAction } from "@/context/PendingActionContext";
 import { motion, AnimatePresence } from "motion/react";
 
-import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDocs, orderBy, limit, serverTimestamp } from "@/lib/firebase";
+import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDocs, orderBy, limit, serverTimestamp, increment } from "@/lib/firebase";
 import { PrintableInvoice } from "./PrintableInvoice";
 import { POSReceipt } from "./POSReceipt";
 import { POSAIUpsell } from "./POSAIUpsell";
@@ -96,6 +97,7 @@ export default function POS() {
     autoCloseTime,
     autoCloseEnabled
   } = useModules();
+  const { consumeAction } = usePendingAction();
   
   const [cart, setCart] = useState<{ product: any; quantity: number; discount?: { type: "Percentage" | "Fixed Amount"; value: number } | null }[]>([]);
   const [isTaxEnabled, setIsTaxEnabled] = useState(true);
@@ -438,20 +440,21 @@ export default function POS() {
     return () => clearInterval(interval);
   }, [autoCloseTime, autoCloseEnabled, isAuthorized, isClosePromptOpen, activeSessions, timePolicies]);
 
+  // Consume PendingAction dispatched from Dashboard quick-actions.
+  // Using context is race-condition-safe; the old window event approach was unreliable
+  // because POS may not have been mounted when the event fired.
   useEffect(() => {
-    const handleAction = (e: any) => {
-      if (e.detail === "NEW_SALE") {
-        setCart([]);
-        setCartDiscount(null);
-        setSelectedCustomer(null);
-        document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus();
-      } else if (e.detail === "CLOSE_REGISTER") {
-        setIsClosePromptOpen(true);
-      }
-    };
-    window.addEventListener("app:action", handleAction);
-    return () => window.removeEventListener("app:action", handleAction);
-  }, []);
+    const action = consumeAction("pos");
+    if (!action) return;
+    if (action.action === "NEW_SALE") {
+      setCart([]);
+      setCartDiscount(null);
+      setSelectedCustomer(null);
+      document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus();
+    } else if (action.action === "CLOSE_REGISTER") {
+      setIsClosePromptOpen(true);
+    }
+  }, [consumeAction]);
 
   const getProductStock = useCallback((productId: string) => {
     if (activeBranch === "all") {
@@ -748,6 +751,10 @@ export default function POS() {
         status: "COMPLETED",
         cashier_id: selectedAdmin?.id || null,
         cashier_name: selectedAdmin?.name || null,
+        // sessionId is REQUIRED for cash reconciliation in handleCloseRegister.
+        // The close dialog queries transactions where sessionId == currentSessionId
+        // to compute expected cash. Omitting this field causes $0 discrepancy report.
+        sessionId: currentSessionId || null,
         timestamp: serverTimestamp(),
         enterprise_id: enterpriseId
       });
@@ -770,7 +777,7 @@ export default function POS() {
         );
         if (invItem) {
           await updateDoc(doc(db, "inventory", invItem.id), {
-            quantity: Math.max(0, (invItem.quantity || 0) - item.quantity)
+            quantity: increment(-item.quantity)
           });
         }
       }));
@@ -785,8 +792,8 @@ export default function POS() {
           : pointsEarned;
 
         await updateDoc(doc(db, "customers", selectedCustomer.id), {
-          spend: (selectedCustomer.spend || 0) + total,
-          points: Math.max(0, (selectedCustomer.points || 0) + pointAdjustment),
+          spend: increment(total),
+          points: increment(pointAdjustment),
           last_purchase_date: serverTimestamp(),
           lastContact: new Date().toISOString()
         });

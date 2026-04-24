@@ -127,7 +127,8 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     enterpriseId,
     billing,
     taxRate,
-    setTaxRate
+    setTaxRate,
+    checkLimit
   } = useModules();
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [enterpriseName, setEnterpriseName] = useState(branding.name || "");
@@ -444,6 +445,12 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     const duplicate = branches.find(b => b.name?.trim().toLowerCase() === normalizedName);
     if (duplicate) {
       toast.error(`A branch named "${newBranch.name}" already exists. Please use a unique name.`);
+      return;
+    }
+
+    const limitCheck = checkLimit("branches");
+    if (!limitCheck.allowed) {
+      toast.error(limitCheck.message);
       return;
     }
 

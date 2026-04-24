@@ -17,7 +17,7 @@ import { useModules } from "@/context/ModuleContext";
 import { cn } from "@/lib/utils";
 
 export default function StaffManager() {
-  const { formatCurrency, enterpriseId, branding } = useModules();
+  const { formatCurrency, enterpriseId, branding, checkLimit } = useModules();
   const [staff, setStaff] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
@@ -111,6 +111,15 @@ export default function StaffManager() {
     }
     const loadingToast = toast.loading(isEditing ? "Updating staff record..." : "Creating staff record...");
     try {
+      if (!isEditing) {
+        const limitCheck = checkLimit("users");
+        if (!limitCheck.allowed) {
+          toast.dismiss(loadingToast);
+          toast.error(limitCheck.message);
+          return;
+        }
+      }
+
       if (isEditing && selectedStaffMember) {
         // 1. Update the Staff record (for POS)
         await updateDoc(doc(db, "staff", selectedStaffMember.id), {

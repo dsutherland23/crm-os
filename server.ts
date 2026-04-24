@@ -70,6 +70,78 @@ async function startServer() {
     res.json({ message: "Orphan cleanup scheduled. Implement with Storage Admin SDK when service account is available." });
   });
 
+  // ── DASHBOARD AGGREGATION CRON ─────────────────────────────────────
+  // Periodic background aggregation of metrics, replacing heavy client-side
+  // data fetching and processing on the Dashboard for enterprise scalability.
+  app.post("/api/cron/aggregate-dashboard", async (req, res) => {
+    try {
+      // In production, limit to active enterprise IDs or iterate through them.
+      // For this implementation, we will use the test enterprise "main-workspace" or take from req.body
+      const enterpriseId = req.body.enterpriseId || process.env.VITE_FIREBASE_PROJECT_ID || "crm-os-enterprise";
+      
+      const [txSnap, custSnap, invSnap] = await Promise.all([
+        db.collection("transactions").where("enterprise_id", "==", enterpriseId).get(),
+        db.collection("customers").where("enterprise_id", "==", enterpriseId).where("status", "!=", "Archived").get(),
+        db.collection("inventory").where("enterprise_id", "==", enterpriseId).get()
+      ]);
+
+      let totalRevenue = 0;
+      const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const days = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (6 - i));
+        return {
+          name: DAY_LABELS[d.getDay()],
+          date: d.toISOString().split("T")[0],
+          sales: 0,
+        };
+      });
+
+      txSnap.forEach(doc => {
+        const data = doc.data();
+        totalRevenue += (Number(data.total) || 0);
+        
+        let txDateStr = "";
+        if (data.timestamp?.toDate) {
+          txDateStr = data.timestamp.toDate().toISOString().split("T")[0];
+        } else if (data.timestamp) {
+          txDateStr = new Date(data.timestamp).toISOString().split("T")[0];
+        }
+
+        const dayMatch = days.find((d) => d.date === txDateStr);
+        if (dayMatch) {
+          dayMatch.sales += (Number(data.total) || 0);
+        }
+      });
+
+      let totalInventoryValue = 0;
+      invSnap.forEach(doc => {
+        const data = doc.data();
+        // Assuming price comes from joined product data in a real environment,
+        // but for now, fallback to stock * price if available.
+        totalInventoryValue += (Number(data.quantity || data.stock) || 0) * (Number(data.retail_price || data.price || data.cost) || 0);
+      });
+
+      const aggregatedData = {
+        metrics: {
+          revenue: totalRevenue,
+          orders: txSnap.size,
+          customers: custSnap.size,
+          inventory: totalInventoryValue
+        },
+        chartData: days,
+        last_updated: admin.firestore.FieldValue.serverTimestamp()
+      };
+
+      await db.collection("dashboard_stats").doc(enterpriseId).set(aggregatedData, { merge: true });
+
+      res.json({ success: true, message: "Dashboard aggregated successfully.", data: aggregatedData });
+    } catch (error: any) {
+      console.error("Dashboard aggregation failed:", error);
+      res.status(500).json({ error: "Aggregation failed", details: error.message });
+    }
+  });
+
 
   // POS Checkout Logic
   app.post("/api/pos/checkout", async (req, res) => {
@@ -96,7 +168,9 @@ async function startServer() {
         timestamp: new Date().toISOString(),
       });
 
-      // 2. Update Inventory
+      // 2. Update Inventory — use FieldValue.increment for atomicity.
+      // Reading stock then subtracting (stale-read pattern) causes race conditions
+      // when two sales process the same item concurrently.
       for (const item of items) {
         const inventoryQuery = await db.collection("inventory")
           .where("product_id", "==", item.id)
@@ -105,10 +179,8 @@ async function startServer() {
           .get();
 
         if (!inventoryQuery.empty) {
-          const inventoryDoc = inventoryQuery.docs[0];
-          const currentStock = inventoryDoc.data().stock;
-          batch.update(inventoryDoc.ref, {
-            stock: currentStock - item.quantity
+          batch.update(inventoryQuery.docs[0].ref, {
+            quantity: admin.firestore.FieldValue.increment(-item.quantity)
           });
         }
       }
