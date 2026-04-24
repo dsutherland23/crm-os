@@ -4,7 +4,7 @@
     "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build --if-present"]
   },
   "firestore": {
-    "database": "ai-studio-5949534d-ed11-4877-ab99-7f0b32e587a8",
+    "database": "(default)",
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },

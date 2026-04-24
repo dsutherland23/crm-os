@@ -767,7 +767,10 @@ export default function POS() {
         sourceId: txRef.id,
         sourceType: "POS_TRANSACTION",
         description: `POS Sale - ${cart.length} items`,
-        metadata: { cashier: selectedAdmin?.name, customer: selectedCustomer?.name }
+        metadata: { 
+          cashier: selectedAdmin?.name || null, 
+          customer: selectedCustomer?.name || null 
+        }
       });
 
       // 2. Deduct inventory quantity for each item

@@ -32,8 +32,16 @@ export async function recordFinancialEvent(params: {
   description: string;
   metadata?: any;
 }) {
-  const { enterpriseId, amount, sourceId, sourceType, description, metadata } = params;
+  const { enterpriseId, amount, sourceId, sourceType, description, metadata: rawMetadata } = params;
   const entries: Omit<LedgerEntry, "id">[] = [];
+
+  // Sanitize metadata to avoid Firestore "undefined" errors
+  const metadata = rawMetadata ? { ...rawMetadata } : {};
+  Object.keys(metadata).forEach(key => {
+    if (metadata[key] === undefined) {
+      metadata[key] = null;
+    }
+  });
 
   // Logic for Double-Entry mapping
   switch (sourceType) {
