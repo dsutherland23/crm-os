@@ -622,15 +622,13 @@ export default function Workflow() {
                               onCheckedChange={() => handleToggle(wf)}
                             />
                             <DropdownMenu>
-                              <DropdownMenuTrigger
-                                render={
+                              <DropdownMenuTrigger asChild>
                                   <Button variant="ghost" size="icon" className="h-9 w-9 min-w-[36px] rounded-xl hover:bg-zinc-100">
                                     {deletingId === wf.id
                                       ? <Loader2 className="w-4 h-4 animate-spin" />
                                       : <MoreHorizontal className="w-4 h-4" />}
                                   </Button>
-                                }
-                              />
+                              </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-48 rounded-xl border-zinc-200">
                                 <DropdownMenuItem
                                   className="flex items-center gap-2 py-2 cursor-pointer"

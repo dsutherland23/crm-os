@@ -171,7 +171,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
     { id: "crm", label: "Customers", icon: Users, enabled: isModuleEnabled("crm") && hasPermission("crm") },
     { id: "pos", label: "Point of Sale", icon: ShoppingCart, enabled: isModuleEnabled("pos") && hasPermission("pos") },
     { id: "inventory", label: "Stock Management", icon: Package, enabled: isModuleEnabled("inventory") && hasPermission("inventory") },
-    { id: "revenue", label: "Revenue", icon: Wallet, enabled: isModuleEnabled("finance") && hasPermission("finance") },
+    { id: "finance", label: "Revenue", icon: Wallet, enabled: isModuleEnabled("finance") && hasPermission("finance") },
     { id: "workflow", label: "Workflows", icon: Zap, enabled: isModuleEnabled("workflow") && hasPermission("workflow") },
     { id: "groups", label: "Groups", icon: Command, enabled: hasPermission("crm") },
     { id: "loyalty", label: "Loyalty", icon: Star, enabled: hasPermission("pos") },

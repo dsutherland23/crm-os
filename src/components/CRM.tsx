@@ -787,7 +787,7 @@ export default function CRM() {
         due_date: invoiceData.dueDate,
         status: invoiceData.status || "UNPAID",
         timestamp: serverTimestamp(),
-        branch_id: activeBranch?.id || "main"
+        branch_id: activeBranch || "main"
       });
       toast.success("Invoice created successfully");
       setIsInvoiceDialogOpen(false);

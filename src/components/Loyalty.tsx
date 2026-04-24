@@ -249,14 +249,12 @@ export default function Loyalty() {
               Reward Logic
             </Button>
             <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs transition-transform hover:scale-[1.02]">
-                    <Plus className="w-4 h-4 mr-2" />
-                    New Campaign
-                  </Button>
-                }
-              />
+              <DropdownMenuTrigger asChild>
+                <Button className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs transition-transform hover:scale-[1.02]">
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Campaign
+                </Button>
+              </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 rounded-xl">
                 <DropdownMenuItem onClick={() => handleOpenDialog("Standard")} className="py-3 px-4 font-medium text-xs cursor-pointer">
                   <Percent className="w-4 h-4 mr-3 text-emerald-600" />
@@ -463,11 +461,9 @@ export default function Loyalty() {
                     <TableCell className="py-4 text-xs font-mono text-zinc-500">{c.end_date || "N/A"}</TableCell>
                     <TableCell className="py-4 text-right">
                       <DropdownMenu>
-                        <DropdownMenuTrigger 
-                          render={
-                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><MoreHorizontal className="w-4 h-4" /></Button>
-                          }
-                        />
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><MoreHorizontal className="w-4 h-4" /></Button>
+                        </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
                           <DropdownMenuItem onClick={() => handleEditCampaign(c)} className="py-2 px-3 font-bold text-[10px] uppercase tracking-widest cursor-pointer">
                             <Edit3 className="w-3.5 h-3.5 mr-2 text-blue-600" />

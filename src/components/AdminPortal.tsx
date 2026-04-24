@@ -4,6 +4,9 @@ import {
   signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
+  GoogleAuthProvider,
+  signInWithPopup,
+  createUserWithEmailAndPassword,
   type User,
 } from "firebase/auth";
 import {
@@ -177,8 +180,21 @@ export default function AdminPortal() {
   const [phase, setPhase] = useState<"checking" | "login" | "portal">("checking");
   const [adminUser, setAdminUser] = useState<User | null>(null);
   const [adminRecord, setAdminRecord] = useState<AdminRecord | null>(null);
+  const [emptyRegistry, setEmptyRegistry] = useState(false);
 
   useEffect(() => {
+    // Check if registry is empty (bootstrap mode)
+    const checkRegistry = async () => {
+      try {
+        const { getDocs, query, collection, limit } = await import("firebase/firestore");
+        const snap = await getDocs(query(collection(db, "admin_users"), limit(1)));
+        setEmptyRegistry(snap.empty);
+      } catch (e) {
+        console.warn("Registry check failed:", e);
+      }
+    };
+    checkRegistry();
+
     const unsub = onAuthStateChanged(auth, async (user) => {
       console.log("Admin Auth State Change:", user ? `User ${user.uid}` : "No User");
       if (!user) { 
@@ -203,6 +219,19 @@ export default function AdminPortal() {
           setAdminUser(user);
           setAdminRecord(snap.data() as AdminRecord);
           setPhase("portal");
+        } else if (emptyRegistry) {
+          // AUTO-PROVISION FIRST ADMIN
+          console.log("Registry empty, auto-provisioning first admin:", user.email);
+          const firstAdmin: AdminRecord = {
+            email: user.email || "",
+            role: "super_admin",
+            granted_at: new Date().toISOString()
+          };
+          await setDoc(doc(db, "admin_users", user.uid), firstAdmin);
+          setAdminUser(user);
+          setAdminRecord(firstAdmin);
+          setPhase("portal");
+          toast.success("Bootstrap complete: You are now the Super Admin.");
         } else {
           console.warn("No admin record found for UID or Email.");
           toast.error("Access denied: UID not found in registry.");
@@ -256,8 +285,22 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isRegister, setIsRegister] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [locked, setLocked] = useState(false);
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+      onSuccess();
+    } catch (err: any) {
+      toast.error(`Google Sign-in failed: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -265,8 +308,10 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
     if (!email || !password) { toast.error("Enter email and password."); return; }
     setLoading(true);
     try {
-      console.log("Attempting admin login for:", email);
-      const cred = await signInWithEmailAndPassword(auth, email, password);
+      console.log(`${isRegister ? 'Creating' : 'Attempting'} admin login for:`, email);
+      const cred = isRegister 
+        ? await createUserWithEmailAndPassword(auth, email, password)
+        : await signInWithEmailAndPassword(auth, email, password);
       console.log("Auth success, checking doc:", cred.user.uid);
       
       const adminSnap = await getDoc(doc(db, "admin_users", cred.user.uid));
@@ -346,9 +391,26 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
           <Button type="submit" disabled={loading || locked}
             className="w-full h-12 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm transition-all shadow-lg shadow-rose-600/20 disabled:opacity-50">
             {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : (
-              <span className="flex items-center gap-2"><Shield className="w-4 h-4" /> Authenticate</span>
+              <span className="flex items-center gap-2"><Shield className="w-4 h-4" /> {isRegister ? "Register & Bootstrap" : "Authenticate"}</span>
             )}
           </Button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
+            <div className="relative flex justify-center text-[10px] uppercase font-black tracking-widest"><span className="bg-zinc-950 px-2 text-zinc-700">or use social gateway</span></div>
+          </div>
+
+          <Button type="button" variant="outline" onClick={handleGoogleLogin} disabled={loading || locked}
+            className="w-full h-11 rounded-xl border-white/10 bg-white/5 hover:bg-white/10 text-white font-bold text-xs">
+            <Globe className="w-4 h-4 mr-2 text-blue-400" /> Sign in with Google
+          </Button>
+
+          <p className="text-center text-[10px] text-zinc-600 font-medium">
+            {isRegister ? "Already have an account?" : "No admin account yet?"}{" "}
+            <button type="button" onClick={() => setIsRegister(!isRegister)} className="text-rose-500 hover:underline font-bold">
+              {isRegister ? "Back to Login" : "Create Master Admin"}
+            </button>
+          </p>
         </form>
         <p className="text-center text-[10px] text-zinc-800 font-medium">Zero Trust · All access attempts are logged</p>
       </div>
@@ -1380,8 +1442,9 @@ function AnalyticsPane() {
 
       <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl p-5 space-y-3">
         <p className="text-white font-bold text-sm">Tenants by Industry</p>
-        {Object.entries(byIndustry).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
-          const pct = tenants.length ? Math.round((v / tenants.length) * 100) : 0;
+        {Object.entries(byIndustry).sort((a: any, b: any) => b[1] - a[1]).map(([k, v]) => {
+          const val = v as number;
+          const pct = tenants.length ? Math.round((val / tenants.length) * 100) : 0;
           return (
             <div key={k} className="space-y-1">
               <div className="flex justify-between text-xs">

@@ -61,6 +61,27 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ── ADMIN PORTAL ────────────────────────────────────────────────
+    match /admin_users/{uid} {
+      // Allow any signed-in user to check if they are an admin or check registry status
+      allow read: if isSignedIn();
+      // Only super_admins can grant/revoke access
+      allow write: if isSignedIn() && (
+        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin' ||
+        !exists(/databases/$(database)/documents/admin_users/0) // Allow first-ever write if system is empty
+      );
+    }
+
+    match /admin_audit_logs/{logId} {
+      allow read: if isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid));
+      allow create: if isSignedIn();
+    }
+
+    match /admin_meta/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid));
+    }
+
     // ── USER PROFILES ────────────────────────────────────────────────
     // Users can always read/write their own profile.
     // Needed for first-time setup and self-repair flows.

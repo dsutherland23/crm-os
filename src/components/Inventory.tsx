@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
+import Papa from 'papaparse';
 import { 
   Plus, Search, Filter, Download, MoreHorizontal, Package, 
   AlertTriangle, ArrowRightLeft, TrendingUp, Layers, Box, BarChart3,
   ChevronRight, ArrowRight, CheckCircle2, AlertCircle, Truck, Clock, RefreshCw, Sparkles,
-  Camera, Image as ImageIcon, Scan, ScanLine, Check, Info, MoreVertical, X as XIcon, Zap, ZapOff, Maximize2, Zap as Flashlight, Loader2, Trash2, Users
+  Camera, Image as ImageIcon, Scan, ScanLine, Check, Info, MoreVertical, X as XIcon, Zap, ZapOff, Maximize2, Zap as Flashlight, Loader2, Trash2, Users,
+  ShieldCheck, CalendarCheck, CreditCard, Activity, FileText
 } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -65,6 +67,7 @@ export default function Inventory() {
     shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies 
   } = useModules();
   const [activeTab, setActiveTab] = useState('stock');
+  const [activeSubTab, setActiveSubTab] = useState('inventory');
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [products, setProducts] = useState<any[]>([]);
@@ -79,8 +82,18 @@ export default function Inventory() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
   const [isPurchaseOrderOpen, setIsPurchaseOrderOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [isStocktakeDialogOpen, setIsStocktakeDialogOpen] = useState(false);
+  const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
+  const [stocktakes, setStocktakes] = useState<any[]>([]);
+  const [inventoryBatches, setInventoryBatches] = useState<any[]>([]);
+  const [selectedPO, setSelectedPO] = useState<any>(null);
+  const [selectedStocktake, setSelectedStocktake] = useState<any>(null);
   const [isBatchDeleting, setIsBatchDeleting] = useState(false);
   const [isBatchDeletingMovements, setIsBatchDeletingMovements] = useState(false);
+  const [isReceiveDialogOpen, setIsReceiveDialogOpen] = useState(false);
+  const [poToReceive, setPoToReceive] = useState<any>(null);
+  const [receivingBatchInfo, setReceivingBatchInfo] = useState<any>({}); // { [itemIndex]: { batch: '', expiry: '' } }
   const [isBatchDeletingSuppliers, setIsBatchDeletingSuppliers] = useState(false);
 
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
@@ -125,6 +138,7 @@ export default function Inventory() {
   });
 
   const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
   const [isSavingSupplier, setIsSavingSupplier] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -138,6 +152,8 @@ export default function Inventory() {
 
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
+  const [isSavingPO, setIsSavingPO] = useState(false);
+  const [isSavingStocktake, setIsSavingStocktake] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isFlashActive, setIsFlashActive] = useState(false);
   const [hasCameraAccess, setHasCameraAccess] = useState(false);
@@ -145,6 +161,19 @@ export default function Inventory() {
   const [flashlight, setFlashlight] = useState(false);
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [poForm, setPoForm] = useState<any>({
+    supplier_id: '',
+    items: [],
+    status: 'DRAFT',
+    total_cost: 0,
+    notes: ''
+  });
+  const [stocktakeForm, setStocktakeForm] = useState<any>({
+    branch_id: '',
+    items: [],
+    status: 'IN_PROGRESS',
+    notes: ''
+  });
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -201,12 +230,15 @@ export default function Inventory() {
     if (!enterpriseId) return;
     try {
       setLoading(true);
-      const [pSnap, iSnap, mSnap, bSnap, sSnap] = await Promise.all([
+      const [pSnap, iSnap, mSnap, bSnap, sSnap, poSnap, stSnap, btSnap] = await Promise.all([
         getDocs(query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId))),
         getDocs(query(collection(db, 'inventory'), where('enterprise_id', '==', enterpriseId))),
         getDocs(query(collection(db, 'inventory_movements'), where('enterprise_id', '==', enterpriseId))),
         getDocs(query(collection(db, 'branches'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId)))
+        getDocs(query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId))),
+        getDocs(query(collection(db, 'purchase_orders'), where('enterprise_id', '==', enterpriseId))),
+        getDocs(query(collection(db, 'stocktakes'), where('enterprise_id', '==', enterpriseId))),
+        getDocs(query(collection(db, 'inventory_batches'), where('enterprise_id', '==', enterpriseId)))
       ]);
 
       setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -218,6 +250,9 @@ export default function Inventory() {
       }));
       setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setSuppliers(sSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setPurchaseOrders(poSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setStocktakes(stSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setInventoryBatches(btSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (error) {
       console.error('Error fetching inventory:', error);
       toast.error('Logistics error: Could not sync assets');
@@ -246,6 +281,306 @@ export default function Inventory() {
     const total = getProductStock(p.id, 'all');
     return sum + (total * (p.cost || 0));
   }, 0);
+
+  const generateSKU = (category: string) => {
+    if (!category) {
+      toast.error('Select a category first to generate SKU');
+      return;
+    }
+    const prefix = category.substring(0, 3).toUpperCase().replace(/[^A-Z]/g, 'X');
+    const count = products.filter(p => p.category === category).length;
+    
+    // Ensure uniqueness
+    let nextNum = count + 1;
+    let newSku = `${prefix}-${nextNum.toString().padStart(3, '0')}`;
+    while (products.some(p => p.sku === newSku)) {
+      nextNum++;
+      newSku = `${prefix}-${nextNum.toString().padStart(3, '0')}`;
+    }
+
+    setProductForm(prev => ({ ...prev, sku: newSku }));
+    toast.success(`SKU generated: ${newSku}`, {
+      icon: <Sparkles className="w-4 h-4 text-amber-500" />
+    });
+  };
+
+  const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const loadingToast = toast.loading("Analyzing database file...");
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          const data = results.data as any[];
+          if (data.length === 0) throw new Error("No records found in CSV");
+
+          const batch = writeBatch(db);
+          let importedCount = 0;
+
+          data.forEach((row) => {
+            const name = row.name || row.Name || row.product || row.Product;
+            const sku = row.sku || row.SKU || row.code || row.Code;
+            if (!name || !sku) return;
+
+            const productRef = doc(collection(db, 'products'));
+            batch.set(productRef, {
+              name,
+              sku,
+              price: Number(row.price || row.Price || row.retail || 0),
+              retail_price: Number(row.price || row.Price || row.retail || 0),
+              cost: Number(row.cost || row.Cost || 0),
+              category: row.category || row.Category || 'General',
+              barcode: row.barcode || row.Barcode || '',
+              min_stock_level: Number(row.min_stock || 10),
+              enterprise_id: enterpriseId,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            });
+            importedCount++;
+          });
+
+          await batch.commit();
+          toast.success(`Strategic Import Complete: ${importedCount} assets onboarded.`, { id: loadingToast });
+          setIsImportDialogOpen(false);
+          fetchData();
+        } catch (error: any) {
+          toast.error(`Import failure: ${error.message}`, { id: loadingToast });
+        }
+      },
+      error: (error) => {
+        toast.error(`Parsing error: ${error.message}`, { id: loadingToast });
+      }
+    });
+  };
+
+  const handleSavePO = async () => {
+    if (!poForm.supplier_id || poForm.items.length === 0) {
+      toast.error('Mission violation: Incomplete PO data');
+      return;
+    }
+    setIsSavingPO(true);
+    try {
+      if (selectedPO) {
+        await updateDoc(doc(db, 'purchase_orders', selectedPO.id), {
+          ...poForm,
+          updated_at: new Date().toISOString()
+        });
+      } else {
+        await addDoc(collection(db, 'purchase_orders'), {
+          ...poForm,
+          enterprise_id: enterpriseId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      }
+      toast.success('Purchase Order synchronized');
+      setIsPurchaseOrderOpen(false);
+      fetchData();
+    } catch (error) {
+      toast.error('Strategic PO failure');
+    } finally {
+      setIsSavingPO(false);
+    }
+  };
+
+  const handleReceivePO = (po: any) => {
+    if (po.status === 'RECEIVED') return;
+    setPoToReceive(po);
+    const initialBatchInfo: any = {};
+    po.items.forEach((_: any, index: number) => {
+      initialBatchInfo[index] = { batch: `B${Math.random().toString(36).substring(7).toUpperCase()}`, expiry: '' };
+    });
+    setReceivingBatchInfo(initialBatchInfo);
+    setIsReceiveDialogOpen(true);
+  };
+
+  const finalizeReception = async () => {
+    if (!poToReceive) return;
+    try {
+      const batch = writeBatch(db);
+      const branchId = activeBranch === 'all' ? (branches[0]?.id || '') : activeBranch;
+      
+      for (let i = 0; i < poToReceive.items.length; i++) {
+        const item = poToReceive.items[i];
+        const batchInfo = receivingBatchInfo[i];
+        
+        // Update Inventory Total
+        const q = query(
+          collection(db, 'inventory'),
+          where('product_id', '==', item.product_id),
+          where('branch_id', '==', branchId),
+          where('enterprise_id', '==', enterpriseId)
+        );
+        const snapshot = await getDocs(q);
+        
+        if (snapshot.empty) {
+          const invRef = doc(collection(db, 'inventory'));
+          batch.set(invRef, {
+            product_id: item.product_id,
+            branch_id: branchId,
+            quantity: item.qty,
+            enterprise_id: enterpriseId,
+            updated_at: new Date().toISOString()
+          });
+        } else {
+          batch.update(snapshot.docs[0].ref, {
+            quantity: (snapshot.docs[0].data().quantity || 0) + item.qty,
+            updated_at: new Date().toISOString()
+          });
+        }
+
+        // Create Inventory Batch
+        const btRef = doc(collection(db, 'inventory_batches'));
+        batch.set(btRef, {
+          product_id: item.product_id,
+          branch_id: branchId,
+          batch_number: batchInfo.batch || `B${Date.now()}`,
+          expiry_date: batchInfo.expiry || '',
+          quantity: item.qty,
+          enterprise_id: enterpriseId,
+          created_at: new Date().toISOString()
+        });
+
+        // Log movement
+        const movRef = doc(collection(db, 'inventory_movements'));
+        batch.set(movRef, {
+          product_id: item.product_id,
+          product: products.find(p => p.id === item.product_id)?.name || 'Unknown',
+          qty: item.qty,
+          type: 'PO_RECEIPT',
+          from: suppliers.find(s => s.id === poToReceive.supplier_id)?.name || 'SUPPLIER',
+          to: branches.find(b => b.id === branchId)?.name || 'LOCAL',
+          date: new Date().toISOString(),
+          status: 'COMPLETED',
+          enterprise_id: enterpriseId,
+          reference_id: poToReceive.id,
+          batch_number: batchInfo.batch
+        });
+      }
+
+      batch.update(doc(db, 'purchase_orders', poToReceive.id), {
+        status: 'RECEIVED',
+        received_at: new Date().toISOString()
+      });
+
+      await batch.commit();
+      toast.success('Logistical reception complete. Assets deployed.');
+      setIsReceiveDialogOpen(false);
+      fetchData();
+    } catch (error) {
+      toast.error('Reception synchronization failure');
+    }
+  };
+
+  const handleApplyStocktake = async (st: any) => {
+    const confirm = window.confirm("Apply reconciliation adjustments? This will override current system counts with your manual findings.");
+    if (!confirm) return;
+
+    try {
+      const batch = writeBatch(db);
+      
+      for (const item of st.items) {
+        if (item.variance === 0) continue;
+
+        const q = query(
+          collection(db, 'inventory'),
+          where('product_id', '==', item.product_id),
+          where('branch_id', '==', st.branch_id),
+          where('enterprise_id', '==', enterpriseId)
+        );
+        const snapshot = await getDocs(q);
+
+        if (!snapshot.empty) {
+          batch.update(snapshot.docs[0].ref, {
+            quantity: item.counted,
+            updated_at: new Date().toISOString()
+          });
+
+          // Log discrepancy
+          const movRef = doc(collection(db, 'inventory_movements'));
+          batch.set(movRef, {
+            product_id: item.product_id,
+            product: products.find(p => p.id === item.product_id)?.name || 'Unknown',
+            qty: item.variance,
+            type: item.variance < 0 ? 'SHRINKAGE' : 'DISCOVERY',
+            from: 'AUDIT',
+            to: branches.find(b => b.id === st.branch_id)?.name || 'LOCAL',
+            date: new Date().toISOString(),
+            status: 'COMPLETED',
+            enterprise_id: enterpriseId,
+            reason: 'AUDIT_RECONCILIATION'
+          });
+        }
+      }
+
+      batch.update(doc(db, 'stocktakes', st.id), {
+        status: 'COMPLETED',
+        completed_at: new Date().toISOString()
+      });
+
+      await batch.commit();
+      toast.success('Inventory state recalibrated successfully');
+      fetchData();
+    } catch (error) {
+      console.error('Audit recalibration error:', error);
+      toast.error('Logistical synchronization failed');
+    }
+  };
+
+  const handleLiquidateBatch = async (batchItem: any) => {
+    if (!window.confirm(`Initiate liquidation protocol for Batch ${batchItem.batch_number}? This will permanently remove ${batchItem.quantity} units from active inventory.`)) return;
+
+    try {
+      const batchOp = writeBatch(db);
+
+      // 1. Deduct from main inventory
+      const q = query(
+        collection(db, 'inventory'),
+        where('product_id', '==', batchItem.product_id),
+        where('branch_id', '==', batchItem.branch_id),
+        where('enterprise_id', '==', enterpriseId)
+      );
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        const invDoc = snapshot.docs[0];
+        const newQty = Math.max(0, (invDoc.data().quantity || 0) - batchItem.quantity);
+        batchOp.update(invDoc.ref, {
+          quantity: newQty,
+          updated_at: new Date().toISOString()
+        });
+      }
+
+      // 2. Log Movement
+      const movRef = doc(collection(db, 'inventory_movements'));
+      batchOp.set(movRef, {
+        product_id: batchItem.product_id,
+        product: products.find(p => p.id === batchItem.product_id)?.name || 'Unknown Asset',
+        qty: batchItem.quantity,
+        type: 'SHRINKAGE',
+        from: branches.find(b => b.id === batchItem.branch_id)?.name || 'LOCAL',
+        to: 'LIQUIDATION',
+        date: new Date().toISOString(),
+        status: 'COMPLETED',
+        enterprise_id: enterpriseId,
+        reason: 'EXPIRATION_LIQUIDATION'
+      });
+
+      // 3. Remove Batch Record
+      batchOp.delete(doc(db, 'inventory_batches', batchItem.id));
+
+      await batchOp.commit();
+      toast.success('Batch liquidated and inventory recalibrated');
+      fetchData();
+    } catch (error) {
+      console.error('Liquidation error:', error);
+      toast.error('Liquidation protocol failed');
+    }
+  };
 
   const categories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
 
@@ -342,6 +677,48 @@ export default function Inventory() {
       if (editingProductId) {
         const productRef = doc(db, 'products', editingProductId);
         batch.update(productRef, productData);
+        
+        const initialStockQty = Number(productForm.initialStock) || 0;
+        if (activeBranch !== 'all') {
+          // Find or create inventory doc for this branch
+          const q = query(
+            collection(db, 'inventory'), 
+            where('product_id', '==', editingProductId),
+            where('branch_id', '==', activeBranch),
+            where('enterprise_id', '==', enterpriseId)
+          );
+          const snapshots = await getDocs(q);
+          if (!snapshots.empty) {
+            batch.update(snapshots.docs[0].ref, { 
+              quantity: initialStockQty,
+              updated_at: new Date().toISOString()
+            });
+          } else {
+            const invRef = doc(collection(db, 'inventory'));
+            batch.set(invRef, {
+              product_id: editingProductId,
+              branch_id: activeBranch,
+              quantity: initialStockQty,
+              enterprise_id: enterpriseId,
+              updated_at: new Date().toISOString()
+            });
+          }
+
+          const movRef = doc(collection(db, 'inventory_movements'));
+          batch.set(movRef, {
+            product_id: editingProductId,
+            product: productForm.name,
+            qty: initialStockQty,
+            type: 'ADJUSTMENT',
+            from: 'SYSTEM',
+            to: branches.find(b => b.id === activeBranch)?.name || 'MAIN',
+            date: new Date().toISOString(),
+            status: 'COMPLETED',
+            enterprise_id: enterpriseId,
+            reason: productForm.adjustmentReason || 'RECOUNT'
+          });
+        }
+        
         await Promise.race([batch.commit(), timeoutPromise]);
         toast.success('Product asset lifecycle updated');
       } else {
@@ -352,29 +729,33 @@ export default function Inventory() {
         });
         
         const initialStockQty = Number(productForm.initialStock) || 0;
-        if (initialStockQty > 0 && activeBranch !== 'all') {
+        const targetBranchId = activeBranch === 'all' ? (branches[0]?.id) : activeBranch;
+
+        if (initialStockQty > 0 && targetBranchId) {
           const invRef = doc(collection(db, 'inventory'));
           batch.set(invRef, {
             product_id: productRef.id,
-            branch_id: activeBranch,
+            branch_id: targetBranchId,
             quantity: initialStockQty,
             enterprise_id: enterpriseId,
             updated_at: new Date().toISOString()
           });
-          
+
           const movRef = doc(collection(db, 'inventory_movements'));
           batch.set(movRef, {
             product_id: productRef.id,
             product: productForm.name,
             qty: initialStockQty,
-            type: 'INITIAL',
-            from: 'MANUFACTURER',
-            to: branches.find(b => b.id === activeBranch)?.name || 'MAIN',
+            type: 'INITIAL_STOCK',
+            from: 'SYSTEM',
+            to: branches.find(b => b.id === targetBranchId)?.name || 'MAIN',
             date: new Date().toISOString(),
             status: 'COMPLETED',
-            enterprise_id: enterpriseId
+            enterprise_id: enterpriseId,
+            reason: 'INITIAL_LOAD'
           });
         }
+
         
         await Promise.race([batch.commit(), timeoutPromise]);
         toast.success('New product asset deployed');
@@ -717,18 +1098,109 @@ export default function Inventory() {
     }
     setIsSavingSupplier(true);
     try {
-      await addDoc(collection(db, 'suppliers'), {
-        ...newSupplier,
-        created_at: new Date().toISOString()
-      });
-      toast.success('Strategic partner onboarded');
+      if (selectedSupplier) {
+        await updateDoc(doc(db, 'suppliers', selectedSupplier.id), {
+          ...newSupplier,
+          updated_at: new Date().toISOString()
+        });
+        toast.success('Partner profile calibrated');
+      } else {
+        await addDoc(collection(db, 'suppliers'), {
+          ...newSupplier,
+          enterprise_id: enterpriseId,
+          created_at: new Date().toISOString()
+        });
+        toast.success('Strategic partner onboarded');
+      }
       setNewSupplier({ name: '', contact: '', email: '', phone: '', status: 'ACTIVE' });
+      setSelectedSupplier(null);
       setIsSupplierDialogOpen(false);
       fetchData();
     } catch (error) {
-      toast.error('Onboarding failure');
+      toast.error('Strategic sync failure');
     } finally {
       setIsSavingSupplier(false);
+    }
+  };
+
+  const handleDeleteSupplier = async (supplierId: string) => {
+    const hasOrders = purchaseOrders.some(po => po.supplier_id === supplierId);
+    if (hasOrders) {
+      toast.error('Cannot decommission partner with active procurement history');
+      return;
+    }
+
+    if (!window.confirm('Initiate partner decommissioning protocol? This action is permanent.')) return;
+
+    try {
+      await deleteDoc(doc(db, 'suppliers', supplierId));
+      toast.success('Partner decommissioned successfully');
+      fetchData();
+    } catch (error) {
+      toast.error('Decommissioning failure');
+    }
+  };
+
+  const handleSavePurchaseOrder = async () => {
+    if (!poForm.supplier_id || poForm.items.length === 0) {
+      toast.error('Strategic partner and assets required');
+      return;
+    }
+    setIsSavingPO(true);
+    try {
+      const totalCost = poForm.items.reduce((sum: number, item: any) => sum + (item.qty * (item.cost || 0)), 0);
+      const poData = {
+        ...poForm,
+        total_cost: totalCost,
+        enterprise_id: enterpriseId,
+        updated_at: new Date().toISOString()
+      };
+
+      if (selectedPO) {
+        await updateDoc(doc(db, 'purchase_orders', selectedPO.id), poData);
+        toast.success('Procurement cycle recalibrated');
+      } else {
+        await addDoc(collection(db, 'purchase_orders'), {
+          ...poData,
+          created_at: new Date().toISOString()
+        });
+        toast.success('Strategic acquisition initialized');
+      }
+      setIsPurchaseOrderOpen(false);
+      fetchData();
+    } catch (error) {
+      toast.error('Logistical archival failed');
+    } finally {
+      setIsSavingPO(false);
+    }
+  };
+
+  const handleUpdatePOStatus = async (poId: string, newStatus: string) => {
+    try {
+      await updateDoc(doc(db, 'purchase_orders', poId), {
+        status: newStatus,
+        updated_at: new Date().toISOString()
+      });
+      toast.success(`Acquisition state: ${newStatus}`);
+      fetchData();
+    } catch (error) {
+      toast.error('State transition failed');
+    }
+  };
+
+  const handleDeletePO = async (poId: string) => {
+    const po = purchaseOrders.find(p => p.id === poId);
+    if (po?.status !== 'DRAFT') {
+      toast.error('Cannot purge active acquisition cycles');
+      return;
+    }
+    if (!window.confirm('Purge procurement draft? This action is permanent.')) return;
+    try {
+      await deleteDoc(doc(db, 'purchase_orders', poId));
+      toast.success('Acquisition draft purged');
+      fetchData();
+    } catch (error) {
+      toast.error('Purge failure');
     }
   };
 
@@ -926,7 +1398,14 @@ export default function Inventory() {
                         value={productForm.sku}
                         onChange={(e) => setProductForm({...productForm, sku: e.target.value})}
                        />
-                       <Zap className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-300" />
+                        <button 
+                          type="button"
+                          onClick={() => generateSKU(productForm.category)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-all active:scale-90 shadow-sm"
+                          title="Auto-generate SKU"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                        </button>
                     </div>
                   </div>
                 </div>
@@ -974,7 +1453,7 @@ export default function Inventory() {
                         className="rounded-2xl h-14 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-orange-500/10 shadow-sm transition-all pl-11 h-14" 
                         value={productForm.initialStock}
                         onChange={(e) => setProductForm({...productForm, initialStock: parseInt(e.target.value) || 0})}
-                        disabled={!!editingProductId}
+                        disabled={activeBranch === "all" && !!editingProductId}
                        />
                     </div>
                   </div>
@@ -1325,7 +1804,12 @@ export default function Inventory() {
             <div className="w-full overflow-x-auto no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
               <TabsList className="bg-zinc-100 p-1 rounded-2xl w-max flex gap-1 border border-zinc-200/50 shadow-inner">
                 <TabsTrigger value="stock" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Stock Levels</TabsTrigger>
+                <TabsTrigger value="action-center" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">
+                  <Zap className="w-3 h-3 mr-2 inline-block text-amber-500" /> Action Center
+                </TabsTrigger>
                 <TabsTrigger value="movements" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Movements Log</TabsTrigger>
+                <TabsTrigger value="purchase-orders" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Procurement</TabsTrigger>
+                <TabsTrigger value="stocktakes" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Audit</TabsTrigger>
                 <TabsTrigger value="suppliers" className="rounded-xl px-8 py-2 font-black text-[10px] uppercase tracking-widest data-[state=active]:bg-white data-[state=active]:shadow-md data-[state=active]:text-zinc-900 text-zinc-500 transition-all">Partnerships</TabsTrigger>
               </TabsList>
             </div>
@@ -1358,7 +1842,7 @@ export default function Inventory() {
 
                     <Button
                       variant="outline"
-                      className="rounded-[1.25rem] border-zinc-200 text-zinc-600 h-12 font-black text-[10px] uppercase tracking-widest transition-all bg-white hover:bg-zinc-50 shadow-sm"
+                      className="rounded-[1.25rem] border-zinc-200 text-zinc-600 h-12 px-6 font-black text-[10px] uppercase tracking-widest transition-all bg-white hover:bg-zinc-50 shadow-sm flex items-center gap-2"
                       onClick={() => {
                         const rows = [
                           ["Name", "SKU", "Category", "Branch Stock", "Total Stock", "Price", "Status"],
@@ -1385,8 +1869,17 @@ export default function Inventory() {
                         toast.success("Inventory asset report exported");
                       }}
                     >
-                      <Download className="w-4 h-4 mr-2" />
+                      <Download className="w-4 h-4" />
                       Export
+                    </Button>
+
+                    <Button 
+                      variant="outline" 
+                      className="rounded-[1.25rem] border-zinc-200 h-12 px-6 bg-zinc-900 text-white hover:bg-zinc-800 transition-all font-black text-[10px] uppercase tracking-widest flex items-center gap-2"
+                      onClick={() => setIsImportDialogOpen(true)}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Import
                     </Button>
                   </div>
                 </div>
@@ -1484,7 +1977,15 @@ export default function Inventory() {
                           .map((item) => {
                             const branchStock = getProductStock(item.id, activeBranch);
                             const totalStock = getProductStock(item.id, "all");
-                            const status = totalStock === 0 ? "OUT OF STOCK" : totalStock <= (item.min_stock_level || 10) ? "LOW STOCK" : "IN STOCK";
+                            const expiringBatch = inventoryBatches.find(b => {
+                              if (b.product_id !== item.id) return false;
+                              const expiryDate = new Date(b.expiry_date);
+                              const diffTime = expiryDate.getTime() - new Date().getTime();
+                              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                              return diffDays > 0 && diffDays <= 30;
+                            });
+                            
+                            const status = expiringBatch ? "TACTICAL ALERT" : totalStock === 0 ? "OUT OF STOCK" : totalStock <= (item.min_stock_level || 10) ? "LOW STOCK" : "IN STOCK";
 
                             return (
                               <TableRow key={item.id} className={cn("hover:bg-zinc-50/80 transition-colors border-b border-zinc-50 group/row", selectedProducts.includes(item.id) && "bg-blue-50/50")}>
@@ -1535,8 +2036,9 @@ export default function Inventory() {
                                   <Badge className={cn(
                                     "text-[9px] font-black uppercase tracking-[0.2em] px-2.5 py-1 rounded-full border shadow-sm",
                                     status === "IN STOCK" ? "bg-emerald-50 text-emerald-600 border-emerald-100/50" : 
-                                    status === "LOW STOCK" ? "bg-amber-50 text-amber-600 border-amber-100/50" : 
-                                    "bg-rose-50 text-rose-600 border-rose-100/50"
+                                    status === "LOW STOCK" ? "bg-rose-50 text-rose-600 border-rose-100/50" : 
+                                    status === "TACTICAL ALERT" ? "bg-amber-50 text-amber-600 border-amber-100/50 animate-pulse" :
+                                    "bg-zinc-50 text-zinc-600 border-zinc-100/50"
                                   )}>
                                     {status}
                                   </Badge>
@@ -1575,7 +2077,162 @@ export default function Inventory() {
                   </Table>
                 </div>
               </Card>
+            </TabsContent>
 
+            <TabsContent value="action-center" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="flex items-center justify-between px-2">
+                    <div className="space-y-1">
+                      <h3 className="font-black text-zinc-900 tracking-tight text-xl">Operational Deficit Dashboard</h3>
+                      <p className="text-xs font-black text-rose-500 uppercase tracking-[0.2em]">Critical Replenishment Required</p>
+                    </div>
+                  </div>
+
+                  <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white ring-1 ring-zinc-50">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-zinc-50/50 border-b border-zinc-100">
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Asset</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Current</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Threshold</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Partner</TableHead>
+                          <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6 text-right">Strategic Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {products.filter(p => getProductStock(p.id, "all") <= (p.min_stock_level || 10)).length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={5} className="py-24 text-center">
+                              <div className="flex flex-col items-center gap-4 text-emerald-500/30">
+                                <ShieldCheck className="w-16 h-16" />
+                                <p className="text-xl font-bold text-zinc-900 opacity-100">All assets secured</p>
+                                <p className="text-sm font-medium text-zinc-500 uppercase tracking-widest">No critical stockouts detected</p>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          products
+                            .filter(p => getProductStock(p.id, "all") <= (p.min_stock_level || 10))
+                            .map((p) => {
+                              const stock = getProductStock(p.id, "all");
+                              const supplier = suppliers.find(s => s.id === p.supplier_id);
+                              return (
+                                <TableRow key={p.id} className="hover:bg-rose-50/20 transition-colors border-b border-zinc-50 group/row">
+                                  <TableCell className="py-6 pl-6">
+                                    <div className="flex items-center gap-3">
+                                      <div className="w-10 h-10 rounded-xl bg-zinc-50 border border-zinc-100 flex items-center justify-center shrink-0">
+                                        <Box className="w-5 h-5 text-zinc-400" />
+                                      </div>
+                                      <span className="font-black text-zinc-900 text-xs uppercase tracking-tight">{p.name}</span>
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="py-6">
+                                    <span className="font-black text-rose-600 text-sm">{stock}</span>
+                                  </TableCell>
+                                  <TableCell className="py-6 font-bold text-zinc-400 text-xs">{p.min_stock_level || 10}</TableCell>
+                                  <TableCell className="py-6 font-bold text-zinc-900 text-[10px] uppercase tracking-wider">{supplier?.name || "Unassigned"}</TableCell>
+                                  <TableCell className="py-6 pr-6 text-right">
+                                    <Button 
+                                      className="h-9 rounded-xl bg-blue-600 text-white font-black text-[9px] uppercase tracking-widest px-5 hover:bg-blue-500 shadow-lg shadow-blue-500/20 transition-all hover:scale-105 active:scale-95"
+                                      onClick={() => {
+                                        const reorderQty = (p.max_stock_level || 100) - stock;
+                                        setPoForm({
+                                          supplier_id: p.supplier_id || '',
+                                          items: [{ product_id: p.id, qty: reorderQty, cost: p.cost || 0 }],
+                                          status: 'DRAFT',
+                                          total_cost: reorderQty * (p.cost || 0),
+                                          notes: `Auto-generated replenishment for ${p.name}`
+                                        });
+                                        setSelectedPO(null);
+                                        setIsPurchaseOrderOpen(true);
+                                      }}
+                                    >
+                                      1-Click Reorder
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </Card>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between px-2">
+                    <div className="space-y-1">
+                      <h3 className="font-black text-zinc-900 tracking-tight text-xl">Expiration Monitor</h3>
+                      <p className="text-xs font-black text-amber-500 uppercase tracking-[0.2em]">Batch Lifecycle Alerts</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    {inventoryBatches
+                      .filter(b => {
+                        const expiryDate = new Date(b.expiry_date);
+                        const diffTime = expiryDate.getTime() - new Date().getTime();
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        return diffDays <= 30;
+                      })
+                      .length === 0 ? (
+                      <Card className="p-12 border-zinc-100 shadow-lg bg-white border-dashed border-2 text-center">
+                        <CalendarCheck className="w-12 h-12 mx-auto text-zinc-200 mb-4" />
+                        <p className="text-xs font-black text-zinc-400 uppercase tracking-widest leading-relaxed">No batches expiring within <br/>the 30-day tactical window.</p>
+                      </Card>
+                    ) : (
+                      inventoryBatches
+                        .filter(b => {
+                          const expiryDate = new Date(b.expiry_date);
+                          const diffTime = expiryDate.getTime() - new Date().getTime();
+                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                          return diffDays <= 30;
+                        })
+                        .sort((a, b) => new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime())
+                        .map((b) => {
+                          const product = products.find(p => p.id === b.product_id);
+                          const expiryDate = new Date(b.expiry_date);
+                          const diffTime = expiryDate.getTime() - new Date().getTime();
+                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                          
+                          return (
+                            <Card key={b.id} className="p-5 border-zinc-100 shadow-xl bg-white group hover:border-amber-200 transition-all">
+                              <div className="flex items-start justify-between mb-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center">
+                                    <Clock className="w-5 h-5 text-amber-600" />
+                                  </div>
+                                  <div>
+                                    <p className="font-black text-zinc-900 text-xs uppercase tracking-tight">{product?.name || "Unknown Asset"}</p>
+                                    <p className="text-[10px] font-mono font-bold text-zinc-400">BATCH: {b.batch_number}</p>
+                                  </div>
+                                </div>
+                                <Badge className={cn(
+                                  "text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full",
+                                  diffDays <= 7 ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"
+                                )}>
+                                  {diffDays <= 0 ? "EXPIRED" : `${diffDays} DAYS LEFT`}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center justify-between pt-4 border-t border-zinc-50">
+                                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Active Units: {b.quantity}</span>
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm" 
+                                  className="h-7 rounded-lg text-zinc-900 font-black text-[9px] uppercase tracking-widest hover:bg-zinc-100"
+                                  onClick={() => handleLiquidateBatch(b)}
+                                >
+                                  Liquidate Batch
+                                </Button>
+                              </div>
+                            </Card>
+                          );
+                        })
+                    )}
+                  </div>
+                </div>
+              </div>
             </TabsContent>
 
             <TabsContent value="movements" className="space-y-6">
@@ -1710,52 +2367,488 @@ export default function Inventory() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="suppliers" className="space-y-6">
+            <TabsContent value="suppliers" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="flex items-center justify-between px-2">
                  <div className="space-y-1">
-                    <h3 className="font-black text-zinc-900 tracking-tight text-lg">Partner Ecosystem</h3>
-                    <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest">Global Sourcing Network</p>
+                    <h3 className="font-black text-zinc-900 tracking-tight text-xl">Partner Ecosystem</h3>
+                    <p className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">Global Sourcing Network</p>
                  </div>
-                 <Button className="rounded-2xl bg-zinc-900 text-white h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all" onClick={() => setIsSupplierDialogOpen(true)}>
+                 <Button className="rounded-2xl bg-zinc-900 text-white h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all" onClick={() => {
+                   setSelectedSupplier(null);
+                   setNewSupplier({ name: '', contact: '', email: '', phone: '', status: 'ACTIVE' });
+                   setIsSupplierDialogOpen(true);
+                 }}>
                     <Plus className="w-4 h-4 mr-2" /> Strategic Partner
                  </Button>
               </div>
 
-               <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-zinc-50 rounded-2xl text-zinc-900 border border-zinc-100">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Strategic Partners</p>
+                      <p className="text-2xl text-zinc-900 font-black">{suppliers.length}</p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-blue-50 rounded-2xl text-blue-600 border border-blue-100">
+                      <Truck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Active Cycles</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {purchaseOrders.filter(po => po.status === 'SENT' || po.status === 'PENDING').length}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 border border-emerald-100">
+                      <TrendingUp className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-0.5">Capital Commitment</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {formatCurrency(purchaseOrders.reduce((sum, po) => sum + (po.total_cost || 0), 0))}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+               <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white ring-1 ring-zinc-50">
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Vendor Name</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Vendor identity</TableHead>
                       <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Key Correspondent</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Secure Email</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Operational Contact</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6">Lifecycle Status</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Throughput</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Operational Status</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6 text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {suppliers.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-24 text-zinc-400">
-                           <div className="flex flex-col items-center gap-4">
-                              <Users className="w-16 h-16 opacity-10" />
-                              <p className="text-xl font-bold text-zinc-900">Vendor directory idle</p>
+                        <TableCell colSpan={5} className="text-center py-32 text-zinc-400">
+                           <div className="flex flex-col items-center gap-6">
+                              <div className="w-20 h-20 rounded-[2.5rem] bg-zinc-50 border border-zinc-100 flex items-center justify-center">
+                                <Users className="w-10 h-10 opacity-20" />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xl font-bold text-zinc-900 uppercase tracking-tighter">Vendor directory idle</p>
+                                <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest">Onboard your first partner to begin procurement</p>
+                              </div>
                            </div>
                         </TableCell>
                       </TableRow>
                     ) : (
-                      suppliers.map((s) => (
-                        <TableRow key={s.id} className="hover:bg-zinc-50/50 transition-colors border-b border-zinc-50 group/row font-display">
-                          <TableCell className="py-6 pl-6 font-black text-zinc-900 text-sm tracking-tight uppercase">{s.name}</TableCell>
-                          <TableCell className="py-6 text-sm font-bold text-zinc-600">{s.contact}</TableCell>
-                          <TableCell className="py-6 text-sm font-medium text-zinc-500 transition-colors hover:text-blue-500 cursor-pointer">{s.email}</TableCell>
-                          <TableCell className="py-6 text-sm font-bold text-zinc-600 tracking-wider font-mono">{s.phone}</TableCell>
-                          <TableCell className="py-6 pr-6">
+                      suppliers.map((s) => {
+                        const partnerPOs = purchaseOrders.filter(po => po.supplier_id === s.id);
+                        const totalSpend = partnerPOs.reduce((sum, po) => sum + (po.total_cost || 0), 0);
+                        
+                        return (
+                          <TableRow key={s.id} className="hover:bg-zinc-50/30 transition-all border-b border-zinc-50 group/row">
+                            <TableCell className="py-6 pl-6">
+                              <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-2xl bg-zinc-50 border border-zinc-100 flex items-center justify-center font-black text-zinc-400 group-hover/row:bg-white group-hover/row:border-zinc-200 transition-all">
+                                  {s.name.substring(0, 2).toUpperCase()}
+                                </div>
+                                <div>
+                                  <p className="font-black text-zinc-900 text-sm tracking-tight uppercase">{s.name}</p>
+                                  <p className="text-[10px] font-bold text-zinc-400 tracking-widest">{s.email}</p>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-6">
+                              <div>
+                                <p className="text-sm font-bold text-zinc-700">{s.contact}</p>
+                                <p className="text-[10px] font-mono font-bold text-zinc-400 tracking-wider">{s.phone}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-6">
+                              <div>
+                                <p className="text-sm font-black text-zinc-900">{formatCurrency(totalSpend)}</p>
+                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{partnerPOs.length} Total Orders</p>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-6">
+                              <Badge className={cn(
+                                "text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border shadow-sm",
+                                s.status === "ACTIVE" ? "bg-emerald-50 text-emerald-600 border-emerald-100/50" : 
+                                s.status === "PROBATION" ? "bg-amber-50 text-amber-600 border-amber-100/50" :
+                                "bg-zinc-50 text-zinc-600 border-zinc-200"
+                              )}>
+                                {s.status || "OPERATIONAL"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="py-6 pr-6 text-right">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
+                                    <MoreHorizontal className="w-5 h-5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
+                                  <DropdownMenuItem 
+                                    className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs uppercase"
+                                    onClick={() => {
+                                      setSelectedSupplier(s);
+                                      setNewSupplier({
+                                        name: s.name,
+                                        contact: s.contact,
+                                        email: s.email,
+                                        phone: s.phone,
+                                        status: s.status || 'ACTIVE'
+                                      });
+                                      setIsSupplierDialogOpen(true);
+                                    }}
+                                  >
+                                    <Box className="w-4 h-4 text-zinc-400" /> Edit Profile
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs uppercase">
+                                    <BarChart3 className="w-4 h-4 text-zinc-400" /> Deep Analytics
+                                  </DropdownMenuItem>
+                                  <div className="h-px bg-zinc-100 my-1" />
+                                  <DropdownMenuItem 
+                                    className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-rose-50 text-rose-600 font-bold text-xs uppercase"
+                                    onClick={() => handleDeleteSupplier(s.id)}
+                                  >
+                                    <Trash2 className="w-4 h-4" /> Decommission
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="purchase-orders" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex items-center justify-between px-2">
+                 <div className="space-y-1">
+                    <h3 className="font-black text-zinc-900 tracking-tight text-xl">Procurement Pipeline</h3>
+                    <p className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">Global Asset Acquisition</p>
+                 </div>
+                 <Button className="rounded-2xl bg-zinc-900 text-white h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all" onClick={() => {
+                   setPoForm({ supplier_id: '', items: [], status: 'DRAFT', total_cost: 0, notes: '' });
+                   setSelectedPO(null);
+                   setIsPurchaseOrderOpen(true);
+                 }}>
+                    <Plus className="w-4 h-4 mr-2" /> New Acquisition
+                 </Button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-zinc-50 rounded-2xl text-zinc-900 border border-zinc-100">
+                      <CreditCard className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Active Commitment</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {formatCurrency(purchaseOrders.filter(po => po.status !== 'RECEIVED' && po.status !== 'CANCELLED').reduce((sum, po) => sum + (po.total_cost || 0), 0))}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-blue-50 rounded-2xl text-blue-600 border border-blue-100">
+                      <Box className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Assets In-Flight</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {purchaseOrders.filter(po => po.status === 'SENT' || po.status === 'PENDING').reduce((sum, po) => sum + (po.items?.length || 0), 0)} Units
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 border border-emerald-100">
+                      <Activity className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-0.5">Capital Throughput</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {formatCurrency(purchaseOrders.filter(po => po.status === 'RECEIVED').reduce((sum, po) => sum + (po.total_cost || 0), 0))}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+               <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white ring-1 ring-zinc-50">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Order signature</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Strategic Partner</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Commitment</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Lifecycle State</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {purchaseOrders.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-32 text-zinc-400">
+                           <div className="flex flex-col items-center gap-6">
+                              <div className="w-20 h-20 rounded-[2.5rem] bg-zinc-50 border border-zinc-100 flex items-center justify-center">
+                                <Box className="w-10 h-10 opacity-20" />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xl font-bold text-zinc-900 uppercase tracking-tighter">Procurement queue idle</p>
+                                <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest">Initialize your first acquisition cycle</p>
+                              </div>
+                           </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      purchaseOrders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((po) => (
+                        <TableRow key={po.id} className="hover:bg-zinc-50/30 transition-all border-b border-zinc-50 group/row">
+                          <TableCell className="py-6 pl-6">
+                            <div>
+                              <p className="font-mono text-[10px] font-black text-zinc-400">#{po.id.slice(0, 8).toUpperCase()}</p>
+                              <p className="text-[10px] font-bold text-zinc-500 uppercase">{new Date(po.created_at).toLocaleDateString()}</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-6">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-zinc-50 flex items-center justify-center font-black text-[10px] text-zinc-400">
+                                {suppliers.find(s => s.id === po.supplier_id)?.name.substring(0, 2).toUpperCase() || "??"}
+                              </div>
+                              <span className="font-black text-zinc-900 text-sm tracking-tight uppercase">
+                                {suppliers.find(s => s.id === po.supplier_id)?.name || "Unknown Partner"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-6">
+                            <div className="space-y-1">
+                              <p className="text-sm font-black text-zinc-900">{formatCurrency(po.total_cost || 0)}</p>
+                              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{po.items?.length || 0} Assets</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-6">
                             <Badge className={cn(
-                              "text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border",
-                              s.status === "ACTIVE" ? "bg-emerald-50 text-emerald-600 border-emerald-100/50" : "bg-zinc-100 text-zinc-600 border-zinc-200"
+                              "text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border shadow-sm",
+                              po.status === "RECEIVED" ? "bg-emerald-50 text-emerald-600 border-emerald-100/50" : 
+                              po.status === "SENT" ? "bg-blue-50 text-blue-600 border-blue-100/50" :
+                              po.status === "DRAFT" ? "bg-zinc-50 text-zinc-400 border-zinc-200" :
+                              "bg-amber-50 text-amber-600 border-amber-100/50"
                             )}>
-                              {s.status || "OPERATIONAL"}
+                              {po.status}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="py-6 pr-6 text-right">
+                             <div className="flex items-center justify-end gap-2">
+                               {po.status === "DRAFT" && (
+                                 <Button 
+                                   size="sm" 
+                                   className="h-9 rounded-xl bg-zinc-900 text-white font-black text-[9px] uppercase tracking-widest px-4 hover:scale-[1.05] transition-all"
+                                   onClick={() => handleUpdatePOStatus(po.id, 'SENT')}
+                                 >
+                                   Mark Sent
+                                 </Button>
+                               )}
+                               {po.status === "SENT" && (
+                                 <Button 
+                                   size="sm" 
+                                   className="h-9 rounded-xl bg-blue-600 text-white font-black text-[9px] uppercase tracking-widest px-4 hover:scale-[1.05] transition-all"
+                                   onClick={() => handleReceivePO(po)}
+                                 >
+                                   Receive Assets
+                                 </Button>
+                               )}
+                               <DropdownMenu>
+                                 <DropdownMenuTrigger asChild>
+                                   <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100">
+                                     <MoreHorizontal className="w-4 h-4" />
+                                   </Button>
+                                 </DropdownMenuTrigger>
+                                 <DropdownMenuContent align="end" className="w-48 rounded-2xl p-2 bg-white shadow-2xl border-zinc-100">
+                                   <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-[10px] uppercase">
+                                     <FileText className="w-4 h-4 text-zinc-400" /> View Order
+                                   </DropdownMenuItem>
+                                   {po.status === 'DRAFT' && (
+                                     <DropdownMenuItem 
+                                       className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-rose-50 text-rose-600 font-bold text-[10px] uppercase"
+                                       onClick={() => handleDeletePO(po.id)}
+                                     >
+                                       <Trash2 className="w-4 h-4" /> Purge Draft
+                                     </DropdownMenuItem>
+                                   )}
+                                 </DropdownMenuContent>
+                               </DropdownMenu>
+                             </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="stocktakes" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <div className="flex items-center justify-between px-2">
+                 <div className="space-y-1">
+                    <h3 className="font-black text-zinc-900 tracking-tight text-xl">Inventory Audits</h3>
+                    <p className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">Reconciliation & Shrinkage Control</p>
+                 </div>
+                 <Button className="rounded-2xl bg-zinc-900 text-white h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all" onClick={() => {
+                    setStocktakeForm({ branch_id: activeBranch === 'all' ? (branches[0]?.id || '') : activeBranch, items: [], status: 'IN_PROGRESS', notes: '' });
+                    setIsStocktakeDialogOpen(true);
+                 }}>
+                    <Plus className="w-4 h-4 mr-2" /> Start Audit
+                 </Button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-zinc-50 rounded-2xl text-zinc-900 border border-zinc-100">
+                      <RefreshCw className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Accuracy Rate</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {stocktakes.length > 0 
+                          ? `${Math.round((stocktakes.filter(st => st.status === 'COMPLETED' && st.items.every((i: any) => i.variance === 0)).length / stocktakes.length) * 100)}%`
+                          : '100%'}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-rose-50 rounded-2xl text-rose-600 border border-rose-100">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-rose-600 uppercase tracking-widest mb-0.5">Capital Leakage</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {formatCurrency(stocktakes.reduce((sum, st) => {
+                          const leakage = st.items?.filter((i: any) => i.variance < 0).reduce((s: number, i: any) => {
+                            const prod = products.find(p => p.id === i.product_id);
+                            return s + (Math.abs(i.variance) * (prod?.cost || 0));
+                          }, 0) || 0;
+                          return sum + leakage;
+                        }, 0))}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
+                  <CardContent className="p-6 flex items-center gap-4">
+                    <div className="p-3 bg-blue-50 rounded-2xl text-blue-600 border border-blue-100">
+                      <Clock className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Operational Pulse</p>
+                      <p className="text-2xl text-zinc-900 font-black">
+                        {stocktakes.length > 0 
+                          ? `${Math.floor((new Date().getTime() - new Date(stocktakes[0].created_at).getTime()) / (1000 * 60 * 60 * 24))} Days`
+                          : 'N/A'}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+               <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white ring-1 ring-zinc-50">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Audit signature</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Branch Node</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Temporal Stamp</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Asset Scope</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Lifecycle Status</TableHead>
+                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stocktakes.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-32 text-zinc-400">
+                           <div className="flex flex-col items-center gap-6">
+                              <div className="w-20 h-20 rounded-[2.5rem] bg-zinc-50 border border-zinc-100 flex items-center justify-center">
+                                <CalendarCheck className="w-10 h-10 opacity-20" />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-xl font-bold text-zinc-900 uppercase tracking-tighter">Audit history clear</p>
+                                <p className="text-xs font-medium text-zinc-500 uppercase tracking-widest">Initialize your first stocktake to ensure data integrity</p>
+                              </div>
+                           </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      stocktakes.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((st) => (
+                        <TableRow key={st.id} className="hover:bg-zinc-50/30 transition-all border-b border-zinc-50 group/row">
+                          <TableCell className="py-6 pl-6 font-mono text-[10px] font-black text-zinc-400">
+                            #{st.id.slice(0, 8).toUpperCase()}
+                          </TableCell>
+                          <TableCell className="py-6">
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-blue-500" />
+                              <span className="font-black text-zinc-900 text-xs tracking-tight uppercase">
+                                {branches.find(b => b.id === st.branch_id)?.name || "Primary Branch"}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-6 text-xs font-bold text-zinc-600">
+                            {new Date(st.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                          </TableCell>
+                          <TableCell className="py-6">
+                            <div className="space-y-1">
+                              <p className="text-xs font-black text-zinc-900">{st.items?.length || 0} Assets</p>
+                              <div className="flex gap-2">
+                                <span className="text-[9px] font-black text-rose-500 uppercase">-{st.items?.filter((i: any) => i.variance < 0).length || 0} Shrink</span>
+                                <span className="text-[9px] font-black text-emerald-500 uppercase">+{st.items?.filter((i: any) => i.variance > 0).length || 0} Discovery</span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-6">
+                            <Badge className={cn(
+                              "text-[9px] font-black uppercase tracking-[0.2em] px-3 py-1 rounded-full border shadow-sm",
+                              st.status === "COMPLETED" ? "bg-emerald-50 text-emerald-600 border-emerald-100/50" : 
+                              "bg-amber-50 text-amber-600 border-amber-100/50 animate-pulse"
+                            )}>
+                              {st.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="py-6 pr-6 text-right">
+                             {st.status !== "COMPLETED" ? (
+                               <Button 
+                                 size="sm" 
+                                 className="h-10 rounded-xl bg-zinc-900 text-white font-black text-[9px] uppercase tracking-widest px-6 shadow-lg shadow-zinc-900/10 hover:scale-[1.05] transition-all"
+                                 onClick={() => handleApplyStocktake(st)}
+                               >
+                                 Recalibrate System
+                               </Button>
+                             ) : (
+                               <Button 
+                                 variant="ghost" 
+                                 size="sm" 
+                                 className="h-10 rounded-xl font-black text-[9px] uppercase tracking-widest px-6 text-zinc-400 hover:text-zinc-900 hover:bg-zinc-50 transition-all"
+                               >
+                                 Download Audit
+                               </Button>
+                             )}
                           </TableCell>
                         </TableRow>
                       ))
@@ -2317,6 +3410,552 @@ export default function Inventory() {
         </div>
       </div>
     )}
+
+    <Dialog open={isImportDialogOpen} onOpenChange={setIsImportDialogOpen}>
+      <DialogContent className="sm:max-w-[500px] rounded-[2rem] border-zinc-100 p-8">
+        <DialogHeader>
+          <div className="w-12 h-12 bg-zinc-900 rounded-2xl flex items-center justify-center text-white mb-4 shadow-xl shadow-black/10">
+            <Layers className="w-6 h-6" />
+          </div>
+          <DialogTitle className="text-2xl font-black font-display tracking-tight">Strategic Database Import</DialogTitle>
+          <DialogDescription className="text-zinc-500 font-medium leading-relaxed">
+            Upload your inventory CSV file to batch onboard assets. Ensure columns for <span className="text-zinc-900 font-bold">Name</span> and <span className="text-zinc-900 font-bold">SKU</span> are present.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="py-8">
+          <div className="border-2 border-dashed border-zinc-100 rounded-[2rem] p-10 text-center hover:border-blue-500/30 hover:bg-blue-50/50 transition-all group relative cursor-pointer">
+            <input 
+              type="file" 
+              accept=".csv" 
+              onChange={handleImportCSV}
+              className="absolute inset-0 opacity-0 cursor-pointer z-10"
+            />
+            <div className="flex flex-col items-center">
+              <div className="w-16 h-16 bg-white rounded-2xl shadow-sm border border-zinc-100 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-500">
+                <Plus className="w-8 h-8 text-zinc-300 group-hover:text-blue-600 transition-colors" />
+              </div>
+              <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">Select Database Source</p>
+              <p className="text-xs text-zinc-400 mt-2">Maximum file size: 50MB (.csv)</p>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="flex flex-col gap-3">
+          <Button 
+            type="button"
+            variant="ghost" 
+            className="w-full rounded-xl font-bold text-xs uppercase tracking-widest text-zinc-400 hover:text-zinc-900"
+            onClick={() => setIsImportDialogOpen(false)}
+          >
+            Cancel Mission
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={isPurchaseOrderOpen} onOpenChange={setIsPurchaseOrderOpen}>
+      <DialogContent className="sm:max-w-3xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-zinc-950 p-8 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-3xl font-black tracking-tight font-display">Strategic Acquisition</DialogTitle>
+            <DialogDescription className="text-zinc-400 font-medium">
+              Initialize a new procurement cycle with a strategic partner.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        
+        <ScrollArea className="max-h-[70vh]">
+          <div className="p-8 space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Strategic Partner</label>
+                <Select 
+                  value={poForm.supplier_id} 
+                  onValueChange={(val) => setPoForm({...poForm, supplier_id: val})}
+                >
+                  <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
+                    <SelectValue placeholder="Select Partner" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl bg-white border-zinc-200">
+                    {suppliers.map(s => (
+                      <SelectItem key={s.id} value={s.id} className="uppercase font-bold">{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Commitment Notes</label>
+                <Input 
+                  placeholder="Terms, logistics, or internal references..." 
+                  className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-medium"
+                  value={poForm.notes}
+                  onChange={(e) => setPoForm({...poForm, notes: e.target.value})}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Asset Selection</label>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="rounded-xl h-8 text-blue-600 font-black text-[9px] uppercase tracking-widest"
+                  onClick={() => {
+                    const firstProd = products[0];
+                    if (firstProd) {
+                      setPoForm({
+                        ...poForm,
+                        items: [...poForm.items, { product_id: firstProd.id, qty: 1, cost: firstProd.cost || 0 }]
+                      });
+                    }
+                  }}
+                >
+                  <Plus className="w-3 h-3 mr-1" /> Add Asset Line
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {poForm.items.map((item: any, index: number) => (
+                  <div key={index} className="flex flex-col md:flex-row items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 animate-in fade-in slide-in-from-top-2">
+                    <div className="flex-1 w-full">
+                      <Select 
+                        value={item.product_id}
+                        onValueChange={(val) => {
+                          const newItems = [...poForm.items];
+                          const prod = products.find(p => p.id === val);
+                          newItems[index] = { ...newItems[index], product_id: val, cost: prod?.cost || 0 };
+                          setPoForm({ ...poForm, items: newItems });
+                        }}
+                      >
+                        <SelectTrigger className="rounded-xl h-12 bg-white border-zinc-200 font-bold">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl bg-white border-zinc-200">
+                          {products.map(p => (
+                            <SelectItem key={p.id} value={p.id} className="uppercase font-bold">{p.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-full md:w-32">
+                      <Input 
+                        type="number"
+                        placeholder="Qty"
+                        className="rounded-xl h-12 bg-white border-zinc-200 font-black text-center"
+                        value={item.qty}
+                        onChange={(e) => {
+                          const newItems = [...poForm.items];
+                          newItems[index].qty = Number(e.target.value);
+                          setPoForm({ ...poForm, items: newItems });
+                        }}
+                      />
+                    </div>
+                    <div className="w-full md:w-32 relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-black text-[10px]">$</span>
+                      <Input 
+                        type="number"
+                        placeholder="Cost"
+                        className="rounded-xl h-12 bg-white border-zinc-200 font-black pl-7"
+                        value={item.cost}
+                        onChange={(e) => {
+                          const newItems = [...poForm.items];
+                          newItems[index].cost = Number(e.target.value);
+                          setPoForm({ ...poForm, items: newItems });
+                        }}
+                      />
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="rounded-xl text-zinc-300 hover:text-rose-500 transition-colors"
+                      onClick={() => {
+                        const newItems = poForm.items.filter((_: any, i: number) => i !== index);
+                        setPoForm({ ...poForm, items: newItems });
+                      }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+
+                {poForm.items.length === 0 && (
+                  <div className="text-center py-12 border-2 border-dashed border-zinc-100 rounded-[2rem]">
+                    <p className="text-xs font-black text-zinc-300 uppercase tracking-[0.2em]">Deployment queue empty</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </ScrollArea>
+
+        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="text-center md:text-left">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Total Commitment</p>
+            <p className="text-2xl font-black text-zinc-900">
+              {formatCurrency(poForm.items.reduce((sum: number, item: any) => sum + (item.qty * item.cost), 0))}
+            </p>
+          </div>
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <Button 
+              variant="ghost" 
+              className="flex-1 md:flex-none rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+              onClick={() => setIsPurchaseOrderOpen(false)}
+            >
+              Cancel Mission
+            </Button>
+            <Button 
+              className="flex-1 md:flex-none rounded-2xl h-14 px-10 bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/20 hover:scale-[1.02] transition-all"
+              disabled={isSavingPO}
+              onClick={() => {
+                const total = poForm.items.reduce((sum: number, item: any) => sum + (item.qty * item.cost), 0);
+                setPoForm({ ...poForm, total_cost: total, status: 'SENT' });
+                handleSavePO();
+              }}
+            >
+              {isSavingPO ? "Deploying..." : "Initialize Order"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={isReceiveDialogOpen} onOpenChange={setIsReceiveDialogOpen}>
+      <DialogContent className="sm:max-w-2xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-emerald-600 p-8 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-3xl font-black tracking-tight font-display text-white text-3xl">Logistical Reception</DialogTitle>
+            <DialogDescription className="text-emerald-100 font-medium">
+              Verifying and logging physical asset entry into the command system.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <ScrollArea className="max-h-[60vh]">
+          <div className="p-8 space-y-6">
+            {poToReceive?.items.map((item: any, index: number) => {
+              const product = products.find(p => p.id === item.product_id);
+              return (
+                <div key={index} className="p-6 bg-zinc-50 rounded-3xl border border-zinc-100 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-white border border-zinc-100 flex items-center justify-center font-black text-xs text-zinc-400">
+                        {index + 1}
+                      </div>
+                      <span className="font-black text-zinc-900 text-sm uppercase">{product?.name}</span>
+                    </div>
+                    <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100/50 font-black text-[10px] px-3">
+                      {item.qty} UNITS
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Batch Number</label>
+                      <Input 
+                        placeholder="Manual override..."
+                        className="rounded-xl h-11 bg-white border-zinc-200 font-bold"
+                        value={receivingBatchInfo[index]?.batch}
+                        onChange={(e) => setReceivingBatchInfo({
+                          ...receivingBatchInfo,
+                          [index]: { ...receivingBatchInfo[index], batch: e.target.value }
+                        })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Expiry Date</label>
+                      <Input 
+                        type="date"
+                        className="rounded-xl h-11 bg-white border-zinc-200 font-bold"
+                        value={receivingBatchInfo[index]?.expiry}
+                        onChange={(e) => setReceivingBatchInfo({
+                          ...receivingBatchInfo,
+                          [index]: { ...receivingBatchInfo[index], expiry: e.target.value }
+                        })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </ScrollArea>
+
+        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex items-center justify-end gap-3">
+          <Button 
+            variant="ghost" 
+            className="rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+            onClick={() => setIsReceiveDialogOpen(false)}
+          >
+            Suspend Entry
+          </Button>
+          <Button 
+            className="rounded-2xl h-14 px-10 bg-emerald-600 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-emerald-500/20 hover:scale-[1.02] transition-all"
+            onClick={finalizeReception}
+          >
+            Deploy Assets & Finalize
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={isSupplierDialogOpen} onOpenChange={setIsSupplierDialogOpen}>
+      <DialogContent className="sm:max-w-md rounded-[2rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-zinc-950 p-8 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black font-display tracking-tight text-white">Strategic Partner Profile</DialogTitle>
+            <DialogDescription className="text-zinc-400 font-medium">
+              Configure parameters for your global sourcing network.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <div className="p-8 space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Vendor Identity</label>
+            <Input 
+              placeholder="Strategic Partner Name..." 
+              className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-black uppercase"
+              value={newSupplier.name}
+              onChange={(e) => setNewSupplier({...newSupplier, name: e.target.value})}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Key Correspondent</label>
+              <Input 
+                placeholder="Name..." 
+                className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold"
+                value={newSupplier.contact}
+                onChange={(e) => setNewSupplier({...newSupplier, contact: e.target.value})}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Secure Email</label>
+              <Input 
+                type="email"
+                placeholder="partner@source.com" 
+                className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold"
+                value={newSupplier.email}
+                onChange={(e) => setNewSupplier({...newSupplier, email: e.target.value})}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Operational Phone</label>
+              <Input 
+                placeholder="+1..." 
+                className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-mono font-bold"
+                value={newSupplier.phone}
+                onChange={(e) => setNewSupplier({...newSupplier, phone: e.target.value})}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Lifecycle State</label>
+              <Select 
+                value={newSupplier.status} 
+                onValueChange={(val) => setNewSupplier({...newSupplier, status: val})}
+              >
+                <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="rounded-2xl bg-white border-zinc-200">
+                  <SelectItem value="ACTIVE" className="font-bold">ACTIVE PROTOCOL</SelectItem>
+                  <SelectItem value="INACTIVE" className="font-bold">SUSPENDED</SelectItem>
+                  <SelectItem value="PROBATION" className="font-bold">PROBATIONARY</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex items-center justify-end gap-3">
+          <Button 
+            variant="ghost" 
+            className="rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+            onClick={() => setIsSupplierDialogOpen(false)}
+          >
+            Suspend Entry
+          </Button>
+          <Button 
+            className="rounded-2xl h-14 px-10 bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all"
+            disabled={isSavingSupplier}
+            onClick={handleAddSupplier}
+          >
+            {isSavingSupplier ? "Synchronizing..." : "Onboard Partner"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={isStocktakeDialogOpen} onOpenChange={setIsStocktakeDialogOpen}>
+      <DialogContent className="sm:max-w-4xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-blue-600 p-8 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-3xl font-black tracking-tight font-display">Operational Audit</DialogTitle>
+            <DialogDescription className="text-blue-100 font-medium">
+              Verifying physical asset presence against digital state.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <ScrollArea className="max-h-[70vh]">
+          <div className="p-8 space-y-8">
+            <div className="flex items-center gap-4">
+              <div className="space-y-2 flex-1">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Branch Node</label>
+                <Select 
+                  value={stocktakeForm.branch_id} 
+                  onValueChange={(val) => {
+                    // Populate items for this branch
+                    const branchProducts = products.map(p => ({
+                      product_id: p.id,
+                      name: p.name,
+                      expected: getProductStock(p.id, val),
+                      counted: getProductStock(p.id, val),
+                      variance: 0
+                    }));
+                    setStocktakeForm({ ...stocktakeForm, branch_id: val, items: branchProducts });
+                  }}
+                >
+                  <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
+                    <SelectValue placeholder="Select Branch" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-2xl bg-white border-zinc-200">
+                    {branches.map(b => (
+                      <SelectItem key={b.id} value={b.id} className="uppercase font-bold">{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button 
+                className="mt-6 h-14 rounded-2xl bg-white border border-zinc-100 text-zinc-900 font-black text-[10px] uppercase tracking-widest shadow-sm"
+                variant="outline"
+                onClick={() => {
+                  const branchProducts = products.map(p => ({
+                    product_id: p.id,
+                    name: p.name,
+                    expected: getProductStock(p.id, stocktakeForm.branch_id),
+                    counted: getProductStock(p.id, stocktakeForm.branch_id),
+                    variance: 0
+                  }));
+                  setStocktakeForm({ ...stocktakeForm, items: branchProducts });
+                }}
+              >
+                Reset Counts
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-12 px-4 text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                <div className="col-span-6">Asset Specification</div>
+                <div className="col-span-2 text-center">System</div>
+                <div className="col-span-2 text-center">Counted</div>
+                <div className="col-span-2 text-right">Variance</div>
+              </div>
+
+              <div className="space-y-2">
+                {stocktakeForm.items.map((item: any, index: number) => (
+                  <div key={item.product_id} className="grid grid-cols-12 items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group/audit">
+                    <div className="col-span-6 flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-white border border-zinc-100 flex items-center justify-center font-black text-xs text-zinc-400">
+                        {index + 1}
+                      </div>
+                      <span className="font-black text-zinc-900 text-sm uppercase truncate">{item.name}</span>
+                    </div>
+                    <div className="col-span-2 text-center font-mono font-bold text-zinc-400">
+                      {item.expected}
+                    </div>
+                    <div className="col-span-2">
+                      <Input 
+                        type="number"
+                        className="rounded-xl h-10 bg-white border-zinc-200 font-black text-center"
+                        value={item.counted}
+                        onChange={(e) => {
+                          const newItems = [...stocktakeForm.items];
+                          const counted = Number(e.target.value);
+                          newItems[index].counted = counted;
+                          newItems[index].variance = counted - item.expected;
+                          setStocktakeForm({ ...stocktakeForm, items: newItems });
+                        }}
+                      />
+                    </div>
+                    <div className={cn(
+                      "col-span-2 text-right font-black text-sm",
+                      item.variance === 0 ? "text-zinc-300" : item.variance < 0 ? "text-rose-500" : "text-emerald-500"
+                    )}>
+                      {item.variance > 0 ? `+${item.variance}` : item.variance}
+                    </div>
+                  </div>
+                ))}
+
+                {stocktakeForm.items.length === 0 && (
+                  <div className="text-center py-24 bg-zinc-50 border-2 border-dashed border-zinc-100 rounded-[3rem]">
+                    <Package className="w-16 h-16 mx-auto text-zinc-200 mb-4" />
+                    <p className="text-sm font-black text-zinc-300 uppercase tracking-widest">Select branch to initialize audit</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </ScrollArea>
+
+        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex items-center justify-between">
+          <div className="flex gap-8">
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Loss/Shrinkage</p>
+              <p className="text-xl font-black text-rose-500">
+                {stocktakeForm.items.filter((i: any) => i.variance < 0).length} Lines
+              </p>
+            </div>
+            <div className="w-px h-10 bg-zinc-200" />
+            <div>
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Audit Coverage</p>
+              <p className="text-xl font-black text-zinc-900">
+                {Math.round((stocktakeForm.items.length / products.length) * 100) || 0}%
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button 
+              variant="ghost" 
+              className="rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+              onClick={() => setIsStocktakeDialogOpen(false)}
+            >
+              Suspend Audit
+            </Button>
+            <Button 
+              className="rounded-2xl h-14 px-10 bg-blue-600 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:scale-[1.02] transition-all"
+              disabled={isSavingStocktake || stocktakeForm.items.length === 0}
+              onClick={async () => {
+                setIsSavingStocktake(true);
+                try {
+                  await addDoc(collection(db, 'stocktakes'), {
+                    ...stocktakeForm,
+                    enterprise_id: enterpriseId,
+                    created_at: new Date().toISOString()
+                  });
+                  toast.success('Audit session recorded');
+                  setIsStocktakeDialogOpen(false);
+                  fetchData();
+                } catch (error) {
+                  toast.error('Audit archival failed');
+                } finally {
+                  setIsSavingStocktake(false);
+                }
+              }}
+            >
+              {isSavingStocktake ? "Archiving..." : "Archive & Reconcile"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }

@@ -125,7 +125,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     branding, 
     setBranding, 
     enterpriseId,
-    billing 
+    billing,
+    taxRate,
+    setTaxRate
   } = useModules();
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [enterpriseName, setEnterpriseName] = useState(branding.name || "");
@@ -209,7 +211,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   const [breakDuration, setBreakDuration] = useState("15");
   const [lunchDuration, setLunchDuration] = useState("30");
   const [gracePeriod, setGracePeriod] = useState("10");
-  const [taxRate, setTaxRate] = useState("15");
+
   const [isTwoFactorEnabled, setIsTwoFactorEnabled] = useState(false);
   const [auditLogRetention, setAuditLogRetention] = useState("90");
   const [is2FALoading, setIs2FALoading] = useState(false);
@@ -554,9 +556,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
           setTopSpenderThreshold(Number(data.topSpenderThreshold));
           setTopSpenderInputValue(data.topSpenderThreshold.toString());
         }
-        if (data.taxRate !== undefined) {
-          setTaxRate(data.taxRate.toString());
-        }
+
         if (data.modules) {
           // Sync with context if mismatch? or just use context logic.
           // For 2026, we ensure cloud is the source of truth.
@@ -604,7 +604,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         breakDuration: parseInt(breakDuration),
         lunchDuration: parseInt(lunchDuration),
         gracePeriod: parseInt(gracePeriod),
-        taxRate: parseFloat(taxRate) || 15,
+        taxRate: Number(taxRate) || 15,
         enterprise_id: enterpriseId,
         updatedAt: serverTimestamp()
       }, { merge: true });
@@ -805,7 +805,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                           />
                         </div>
                      </div>
-                     <div className="space-y-2">
+                      <div className="space-y-2">
                         <Label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Phone Support</Label>
                         <div className="relative">
                           <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
@@ -815,7 +815,19 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                             className="pl-11 rounded-xl h-11 border-zinc-200"
                           />
                         </div>
-                     </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Office Number</Label>
+                        <div className="relative">
+                          <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                          <Input 
+                            value={branding.officePhone}
+                            onChange={(e) => setBranding({ officePhone: e.target.value })}
+                            className="pl-11 rounded-xl h-11 border-zinc-200"
+                            placeholder="+1 888-..."
+                          />
+                        </div>
+                      </div>
                      <div className="md:col-span-2 space-y-2">
                         <Label className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Corporate Address</Label>
                         <div className="relative">
@@ -1633,8 +1645,8 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                     <Input 
                       type="number"
                       step="0.01"
-                      value={taxRate} 
-                      onChange={(e) => setTaxRate(e.target.value)}
+                      value={taxRate.toString()} 
+                      onChange={(e) => setTaxRate(Number(e.target.value) || 0)}
                       className="pl-11 rounded-xl border-zinc-200 h-12 font-bold" 
                       placeholder="e.g. 15"
                     />

@@ -12,6 +12,7 @@ interface POSReceiptProps {
       name: string;
       price: number;
       qty: number;
+      discount?: { type: "Percentage" | "Fixed Amount"; value: number } | null;
     }>;
     subtotal: number;
     tax: number;
@@ -43,17 +44,29 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
           <span>Item</span>
           <span>Total</span>
         </div>
-        {order.items.map((item, idx) => (
-          <div key={`${item.id}-${idx}`} className="space-y-0.5">
-            <div className="flex justify-between">
-              <span className="uppercase">{item.name}</span>
-              <span>{formatCurrency(item.price * item.qty)}</span>
+        {order.items.map((item, idx) => {
+          const baseTotal = item.price * item.qty;
+          let discountVal = 0;
+          if (item.discount) {
+            if (item.discount.type === "Percentage") {
+              discountVal = baseTotal * (item.discount.value / 100);
+            } else {
+              discountVal = item.discount.value * item.qty;
+            }
+          }
+          return (
+            <div key={`${item.id}-${idx}`} className="space-y-0.5">
+              <div className="flex justify-between">
+                <span className="uppercase">{item.name}</span>
+                <span>{formatCurrency(baseTotal - discountVal)}</span>
+              </div>
+              <div className="flex justify-between text-[10px] text-zinc-600">
+                <span>{item.qty} x {formatCurrency(item.price)}</span>
+                {discountVal > 0 && <span className="text-black font-bold">SAVED: -{formatCurrency(discountVal)}</span>}
+              </div>
             </div>
-            <div className="text-[10px] text-zinc-600">
-              {item.qty} x {formatCurrency(item.price)}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="border-b border-dashed border-black my-2" />

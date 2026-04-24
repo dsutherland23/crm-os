@@ -119,7 +119,7 @@ import {
 import { PrintableInvoice } from "./PrintableInvoice";
 
 export default function Revenue() {
-  const { activeBranch, formatCurrency, enterpriseId, branding, currency } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId, branding, currency, taxRate: globalTaxRate, setTaxRate: setGlobalTaxRate } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -136,7 +136,7 @@ export default function Revenue() {
   const [isQuoteDialogOpen, setIsQuoteDialogOpen] = useState(false);
   const [isRecurringDialogOpen, setIsRecurringDialogOpen] = useState(false);
   const [isTaxDialogOpen, setIsTaxDialogOpen] = useState(false);
-  const [globalTaxRate, setGlobalTaxRate] = useState(15.0);
+
   const [isStatementDialogOpen, setIsStatementDialogOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
   const [selectedAccountForLedger, setSelectedAccountForLedger] = useState<any>(null);
@@ -464,12 +464,7 @@ export default function Revenue() {
       setLoading(false);
     }, (error) => console.error("products:", error));
 
-    const unsubSettings = onSnapshot(doc(db, "settings", enterpriseId), (docSnapshot) => {
-      if (docSnapshot.exists()) {
-        const data = docSnapshot.data();
-        if (data.taxRate !== undefined) setGlobalTaxRate(Number(data.taxRate));
-      }
-    }, (error) => console.error("settings:", error));
+
 
     const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -490,7 +485,6 @@ export default function Revenue() {
       unsubRecurring();
       unsubCustomers();
       unsubProducts();
-      unsubSettings();
       unsubStaff();
       unsubSessions();
       unsubBankAccounts();

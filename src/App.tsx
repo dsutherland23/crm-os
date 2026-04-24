@@ -74,7 +74,7 @@ function AppContent() {
 
       // Reuse existing enterprise_id if present, otherwise derive a new one
       const slug = user.email?.split("@")[0].replace(/[^a-zA-Z0-9]/g, "-") || user.uid.substring(0, 8);
-      const newEnterpriseId = existingData?.enterprise_id || `ent-${slug}`;
+      const newEnterpriseId = (existingData as any)?.enterprise_id || `ent-${slug}`;
 
       const profileData = {
         fullName: existingData?.fullName || user.displayName || slug,

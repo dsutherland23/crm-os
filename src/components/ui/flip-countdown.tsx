@@ -8,6 +8,7 @@ const FlipUnit = ({
 }: {
   digit: string;
   cardStyle: React.CSSProperties;
+  key?: React.Key;
 }) => {
   const [currentDigit, setCurrentDigit] = useState(digit);
   const [previousDigit, setPreviousDigit] = useState(digit);
@@ -43,7 +44,7 @@ const FlipUnit = ({
 
 // Main exported component, customized for a small "visitor counter" style
 export const FlipCountdown = ({
-  count = 0n,
+  count = BigInt(0),
   className,
   cardBgColor = '#18181b', // Default zinc-900
   textColor = '#ffffff',
@@ -56,14 +57,15 @@ export const FlipCountdown = ({
   minDigits?: number;
 }) => {
   const displayValue = useMemo(() => {
-    const val = BigInt(count);
-    return String(val < 0n ? 0n : val).padStart(minDigits, '0');
+    const val = BigInt(count || 0);
+    const zero = BigInt(0);
+    return String(val < zero ? zero : val).padStart(minDigits, '0');
   }, [count, minDigits]);
 
   const cardStyle: React.CSSProperties = {
     '--flip-card-bg': cardBgColor,
     '--flip-card-text': textColor,
-  } as React.CSSProperties;
+  } as any;
 
   return (
     <div className={cn('flip-countdown-container', className)}>

@@ -90,10 +90,17 @@ export default function POS() {
     activeBranch, setActiveBranch, hasActiveTransaction, setHasActiveTransaction, 
     formatCurrency, currency, enterpriseId, branding, setPosSession, 
     posSession, clearSession, updateShiftStatus, logout,
-    shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies 
+    shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies,
+    taxRate: globalTaxRate,
+    autoCloseTime,
+    autoCloseEnabled
   } = useModules();
   
-  const [cart, setCart] = useState<{ product: any; quantity: number }[]>([]);
+  const [cart, setCart] = useState<{ product: any; quantity: number; discount?: { type: "Percentage" | "Fixed Amount"; value: number } | null }[]>([]);
+  const [isTaxEnabled, setIsTaxEnabled] = useState(true);
+  const [isItemDiscountDialogOpen, setIsItemDiscountDialogOpen] = useState(false);
+  const [selectedItemForDiscount, setSelectedItemForDiscount] = useState<string | null>(null);
+  const [itemDiscount, setItemDiscount] = useState({ type: "Percentage", value: "" });
   
   useEffect(() => {
     setHasActiveTransaction(cart.length > 0);
@@ -159,8 +166,7 @@ export default function POS() {
   const [selectedAdmin, setSelectedAdmin] = useState<any>(null);
   const [pinEntry, setPinEntry] = useState("");
   const [adminPin, setAdminPin] = useState("1234");
-  const [autoCloseTime, setAutoCloseTime] = useState("");
-  const [autoCloseEnabled, setAutoCloseEnabled] = useState(false);
+
   const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
   const [isStockSynced, setIsStockSynced] = useState(false);
   const [isOpeningFloatOpen, setIsOpeningFloatOpen] = useState(false);
@@ -176,6 +182,8 @@ export default function POS() {
   const [closeRegisterNotes, setCloseRegisterNotes] = useState("");
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [currentSessionData, setCurrentSessionData] = useState<any>(null);
+  const [isCustomItemDialogOpen, setIsCustomItemDialogOpen] = useState(false);
+  const [customItem, setCustomItem] = useState({ name: "", price: "" });
   const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
   const [isCartCollapsed, setIsCartCollapsed] = useState(false);
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -246,7 +254,7 @@ export default function POS() {
     }
   }, [posSession]);
 
-  const [globalTaxRate, setGlobalTaxRate] = useState(15.0); // Fallback to 15%
+ // Sync with Global Session ────────────────────────────────────
 
   // Core Data Listeners (Required for login screen)
   useEffect(() => {
@@ -325,31 +333,7 @@ export default function POS() {
     };
   }, [enterpriseId, isAuthorized]);
 
-  // Global Settings Listener
-  useEffect(() => {
-    if (!enterpriseId) return;
 
-    const unsubSettings = onSnapshot(
-      doc(db, "settings", "global"),
-      (docSnapshot) => {
-        if (docSnapshot.exists()) {
-          const data = docSnapshot.data();
-          if (data.autoCloseTime) setAutoCloseTime(data.autoCloseTime);
-          if (data.autoCloseEnabled !== undefined) setAutoCloseEnabled(data.autoCloseEnabled);
-          if (data.taxRate !== undefined) setGlobalTaxRate(Number(data.taxRate));
-          setTimePolicies({
-            breakDuration: data.breakDuration ? parseInt(data.breakDuration) : 15,
-            lunchDuration: data.lunchDuration ? parseInt(data.lunchDuration) : 30,
-            meetingDuration: 60,
-            gracePeriod: data.gracePeriod ? parseInt(data.gracePeriod) : 10
-          });
-        }
-      },
-      (err) => console.error("settings-listener-error:", err)
-    );
-
-    return () => unsubSettings();
-  }, [enterpriseId]);
 
   // Specific Session Monitor
   useEffect(() => {
@@ -626,8 +610,23 @@ export default function POS() {
     toast.success("Discount applied");
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + ((item.product.retail_price || item.product.price || 0) * item.quantity), 0);
+  const subtotal = cart.reduce((sum, item) => {
+    const basePrice = (item.product.retail_price || item.product.price || 0);
+    let itemTotal = basePrice * item.quantity;
+    
+    if (item.discount) {
+      if (item.discount.type === "Percentage") {
+        itemTotal -= (itemTotal * (item.discount.value / 100));
+      } else {
+        itemTotal -= Math.min(itemTotal, item.discount.value * item.quantity);
+      }
+    }
+    return sum + itemTotal;
+  }, 0);
   const totalItems = cart.reduce((acc, curr) => acc + curr.quantity, 0);
+
+  // Helper for item-level gross (before discounts) if needed for reporting
+  const grossSubtotal = cart.reduce((sum, item) => sum + ((item.product.retail_price || item.product.price || 0) * item.quantity), 0);
 
   const eligibleCampaigns = useMemo(() => {
     if (totalItems === 0) return [];
@@ -702,7 +701,7 @@ export default function POS() {
   // Tax is calculated on the GROSS subtotal before rewards/discounts are applied 
   // to ensure correct tax reporting for loyalty-based transactions.
   const calculatedTaxRate = (globalTaxRate || 15) / 100;
-  const tax = subtotal * calculatedTaxRate;
+  const tax = isTaxEnabled ? (subtotal * calculatedTaxRate) : 0;
   const total = Math.max(0, subtotal + tax - discountAmount);
 
   const handleCompleteTransaction = async () => {
@@ -715,13 +714,26 @@ export default function POS() {
 
       // 1. Write the transaction document
       const txRef = await addDoc(collection(db, "transactions"), {
-        items: cart.map(item => ({
-          product_id: item.product.id,
-          name: item.product.name,
-          quantity: item.quantity,
-          price: item.product.retail_price || item.product.price || 0,
-          subtotal: (item.product.retail_price || item.product.price || 0) * item.quantity
-        })),
+        items: cart.map(item => {
+          const basePrice = item.product.retail_price || item.product.price || 0;
+          const baseTotal = basePrice * item.quantity;
+          let discountVal = 0;
+          if (item.discount) {
+            if (item.discount.type === "Percentage") {
+              discountVal = baseTotal * (item.discount.value / 100);
+            } else {
+              discountVal = item.discount.value * item.quantity;
+            }
+          }
+          return {
+            product_id: item.product.id,
+            name: item.product.name,
+            quantity: item.quantity,
+            price: basePrice,
+            discount: item.discount || null,
+            subtotal: baseTotal - discountVal
+          };
+        }),
         customer_id: selectedCustomer?.id || null,
         customer_name: selectedCustomer?.name || null,
         branch_id: resolvedBranch,
@@ -730,6 +742,7 @@ export default function POS() {
         discount: cartDiscount ? { ...cartDiscount, amount: discountAmount } : null,
         discount_amount: discountAmount,
         tax_rate: globalTaxRate,
+        tax_enabled: isTaxEnabled,
         tax,
         total,
         status: "COMPLETED",
@@ -1451,12 +1464,21 @@ export default function POS() {
         isCartOpenOnMobile ? "translate-x-0" : "translate-x-full md:translate-x-0",
         isCartCollapsed ? "md:w-0 md:opacity-0 md:pointer-events-none -mr-4" : "md:w-[400px] md:opacity-100"
       )}>
-        <div className="p-6 lg:p-8 border-b border-zinc-100 space-y-4">
+        <div className="flex-none p-6 lg:p-8 border-b border-zinc-100 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingCart className="w-5 h-5 text-zinc-900" />
               <h2 className="text-xl font-bold tracking-tight font-display">Current Order</h2>
             </div>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="rounded-xl border-zinc-200 h-9 font-bold text-[10px] uppercase tracking-wider"
+              onClick={() => setIsCustomItemDialogOpen(true)}
+            >
+              <Plus className="w-3 h-3 mr-1.5" />
+              Custom
+            </Button>
             <div className="flex items-center gap-2">
               <Badge className="bg-blue-600 text-white border-none px-2 py-0.5 rounded-lg">{cart.length} items</Badge>
               <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsCartOpenOnMobile(false)}>
@@ -1513,7 +1535,8 @@ export default function POS() {
           />
         </div>
 
-        <ScrollArea className="flex-1 p-8">
+        <div className="flex-1 min-h-0 relative">
+          <ScrollArea className="absolute inset-0 p-8">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-40">
               <div className="w-20 h-20 bg-zinc-100 rounded-full flex items-center justify-center">
@@ -1541,27 +1564,61 @@ export default function POS() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-1">
-                        <p className="text-sm font-bold text-zinc-900 truncate">{item.product.name}</p>
-                        <p className="text-sm font-bold text-zinc-900">{formatCurrency((item.product.retail_price || item.product.price || 0) * item.quantity)}</p>
+                        <div className="flex flex-col mb-1">
+                          <p className="text-sm font-bold text-zinc-900 truncate">{item.product.name}</p>
+                          {item.discount && (
+                            <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+                              <Tag className="w-2.5 h-2.5" />
+                              -{item.discount.type === "Percentage" ? `${item.discount.value}%` : formatCurrency(item.discount.value)} off
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm font-bold text-zinc-900">
+                          {formatCurrency(
+                            ((item.product.retail_price || item.product.price || 0) * item.quantity) - 
+                            (item.discount ? (item.discount.type === "Percentage" ? ((item.product.retail_price || item.product.price || 0) * item.quantity * (item.discount.value / 100)) : (item.discount.value * item.quantity)) : 0)
+                          )}
+                        </p>
                       </div>
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 bg-zinc-100 rounded-lg p-1">
+                        <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 bg-zinc-100 rounded-lg p-1">
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="w-6 h-6 rounded-md hover:bg-white"
+                              onClick={() => updateQuantity(item.product.id, -1)}
+                            >
+                              <Minus className="w-3 h-3" />
+                            </Button>
+                            <span className="text-xs font-bold w-4 text-center">{item.quantity}</span>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              className="w-6 h-6 rounded-md hover:bg-white"
+                              onClick={() => updateQuantity(item.product.id, 1)}
+                            >
+                              <Plus className="w-3 h-3" />
+                            </Button>
+                          </div>
                           <Button 
                             variant="ghost" 
-                            size="icon" 
-                            className="w-6 h-6 rounded-md hover:bg-white"
-                            onClick={() => updateQuantity(item.product.id, -1)}
+                            size="sm" 
+                            className={cn(
+                              "h-8 rounded-lg text-[10px] font-black uppercase tracking-widest",
+                              item.discount ? "text-emerald-600 hover:text-emerald-700 bg-emerald-50" : "text-zinc-400 hover:text-zinc-900"
+                            )}
+                            onClick={() => {
+                              setSelectedItemForDiscount(item.product.id);
+                              setItemDiscount({ 
+                                type: item.discount?.type || "Percentage", 
+                                value: item.discount?.value?.toString() || "" 
+                              });
+                              setIsItemDiscountDialogOpen(true);
+                            }}
                           >
-                            <Minus className="w-3 h-3" />
-                          </Button>
-                          <span className="text-xs font-bold w-4 text-center">{item.quantity}</span>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="w-6 h-6 rounded-md hover:bg-white"
-                            onClick={() => updateQuantity(item.product.id, 1)}
-                          >
-                            <Plus className="w-3 h-3" />
+                            <Tag className="w-3 h-3 mr-1" />
+                            {item.discount ? "Adjust Discount" : "Add Discount"}
                           </Button>
                         </div>
                         <Button 
@@ -1579,9 +1636,10 @@ export default function POS() {
               </AnimatePresence>
             </div>
           )}
-        </ScrollArea>
+          </ScrollArea>
+        </div>
 
-        <div className="p-8 bg-zinc-50 border-t border-zinc-200 space-y-6">
+        <div className="flex-none p-8 bg-zinc-50 border-t border-zinc-200 space-y-6">
           
           <AnimatePresence>
             {eligibleCampaigns.length > 0 && (activeBranch === "all" || !cartDiscount) && (
@@ -1690,8 +1748,22 @@ export default function POS() {
               </div>
             )}
 
-            <div className="flex justify-between text-sm">
-              <span className="text-zinc-500">Tax ({globalTaxRate}%)</span>
+            <div className="flex justify-between text-sm items-center">
+              <div className="flex items-center gap-2">
+                <span className="text-zinc-500">Tax ({globalTaxRate}%)</span>
+                <button 
+                  onClick={() => setIsTaxEnabled(!isTaxEnabled)}
+                  className={cn(
+                    "w-8 h-4 rounded-full transition-colors relative",
+                    isTaxEnabled ? "bg-blue-600" : "bg-zinc-200"
+                  )}
+                >
+                  <div className={cn(
+                    "absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm",
+                    isTaxEnabled ? "left-4.5" : "left-0.5"
+                  )} />
+                </button>
+              </div>
               <span className="font-medium text-zinc-900">{formatCurrency(tax)}</span>
             </div>
             <div className="flex justify-between text-2xl font-bold pt-4 border-t border-zinc-200">
@@ -2412,6 +2484,190 @@ export default function POS() {
               )}
             </div>
           </ScrollArea>
+        </DialogContent>
+      </Dialog>
+
+      {/* Custom Item Dialog */}
+      <Dialog open={isCustomItemDialogOpen} onOpenChange={setIsCustomItemDialogOpen}>
+        <DialogContent className="rounded-[2rem] p-8 max-w-md border-none shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-zinc-900">Add Custom Item</DialogTitle>
+            <DialogDescription className="text-sm font-medium text-zinc-500">
+              Enter details for a manual line item entry.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 py-6">
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Item Name</Label>
+              <Input 
+                placeholder="e.g. Service Fee" 
+                className="rounded-2xl h-14 bg-zinc-50 border-none font-bold"
+                value={customItem.name}
+                onChange={(e) => setCustomItem({...customItem, name: e.target.value})}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Price ({currency})</Label>
+              <Input 
+                type="number"
+                placeholder="0.00" 
+                className="rounded-2xl h-14 bg-zinc-50 border-none font-bold text-2xl"
+                value={customItem.price}
+                onChange={(e) => setCustomItem({...customItem, price: e.target.value})}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-3">
+            <Button 
+              variant="ghost" 
+              className="flex-1 rounded-2xl h-14 font-bold" 
+              onClick={() => setIsCustomItemDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button 
+              className="flex-1 rounded-2xl h-14 font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xl shadow-blue-600/20"
+              onClick={() => {
+                if (!customItem.name || !customItem.price) return;
+                const priceNum = parseFloat(customItem.price);
+                addToCart({
+                  id: `custom-${Date.now()}`,
+                  name: customItem.name,
+                  retail_price: priceNum,
+                  price: priceNum,
+                  category: "MANUAL",
+                  isCustom: true
+                });
+                setIsCustomItemDialogOpen(false);
+                setCustomItem({ name: "", price: "" });
+              }}
+            >
+              Add to Cart
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Item Discount Dialog */}
+      <Dialog open={isItemDiscountDialogOpen} onOpenChange={setIsItemDiscountDialogOpen}>
+        <DialogContent className="rounded-[2.5rem] p-8 max-w-md border-none shadow-2xl bg-white">
+          <DialogHeader className="mb-6">
+            <DialogTitle className="text-2xl font-black text-zinc-900">Line Item Discount</DialogTitle>
+            <DialogDescription className="text-zinc-500 font-bold">
+              Apply a specific discount to this item only.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-4">
+            <div className="flex bg-zinc-100 p-1 rounded-2xl">
+              <Button 
+                variant="ghost" 
+                className={cn(
+                  "flex-1 rounded-xl h-11 font-bold text-xs transition-all",
+                  itemDiscount.type === "Percentage" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"
+                )}
+                onClick={() => setItemDiscount({ ...itemDiscount, type: "Percentage" })}
+              >
+                Percentage
+              </Button>
+              <Button 
+                variant="ghost" 
+                className={cn(
+                  "flex-1 rounded-xl h-11 font-bold text-xs transition-all",
+                  itemDiscount.type === "Fixed Amount" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500"
+                )}
+                onClick={() => setItemDiscount({ ...itemDiscount, type: "Fixed Amount" })}
+              >
+                Fixed Amount
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                {itemDiscount.type === "Percentage" ? "Discount Percent" : `Discount Amount (${currency})`}
+              </Label>
+              <Input 
+                type="number"
+                placeholder={itemDiscount.type === "Percentage" ? "0" : "0.00"}
+                className="h-16 rounded-2xl border-none bg-zinc-50 text-2xl font-black focus:ring-4 focus:ring-blue-500/10 transition-all text-center"
+                value={itemDiscount.value}
+                onChange={(e) => setItemDiscount({ ...itemDiscount, value: e.target.value })}
+                autoFocus
+              />
+            </div>
+
+            {itemDiscount.type === "Percentage" && (
+              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
+                {[5, 10, 15, 20, 25, 50].map(val => (
+                  <Button 
+                    key={val}
+                    variant="outline"
+                    className="rounded-xl h-10 px-4 font-bold text-xs flex-none"
+                    onClick={() => setItemDiscount({ ...itemDiscount, value: val.toString() })}
+                  >
+                    {val}%
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="gap-3 mt-4">
+            <Button 
+              variant="ghost" 
+              className="flex-1 rounded-2xl h-14 font-bold text-zinc-500"
+              onClick={() => {
+                setCart(prev => prev.map(item => 
+                  item.product.id === selectedItemForDiscount ? { ...item, discount: null } : item
+                ));
+                setIsItemDiscountDialogOpen(false);
+              }}
+            >
+              Remove
+            </Button>
+            <Button 
+              className="flex-1 rounded-2xl h-14 font-black bg-zinc-900 text-white hover:bg-zinc-800 shadow-xl shadow-zinc-900/10"
+              onClick={() => {
+                const val = Number(itemDiscount.value);
+                if (!itemDiscount.value || isNaN(val) || val < 0) {
+                  toast.error("Please enter a valid amount");
+                  return;
+                }
+
+                // Grade-based cap check
+                const grade = posSession?.payGrade || "EXECUTIVE";
+                const capPercent = grade === "STANDARD" ? 10 : grade === "SUPERVISOR" ? 25 : 100;
+                if (itemDiscount.type === "Percentage" && val > capPercent) {
+                  toast.error(`Your ${grade} grade is capped at ${capPercent}% item discounts.`);
+                  return;
+                }
+
+                if (itemDiscount.type === "Percentage" && val > 100) {
+                  toast.error("Cannot exceed 100%");
+                  return;
+                }
+
+                setCart(prev => prev.map(item => {
+                  if (item.product.id === selectedItemForDiscount) {
+                    const itemSubtotal = (item.product.retail_price || item.product.price || 0) * item.quantity;
+                    if (itemDiscount.type === "Fixed Amount" && val > itemSubtotal) {
+                      toast.error("Discount exceeds item subtotal");
+                      return item;
+                    }
+                    return { 
+                      ...item, 
+                      discount: { type: itemDiscount.type as any, value: val } 
+                    };
+                  }
+                  return item;
+                }));
+                setIsItemDiscountDialogOpen(false);
+                toast.success("Item discount applied");
+              }}
+            >
+              Apply Discount
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

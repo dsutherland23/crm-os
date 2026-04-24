@@ -29,6 +29,7 @@ export const SocialHub: React.FC = () => {
     { name: "Facebook", icon: <Facebook className="w-5 h-5" />, url: branding.socials?.facebook, color: "bg-blue-800" },
     { name: "Twitter", icon: <Twitter className="w-5 h-5" />, url: branding.socials?.twitter, color: "bg-zinc-900" },
     { name: "WhatsApp", icon: <MessageCircle className="w-5 h-5" />, url: branding.phone ? `https://wa.me/${branding.phone.replace(/\D/g, '')}` : null, color: "bg-emerald-600" },
+    { name: "Office", icon: <MessageCircle className="w-5 h-5" />, url: branding.officePhone ? `tel:${branding.officePhone.replace(/\D/g, '')}` : null, color: "bg-blue-500" },
     { name: "Email", icon: <Mail className="w-5 h-5" />, url: branding.email ? `mailto:${branding.email}` : null, color: "bg-zinc-700" }
   ].filter(p => p.url);
 

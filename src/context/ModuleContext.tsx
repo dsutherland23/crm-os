@@ -51,6 +51,12 @@ interface ModuleContextType {
   hasPermission: (moduleId: string, level?: "viewer" | "editor" | "admin") => boolean;
   billing: BillingConfig;
   updateBilling: (update: Partial<BillingConfig>) => Promise<void>;
+  taxRate: number;
+  setTaxRate: (rate: number) => Promise<void>;
+  autoCloseTime: string;
+  setAutoCloseTime: (time: string) => Promise<void>;
+  autoCloseEnabled: boolean;
+  setAutoCloseEnabled: (enabled: boolean) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -74,6 +80,7 @@ export interface BrandingConfig {
   logo: string;
   email: string;
   phone: string;
+  officePhone: string;
   address: string;
   socials: {
     facebook: string;
@@ -89,6 +96,7 @@ const DEFAULT_BRANDING: BrandingConfig = {
   logo: "",
   email: "connect@orivocrm.pro",
   phone: "+1 888-ORIVO-CRM",
+  officePhone: "+1 888-OFFICE-01",
   address: "Orivo HQ, Digital Valley, Cloud Suite 101",
   socials: { 
     facebook: "https://facebook.com/orivocrm", 
@@ -133,6 +141,10 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     to: new Date().toISOString()
   });
 
+  const [taxRate, setTaxRateState] = useState(15);
+  const [autoCloseTime, setAutoCloseTimeState] = useState("22:00");
+  const [autoCloseEnabled, setAutoCloseEnabledState] = useState(false);
+
   const [branding, setBrandingState] = useState<BrandingConfig>(() => {
     const saved = localStorage.getItem("crm_branding");
     return saved ? JSON.parse(saved) : DEFAULT_BRANDING;
@@ -164,6 +176,9 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
          if (data.topSpenderThreshold !== undefined) setTopSpenderThreshold(Number(data.topSpenderThreshold));
          if (data.currency) setCurrency(data.currency);
          if (data.billing) setBillingState(data.billing);
+         if (data.taxRate !== undefined) setTaxRateState(Number(data.taxRate));
+         if (data.autoCloseTime) setAutoCloseTimeState(data.autoCloseTime);
+         if (data.autoCloseEnabled !== undefined) setAutoCloseEnabledState(data.autoCloseEnabled);
        }
     });
 
@@ -194,6 +209,49 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
 
   const setBranding = (update: Partial<BrandingConfig>) => {
     setBrandingState(prev => ({ ...prev, ...update }));
+  };
+
+  const setTaxRate = async (rate: number) => {
+    if (!enterpriseId) return;
+    setTaxRateState(rate);
+    try {
+      const { updateDoc, doc } = await import("firebase/firestore");
+      await updateDoc(doc(db, "enterprise_settings", enterpriseId), {
+        taxRate: rate,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Failed to update tax rate:", error);
+      toast.error("Failed to sync tax rate to cloud");
+    }
+  };
+
+  const setAutoCloseTime = async (time: string) => {
+    if (!enterpriseId) return;
+    setAutoCloseTimeState(time);
+    try {
+      const { updateDoc, doc } = await import("firebase/firestore");
+      await updateDoc(doc(db, "enterprise_settings", enterpriseId), {
+        autoCloseTime: time,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Failed to update autoCloseTime:", error);
+    }
+  };
+
+  const setAutoCloseEnabled = async (enabled: boolean) => {
+    if (!enterpriseId) return;
+    setAutoCloseEnabledState(enabled);
+    try {
+      const { updateDoc, doc } = await import("firebase/firestore");
+      await updateDoc(doc(db, "enterprise_settings", enterpriseId), {
+        autoCloseEnabled: enabled,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error("Failed to update autoCloseEnabled:", error);
+    }
   };
 
   useEffect(() => {
@@ -408,6 +466,12 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       hasPermission,
       billing,
       updateBilling,
+      taxRate,
+      setTaxRate,
+      autoCloseTime,
+      setAutoCloseTime,
+      autoCloseEnabled,
+      setAutoCloseEnabled,
       logout
     }}>
       {children}

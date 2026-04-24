@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore } from 'firebase/firestore';
+import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import * as fs from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { getMockUser } from './auth-mock';
@@ -13,8 +13,10 @@ export const auth = getAuth(app);
 //  - Firebase Auth has its OWN persistence (localStorage/IndexedDB) that keeps users logged in.
 //  - Firestore's IndexedDB persistence layer causes "INTERNAL ASSERTION FAILED: Unexpected state"
 //    errors when the cache becomes corrupted (common after switching between persistence modes).
-//  - Without persistence, data loads fresh on each session — which is correct behavior for a CRM.
-export const db = initializeFirestore(app, {});
+//  - By explicitly using memoryLocalCache(), we guarantee no disk access and resolve assertion errors.
+export const db = initializeFirestore(app, {
+  localCache: memoryLocalCache()
+});
 
 // Proactively clean up any stale Firestore IndexedDB databases left from previous sessions.
 // This prevents "Unexpected state" assertion errors from corrupted cache on page load.
