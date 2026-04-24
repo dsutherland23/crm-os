@@ -36,7 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useModules } from "@/context/ModuleContext";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { db, collection, query, onSnapshot, orderBy, limit, where } from "@/lib/firebase";
+import { db, collection, query, onSnapshot, orderBy, limit, where, doc } from "@/lib/firebase";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePendingAction } from "@/context/PendingActionContext";
 

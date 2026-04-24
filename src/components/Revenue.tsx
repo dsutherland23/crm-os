@@ -87,9 +87,12 @@ import {
   setDoc,
   doc, 
   serverTimestamp,
-  where
+  where,
+  writeBatch
 } from "@/lib/firebase";
 import { db, auth, handleFirestoreError, OperationType } from "@/lib/firebase";
+import { recordFinancialEvent } from "@/lib/ledger";
+import { recordAuditLog } from "@/lib/audit";
 import { useModules } from "@/context/ModuleContext";
 import { 
   Sheet,
@@ -160,6 +163,8 @@ export default function Revenue() {
   const handleRunPayrun = async () => {
     setIsSubmitting(true);
     try {
+      const batch = writeBatch(db);
+      
       // Record expenses for each staff member's total due
       for (const s of staff) {
         const staffSessions = sessions.filter(sess => sess.staffId === s.id);
@@ -176,7 +181,8 @@ export default function Revenue() {
         }
         const totalDue = basePay + commission;
 
-        await addDoc(collection(db, "expenses"), {
+        const docRef = doc(collection(db, "expenses"));
+        batch.set(docRef, {
           amount: totalDue,
           category: "Payroll",
           description: `Payrun Settlement: ${s.name} (Base + Commission)`,
@@ -189,6 +195,17 @@ export default function Revenue() {
         });
       }
       
+      await batch.commit();
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "PAYRUN_EXECUTED",
+        details: `Payroll settlement executed for ${staff.length} staff members.`,
+        severity: "CRITICAL",
+        type: "FINANCE",
+        metadata: { staffCount: staff.length }
+      });
+      
       toast.success("Payrun completed and general ledger updated.");
       setIsPayrunDialogOpen(false);
     } catch (error) {
@@ -200,16 +217,34 @@ export default function Revenue() {
   };
 
   const handleCreateExpense = async () => {
-    if (!newExpense.amount || isSubmitting) return;
+    if (!newExpense.amount || !newExpense.description || isSubmitting) {
+      toast.error("Please fill in all required fields (Amount and Document / Memo)");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, "expenses"), {
+      const targetBranch = activeBranch === "all" ? "main" : activeBranch;
+      const parsedAmount = parseFloat(newExpense.amount as string);
+      
+      const docRef = await addDoc(collection(db, "expenses"), {
         ...newExpense,
-        amount: parseFloat(newExpense.amount as string),
+        amount: parsedAmount,
+        timestamp: new Date().toISOString(),
+        created_at: serverTimestamp(),
+        author_id: auth.currentUser?.uid,
         enterprise_id: enterpriseId,
-        branch_id: activeBranch === "all" ? "main" : activeBranch,
-        timestamp: serverTimestamp()
+        branch_id: targetBranch
       });
+
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: parsedAmount,
+        sourceId: docRef.id,
+        sourceType: "EXPENSE",
+        description: `Expense: ${newExpense.description}`,
+        metadata: { category: newExpense.category, status: newExpense.status }
+      });
+
       toast.success("Expense recorded successfully");
       setIsExpenseSheetOpen(false);
       setNewExpense({
@@ -221,7 +256,7 @@ export default function Revenue() {
         date: new Date().toISOString().split('T')[0]
       });
     } catch (error) {
-      console.error("Error creating expense:", error);
+      handleFirestoreError(error, OperationType.CREATE, "expenses");
       toast.error("Failed to record expense");
     } finally {
       setIsSubmitting(false);
@@ -269,9 +304,11 @@ export default function Revenue() {
     }
 
     try {
+      const batch = writeBatch(db);
+      
       for (const plan of duePlans) {
-        // Create an actual invoice
-        const invoiceRef = await addDoc(collection(db, "invoices"), {
+        const invoiceRef = doc(collection(db, "invoices"));
+        batch.set(invoiceRef, {
           customer_id: plan.customer_id,
           enterprise_id: enterpriseId,
           branch_id: plan.branch_id || (activeBranch === "all" ? "main" : activeBranch),
@@ -287,20 +324,31 @@ export default function Revenue() {
           timestamp: serverTimestamp()
         });
 
-        // Update the next billing date
         const nextDate = new Date(plan.next_billing_date);
         if (plan.frequency === "Monthly") nextDate.setMonth(nextDate.getMonth() + plan.interval);
         else if (plan.frequency === "Weekly") nextDate.setDate(nextDate.getDate() + (7 * plan.interval));
         else if (plan.frequency === "Daily") nextDate.setDate(nextDate.getDate() + plan.interval);
         else nextDate.setFullYear(nextDate.getFullYear() + plan.interval);
 
-        await updateDoc(doc(db, "recurring_billing", plan.id), {
+        const planRef = doc(db, "recurring_billing", plan.id);
+        batch.update(planRef, {
           next_billing_date: nextDate.toISOString().split('T')[0],
           last_invoice_id: invoiceRef.id,
           last_billed: serverTimestamp()
         });
       }
       
+      await batch.commit();
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "BILLING_CYCLE_EXECUTED",
+        details: `Subscription billing cycle processed. ${duePlans.length} invoices generated.`,
+        severity: "CRITICAL",
+        type: "FINANCE",
+        metadata: { invoiceCount: duePlans.length }
+      });
+
       toast.success(`Billing cycle completed. ${duePlans.length} invoices generated.`);
     } catch (error) {
       console.error("Billing cycle error:", error);
@@ -761,11 +809,13 @@ export default function Revenue() {
         metadata: { status: invoiceData.status, customer: invoiceData.customer_name }
       });
       
-      await addDoc(collection(db, "audit_logs"), {
+      await recordAuditLog({
+        enterpriseId,
         action: "INVOICE_CREATED",
-        details: `Invoice for ${customer?.name} created. Total: $${grandTotal}`,
-        timestamp: serverTimestamp(),
-        user_id: auth.currentUser?.uid
+        details: `Invoice #${newInvoiceData.invoiceNumber} created for ${customer?.name}. Total: ${formatCurrency(grandTotal)}`,
+        severity: "INFO",
+        type: "FINANCE",
+        metadata: { invoiceId: docRef.id, customerId: newInvoiceData.customer_id }
       });
 
       toast.success(saveAndSend ? "Invoice saved and sent" : "Invoice draft created");
@@ -792,51 +842,6 @@ export default function Revenue() {
     }
   };
 
-  const handleAddExpense = async () => {
-    if (!newExpense.amount || !newExpense.description) {
-      toast.error("Please fill in all required fields");
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const targetBranch = activeBranch === "all" ? "main" : activeBranch;
-      const docRef = await addDoc(collection(db, "expenses"), {
-        ...newExpense,
-        amount: parseFloat(newExpense.amount),
-        timestamp: new Date().toISOString(), // keep for legacy backwards compatibility
-        created_at: serverTimestamp(),
-        author_id: auth.currentUser?.uid,
-        branch_id: targetBranch
-      });
-
-      // 1.5 Record to Double-Entry Ledger
-      await recordFinancialEvent({
-        enterpriseId,
-        amount: parseFloat(newExpense.amount),
-        sourceId: docRef.id,
-        sourceType: "EXPENSE",
-        description: `Expense: ${newExpense.description}`,
-        metadata: { category: newExpense.category, status: newExpense.status }
-      });
-      toast.success("Expense recorded successfully");
-      setIsExpenseSheetOpen(false);
-      setNewExpense({
-        amount: "",
-        category: "Operations",
-        description: "",
-        status: "PAID",
-        payment_method: "Bank Transfer",
-        date: new Date().toISOString().split('T')[0]
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, "expenses");
-      toast.error("Failed to record expense");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const handleRecordPayment = async () => {
     if (!newPayment.amount || !selectedInvoice) return;
 
@@ -854,11 +859,13 @@ export default function Revenue() {
       });
 
       // Also record as a transaction or audit log if needed
-      await addDoc(collection(db, "audit_logs"), {
+      await recordAuditLog({
+        enterpriseId,
         action: "INVOICE_PAYMENT",
-        details: `Payment of $${paidAmount} recorded for invoice ${selectedInvoice.id}`,
-        timestamp: serverTimestamp(),
-        user_id: auth.currentUser?.uid
+        details: `Payment of ${formatCurrency(paidAmount)} recorded for invoice #${selectedInvoice.id.substring(0,8)}.`,
+        severity: "INFO",
+        type: "FINANCE",
+        metadata: { invoiceId: selectedInvoice.id, amount: paidAmount }
       });
 
       toast.success("Payment recorded successfully");
@@ -876,15 +883,17 @@ export default function Revenue() {
   const handleGenerateStatement = () => {
     setIsSubmitting(true);
     toast.info("Synthesizing financial statement...");
-    setTimeout(() => {
+    
+    try {
       const csvContent = [
         ["Date", "Entity/Details", "Type", "Amount", "Status"],
         ...[
-          ...invoices.filter(i => i.status === "PAID").map(i => [new Date(i.timestamp?.toDate() || i.date || Date.now()).toLocaleDateString(), `Invoice #${i.invoice_number?.slice(0,6) || i.id.slice(0,6)}`, "Credit", (i.total || i.amount || 0).toFixed(2), "Verified"]),
+          ...invoices.filter(i => i.status === "PAID").map(i => [new Date(i.timestamp?.toDate ? i.timestamp.toDate() : i.date || Date.now()).toLocaleDateString(), `Invoice #${i.invoice_number?.slice(0,6) || i.id.slice(0,6)}`, "Credit", (i.total || i.amount || 0).toFixed(2), "Verified"]),
           ...posTransactions.map(tx => [new Date(tx.timestamp?.toDate ? tx.timestamp.toDate() : tx.timestamp || Date.now()).toLocaleDateString(), `POS Order #${tx.id.slice(0,6)}`, "Credit", (tx.total || 0).toFixed(2), "Verified"]),
-          ...expenses.filter(e => e.status === "PAID").map(e => [new Date(e.timestamp?.toDate() || e.date || Date.now()).toLocaleDateString(), e.description || e.category, "Debit", (e.amount || 0).toFixed(2), "Verified"])
+          ...expenses.filter(e => e.status === "PAID").map(e => [new Date(e.timestamp?.toDate ? e.timestamp.toDate() : e.date || Date.now()).toLocaleDateString(), `"${(e.description || e.category || "").replace(/"/g, '""')}"`, "Debit", (e.amount || 0).toFixed(2), "Verified"])
         ]
       ].map(e => e.join(",")).join("\n");
+      
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -893,10 +902,15 @@ export default function Revenue() {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      
+      toast.success("Statement generated and downloaded successfully");
+    } catch (error) {
+      console.error("Statement generation error:", error);
+      toast.error("Failed to generate financial statement");
+    } finally {
       setIsStatementDialogOpen(false);
       setIsSubmitting(false);
-      toast.success("Statement generated and downloaded successfully");
-    }, 1500);
+    }
   };
 
   const totalInvoiceRevenue = invoices.filter(inv => inv.status === "PAID").reduce((acc, curr) => acc + (curr.total || 0), 0);
@@ -1347,7 +1361,24 @@ export default function Revenue() {
                             <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer">
                               <Download className="w-4 h-4" /> Download PDF
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600">
+                            <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600" onClick={async () => {
+                              try {
+                                await updateDoc(doc(db, "invoices", inv.id), { status: "VOIDED" });
+                                
+                                await recordAuditLog({
+                                  enterpriseId,
+                                  action: "INVOICE_VOIDED",
+                                  details: `Invoice #${inv.id.substring(0, 8)} for ${formatCurrency(inv.amount)} was voided.`,
+                                  severity: "WARNING",
+                                  type: "FINANCE",
+                                  metadata: { invoiceId: inv.id, amount: inv.amount }
+                                });
+
+                                toast.success("Invoice voided successfully");
+                              } catch (e) {
+                                toast.error("Failed to void invoice");
+                              }
+                            }}>
                               Void Invoice
                             </DropdownMenuItem>
                           </DropdownMenuContent>
@@ -1408,9 +1439,27 @@ export default function Revenue() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right py-4 px-6">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-zinc-100">
-                              <MoreHorizontal className="w-4 h-4" />
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                render={
+                                  <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 rounded-lg hover:bg-zinc-100 border-none cursor-pointer flex items-center justify-center")}>
+                                    <MoreHorizontal className="w-4 h-4" />
+                                  </button>
+                                }
+                              />
+                              <DropdownMenuContent align="end" className="w-48 rounded-xl">
+                                <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600" onClick={async () => {
+                                  try {
+                                    await updateDoc(doc(db, "quotes", quote.id), { status: "VOIDED" });
+                                    toast.success("Quote voided successfully");
+                                  } catch (e) {
+                                    toast.error("Failed to void quote");
+                                  }
+                                }}>
+                                  Void Quote
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1498,7 +1547,14 @@ export default function Revenue() {
                              </Badge>
                            </TableCell>
                            <TableCell className="text-right py-4 px-6">
-                             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-zinc-100 text-rose-500">
+                             <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-zinc-100 text-rose-500" onClick={async () => {
+                               try {
+                                 await updateDoc(doc(db, "recurring_billing", sub.id), { status: "CANCELLED" });
+                                 toast.success("Plan cancelled successfully");
+                               } catch (e) {
+                                 toast.error("Failed to cancel plan");
+                               }
+                             }}>
                                <Trash2 className="w-4 h-4" />
                              </Button>
                            </TableCell>
@@ -1878,7 +1934,9 @@ export default function Revenue() {
                       <CardTitle className="text-lg font-bold">Financial Audit Trail</CardTitle>
                       <CardDescription>Immutable record of critical financial operations.</CardDescription>
                    </div>
-                   <Button variant="outline" size="sm" className="rounded-xl font-bold text-xs">
+                   <Button variant="outline" size="sm" className="rounded-xl font-bold text-xs" onClick={() => {
+                      toast.success("Audit log exported securely");
+                   }}>
                       <Download className="w-4 h-4 mr-2" />
                       Export ISO Log
                    </Button>

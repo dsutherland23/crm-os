@@ -223,7 +223,7 @@ function AppContent() {
       case "inventory": return hasPermission("inventory") ? <Inventory /> : fallback;
       case "analytics": return hasPermission("analytics") ? <Analytics /> : fallback;
       case "workflow":  return hasPermission("workflow")  ? <Workflow />  : fallback;
-      case "audit":     return hasPermission("audit")     ? <AuditLogs /> : fallback;
+      case "audit_logs": return hasPermission("audit_logs") ? <AuditLogs /> : fallback;
       case "ai":        return hasPermission("ai")        ? <AIInsights /> : fallback;
       case "settings":  return hasPermission("settings", "admin") ? <Settings defaultTab={settingsTab} /> : fallback;
       case "staff":     return hasPermission("staff", "admin")    ? <StaffManager /> : fallback;

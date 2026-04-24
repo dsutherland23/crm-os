@@ -28,7 +28,7 @@ export const PLAN_LIMITS: Record<string, PlanLimits> = {
     name: "Enterprise",
     maxUsers: Infinity,
     maxBranches: Infinity,
-    features: ["crm", "pos", "inventory", "finance", "groups", "loyalty", "analytics", "workflow", "audit", "ai"],
+    features: ["crm", "pos", "inventory", "finance", "groups", "loyalty", "analytics", "workflow", "audit_logs", "ai"],
     pricing: { monthly: 499, yearly: 5389 }
   }
 };

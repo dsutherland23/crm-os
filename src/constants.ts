@@ -12,6 +12,8 @@ export const DEFAULT_MODULE_CONFIG: ModuleConfig = {
   ai: true,
   audit_logs: true,
   workflow: true,
+  groups: true,
+  loyalty: true,
 };
 
 export const APP_NAME = "CRM OS Enterprise";

@@ -179,6 +179,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
          if (data.taxRate !== undefined) setTaxRateState(Number(data.taxRate));
          if (data.autoCloseTime) setAutoCloseTimeState(data.autoCloseTime);
          if (data.autoCloseEnabled !== undefined) setAutoCloseEnabledState(data.autoCloseEnabled);
+         if (data.modules) setConfig(prev => ({ ...DEFAULT_MODULE_CONFIG, ...prev, ...data.modules }));
        }
     });
 

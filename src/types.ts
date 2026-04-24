@@ -94,4 +94,6 @@ export interface ModuleConfig {
   ai: boolean;
   audit_logs: boolean;
   workflow: boolean;
+  groups: boolean;
+  loyalty: boolean;
 }

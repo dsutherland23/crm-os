@@ -45,7 +45,8 @@ import {
   ExternalLink,
   CheckCircle,
   FileUp,
-  Landmark
+  Landmark,
+  Star
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -92,6 +93,7 @@ import { motion } from "motion/react";
 
 import { collection, onSnapshot, doc, setDoc, getDocs, writeBatch, addDoc, deleteDoc, query, where, serverTimestamp } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
+import { recordAuditLog } from "@/lib/audit";
 
 import CommissionPartners from "./CommissionPartners";
 import StaffManager from "./StaffManager";
@@ -239,6 +241,15 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         }, { merge: true });
         
         setIsTwoFactorEnabled(enabled);
+        
+        await recordAuditLog({
+          enterpriseId,
+          action: enabled ? "2FA_ENABLED" : "2FA_DISABLED",
+          details: `Executive Two-Factor Authentication has been ${enabled ? 'activated' : 'deactivated'}.`,
+          severity: "CRITICAL",
+          type: "SECURITY"
+        });
+
         toast.success(`Security protocol updated: 2FA is now ${enabled ? 'active' : 'inactive'} across all executive accounts.`, { id: loadingToast });
       } catch (err: any) {
         toast.error("Security update failed: " + err.message, { id: loadingToast });
@@ -263,6 +274,15 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
       setIsCommissionPinDialogOpen(false);
       setCurrentPinInput("");
       setNewPinInput("");
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "PIN_UPDATED",
+        details: "Commission Partner access PIN has been changed.",
+        severity: "WARNING",
+        type: "SECURITY"
+      });
+
       toast.success("Commission PIN updated securely.");
     } catch (error: any) {
       toast.error("Failed to update PIN: " + error.message);
@@ -325,15 +345,31 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         const snapshot = await getDocs(q);
         
         if (!snapshot.empty) {
-          const batch = writeBatch(db);
-          snapshot.docs.forEach((doc: any) => batch.delete(doc.ref));
-          await batch.commit();
+          // Batch has a limit of 500 operations
+          const chunks = [];
+          for (let i = 0; i < snapshot.docs.length; i += 500) {
+            chunks.push(snapshot.docs.slice(i, i + 500));
+          }
+          
+          for (const chunk of chunks) {
+            const batch = writeBatch(db);
+            chunk.forEach((doc: any) => batch.delete(doc.ref));
+            await batch.commit();
+          }
         }
       }
 
       toast.success("Enterprise data wiped successfully.", {
         id: loadingToast,
         description: "Your workspace has been returned to factory settings."
+      });
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "FACTORY_RESET",
+        details: "A complete enterprise-wide data purge was executed. All module records were destroyed.",
+        severity: "CRITICAL",
+        type: "SYSTEM"
       });
 
       // Force a reload to clear all local state and caches
@@ -394,15 +430,25 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
 
       const batch = writeBatch(db);
       for (const role of defaultRoles) {
-        const docRef = doc(collection(db, "roles"));
+        const roleId = `${enterpriseId}-${role.name.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+        const docRef = doc(db, "roles", roleId);
         batch.set(docRef, {
           ...role,
           users: 0,
           enterprise_id: enterpriseId,
           createdAt: serverTimestamp()
-        });
+        }, { merge: true });
       }
       await batch.commit();
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "ROLES_SEEDED",
+        details: "Default enterprise-grade roles were provisioned into the system.",
+        severity: "INFO",
+        type: "SYSTEM"
+      });
+
       toast.success("System roles successfully provisioned.", { id: loadingToast });
     } catch (err: any) {
       toast.error("Role seeding failed: " + err.message, { id: loadingToast });
@@ -637,6 +683,15 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         description: "Your enterprise capability set has been updated globally.",
         duration: 3000
       });
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "MODULE_CONFIG_UPDATE",
+        details: "The core module capability matrix was updated by an administrator.",
+        severity: "WARNING",
+        type: "SYSTEM",
+        metadata: { config }
+      });
     } catch (error: any) {
       toast.error("Module commit failed: " + error.message, { id: loadingToast });
     }
@@ -687,6 +742,8 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     { id: "analytics", name: "Advanced Analytics", description: "Sales trends, customer insights, and revenue reports.", icon: Building },
     { id: "workflow", name: "Workflow Engine", description: "Automated business processes and trigger-based logic.", icon: Zap },
     { id: "ai", name: "AI Layer (Gemini)", description: "Auto-categorization, predictions, and smart insights.", icon: Palette },
+    { id: "groups", name: "Client Groups", description: "Segment customers into operational cohorts for targeted actions.", icon: Users },
+    { id: "loyalty", name: "Loyalty Program", description: "Manage points, rewards, and customer engagement schemes.", icon: Star },
     { id: "audit_logs", name: "Audit Logs", description: "Track system activities and security events.", icon: Lock },
   ];
 
