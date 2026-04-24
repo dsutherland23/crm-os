@@ -8,7 +8,7 @@ import {
   ShieldCheck, CalendarCheck, CreditCard, Activity, FileText
 } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -98,6 +98,9 @@ export default function Inventory() {
 
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+  const [isCustomUnit, setIsCustomUnit] = useState(false);
+
+  const UNITS = ["boxes", "g", "kg", "L", "lbs", "mL", "oz", "pcs", "units", "clutch", "m", "cm", "in", "ft", "yd", "pack", "case", "set", "roll", "bag", "bundle", "doz", "gross"];
   const [selectedMovements, setSelectedMovements] = useState<string[]>([]);
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
   const [deleteConfirmProduct, setDeleteConfirmProduct] = useState<any>(null);
@@ -118,7 +121,8 @@ export default function Inventory() {
     supplier_id: '',
     description: '',
     initialStock: 0,
-    adjustmentReason: 'RESTOCK'
+    adjustmentReason: 'RESTOCK',
+    unit: 'pcs'
   });
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [isSavingProduct, setIsSavingProduct] = useState(false);
@@ -318,32 +322,47 @@ export default function Inventory() {
           const data = results.data as any[];
           if (data.length === 0) throw new Error("No records found in CSV");
 
-          const batch = writeBatch(db);
+          const parseNumber = (val: any) => {
+            if (typeof val === 'number') return val;
+            if (!val) return 0;
+            const cleaned = String(val).replace(/[^0-9.-]/g, '');
+            return parseFloat(cleaned) || 0;
+          };
+
+          // Firestore has a 500 operation limit per batch
+          const BATCH_SIZE = 500;
           let importedCount = 0;
+          
+          for (let i = 0; i < data.length; i += BATCH_SIZE) {
+            const chunk = data.slice(i, i + BATCH_SIZE);
+            const batch = writeBatch(db);
+            
+            chunk.forEach((row) => {
+              const name = row.name || row.Name || row.product || row.Product;
+              const sku = row.sku || row.SKU || row.code || row.Code;
+              if (!name || !sku) return;
 
-          data.forEach((row) => {
-            const name = row.name || row.Name || row.product || row.Product;
-            const sku = row.sku || row.SKU || row.code || row.Code;
-            if (!name || !sku) return;
-
-            const productRef = doc(collection(db, 'products'));
-            batch.set(productRef, {
-              name,
-              sku,
-              price: Number(row.price || row.Price || row.retail || 0),
-              retail_price: Number(row.price || row.Price || row.retail || 0),
-              cost: Number(row.cost || row.Cost || 0),
-              category: row.category || row.Category || 'General',
-              barcode: row.barcode || row.Barcode || '',
-              min_stock_level: Number(row.min_stock || 10),
-              enterprise_id: enterpriseId,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
+              const productRef = doc(collection(db, 'products'));
+              batch.set(productRef, {
+                name,
+                sku,
+                price: parseNumber(row.price || row.Price || row.retail),
+                retail_price: parseNumber(row.price || row.Price || row.retail),
+                cost: parseNumber(row.cost || row.Cost),
+                category: row.category || row.Category || 'General',
+                barcode: row.barcode || row.Barcode || '',
+                unit: row.unit || row.Unit || 'pcs',
+                min_stock_level: parseNumber(row.min_stock || row.minStock || 10),
+                enterprise_id: enterpriseId,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              });
+              importedCount++;
             });
-            importedCount++;
-          });
 
-          await batch.commit();
+            await batch.commit();
+          }
+
           toast.success(`Strategic Import Complete: ${importedCount} assets onboarded.`, { id: loadingToast });
           setIsImportDialogOpen(false);
           fetchData();
@@ -599,12 +618,15 @@ export default function Inventory() {
         minStock: product.min_stock_level || 10,
         maxStock: product.max_stock_level || 100,
         leadTime: product.lead_time_days || 5,
-        autoReorder: product.auto_reorder || false,
-        supplier_id: product.supplier_id || '',
-        description: product.description || '',
-        initialStock: getProductStock(product.id, 'all'),
-        adjustmentReason: 'RESTOCK'
+        autoReorder: product?.auto_reorder || false,
+        supplier_id: product?.supplier_id || '',
+        description: product?.description || '',
+        initialStock: product?.stock || 0,
+        adjustmentReason: 'RESTOCK',
+        unit: product?.unit || 'pcs'
       });
+      setIsCustomUnit(product?.unit && !UNITS.includes(product.unit));
+      setEditingProductId(product?.id || null);
     } else {
       setEditingProductId(null);
       setProductForm({
@@ -666,6 +688,7 @@ export default function Inventory() {
         auto_reorder: Boolean(productForm.autoReorder),
         description: productForm.description || '',
         supplier_id: productForm.supplier_id || '',
+        unit: productForm.unit || 'pcs',
         enterprise_id: enterpriseId,
         updated_at: new Date().toISOString()
       };
@@ -1069,7 +1092,7 @@ export default function Inventory() {
     // 2. Async Cloud Sync with Timeout
     setIsUploadingImage(true);
     const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Sync Timeout')), 15000)
+      setTimeout(() => reject(new Error('Sync Timeout')), 30000)
     );
 
     try {
@@ -1379,7 +1402,7 @@ export default function Inventory() {
                     onChange={(e) => setProductForm({...productForm, name: e.target.value})}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Catalog Category</label>
                     <Input 
@@ -1407,6 +1430,51 @@ export default function Inventory() {
                           <Sparkles className="w-4 h-4" />
                         </button>
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Measurement Unit</label>
+                    {isCustomUnit ? (
+                      <div className="relative">
+                        <Input 
+                          placeholder="Enter unit..." 
+                          className="rounded-2xl h-14 bg-white border-zinc-200 font-bold focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm pr-10" 
+                          value={productForm.unit}
+                          onChange={(e) => setProductForm({...productForm, unit: e.target.value})}
+                        />
+                        <button 
+                          onClick={() => {
+                            setIsCustomUnit(false);
+                            setProductForm({...productForm, unit: 'pcs'});
+                          }}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center rounded-xl bg-zinc-100 text-zinc-400 hover:bg-zinc-200 transition-all"
+                        >
+                          <XIcon className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <Select 
+                        value={productForm.unit} 
+                        onValueChange={(val) => {
+                          if (val === "custom") {
+                            setIsCustomUnit(true);
+                            setProductForm({...productForm, unit: ""});
+                          } else {
+                            setProductForm({...productForm, unit: val});
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="rounded-2xl h-14 bg-white border-zinc-200 font-bold focus:ring-4 focus:ring-blue-500/10 shadow-sm transition-all text-sm">
+                          <SelectValue placeholder="Select unit" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-2xl border-zinc-100">
+                          {UNITS.map(u => (
+                            <SelectItem key={u} value={u} className="font-bold text-xs capitalize">{u}</SelectItem>
+                          ))}
+                          <div className="h-px bg-zinc-100 my-1" />
+                          <SelectItem value="custom" className="font-bold text-xs text-blue-600">Add Custom Unit...</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 </div>
                 <div className="space-y-2 md:col-span-2">
@@ -1507,7 +1575,7 @@ export default function Inventory() {
                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full -mr-16 -mt-16" />
                    <div className="space-y-1 min-w-0">
                       <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500">Live Velocity Insight</p>
-                      <p className="text-3xl font-black text-zinc-900 leading-none">4.2 <span className="text-xs font-bold text-zinc-400 tracking-normal">units / day</span></p>
+                       <p className="text-3xl font-black text-zinc-900 leading-none">4.2 <span className="text-xs font-bold text-zinc-400 tracking-normal capitalize">{productForm.unit || 'units'} / day</span></p>
                    </div>
                    <div className="h-px bg-zinc-100" />
                    <div className="space-y-1">
@@ -1521,7 +1589,7 @@ export default function Inventory() {
                    </div>
                    <div className="mt-4 p-4 bg-blue-50/50 rounded-2xl border border-blue-100/50">
                       <p className="text-[10px] font-medium text-blue-600/70 leading-relaxed italic">
-                        "Optimized for {activeBranch === "all" ? "Enterprise" : branches.find(b=>b.id===activeBranch)?.name} deployment. Recommended reorder trigger: <b>{Math.ceil(4.2 * productForm.leadTime) + productForm.minStock} units</b>."
+                         "Optimized for {activeBranch === "all" ? "Enterprise" : branches.find(b=>b.id===activeBranch)?.name} deployment. Recommended reorder trigger: <b>{Math.ceil(4.2 * productForm.leadTime) + productForm.minStock} {productForm.unit || 'units'}</b>."
                       </p>
                    </div>
                 </div>
@@ -1644,7 +1712,7 @@ export default function Inventory() {
                           <Zap className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
                        </div>
                        <div className="flex items-end gap-2">
-                          <p className="text-2xl font-black text-zinc-900 leading-none">12.5 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">units / week</span></p>
+                           <p className="text-2xl font-black text-zinc-900 leading-none">12.5 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'} / week</span></p>
                        </div>
                     </div>
                     <div className="p-7 bg-white rounded-[2.5rem] border border-zinc-100 shadow-sm space-y-3 hover:border-blue-200 transition-colors group">
@@ -1653,7 +1721,7 @@ export default function Inventory() {
                           <Sparkles className="w-4 h-4 text-blue-500 group-hover:rotate-12 transition-transform" />
                        </div>
                        <div className="flex items-end gap-2">
-                          <p className="text-2xl font-black text-zinc-900 leading-none">45 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">units</span></p>
+                           <p className="text-2xl font-black text-zinc-900 leading-none">45 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'}</span></p>
                        </div>
                     </div>
                  </div>
@@ -2047,9 +2115,9 @@ export default function Inventory() {
                                   <DropdownMenu>
                                   <DropdownMenuTrigger 
                                     render={
-                                      <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
+                                      <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all")}>
                                         <MoreHorizontal className="w-5 h-5" />
-                                      </Button>
+                                      </button>
                                     }
                                   />
                                     <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
@@ -2325,8 +2393,8 @@ export default function Inventory() {
                            <DropdownMenu>
                                 <DropdownMenuTrigger 
                                   render={
-                                    <div className={cn(
-                                      "flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer hover:opacity-80 transition-all shadow-sm",
+                                    <button className={cn(
+                                      "outline-none flex items-center gap-2 px-3 py-1.5 rounded-full border cursor-pointer hover:opacity-80 transition-all shadow-sm appearance-none",
                                       m.status === "COMPLETED" ? "bg-emerald-50 border-emerald-100/50" :
                                       m.status === "CANCELLED" ? "bg-rose-50 border-rose-100/50" :
                                       m.status === "IN_TRANSIT" ? "bg-blue-50 border-blue-100/50" :
@@ -2348,7 +2416,7 @@ export default function Inventory() {
                                       )}>
                                         {m.status}
                                       </span>
-                                    </div>
+                                    </button>
                                   }
                                 />
                               <DropdownMenuContent align="end" className="rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white">
@@ -2490,11 +2558,13 @@ export default function Inventory() {
                             </TableCell>
                             <TableCell className="py-6 pr-6 text-right">
                               <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
-                                    <MoreHorizontal className="w-5 h-5" />
-                                  </Button>
-                                </DropdownMenuTrigger>
+                                <DropdownMenuTrigger 
+                                  render={
+                                    <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all")}>
+                                      <MoreHorizontal className="w-5 h-5" />
+                                    </button>
+                                  }
+                                />
                                 <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
                                   <DropdownMenuItem 
                                     className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs uppercase"
@@ -2674,11 +2744,13 @@ export default function Inventory() {
                                  </Button>
                                )}
                                <DropdownMenu>
-                                 <DropdownMenuTrigger asChild>
-                                   <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100">
-                                     <MoreHorizontal className="w-4 h-4" />
-                                   </Button>
-                                 </DropdownMenuTrigger>
+                                 <DropdownMenuTrigger 
+                                   render={
+                                     <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-9 w-9 rounded-xl text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100")}>
+                                       <MoreHorizontal className="w-4 h-4" />
+                                     </button>
+                                   }
+                                 />
                                  <DropdownMenuContent align="end" className="w-48 rounded-2xl p-2 bg-white shadow-2xl border-zinc-100">
                                    <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-[10px] uppercase">
                                      <FileText className="w-4 h-4 text-zinc-400" /> View Order

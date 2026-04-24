@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { User, Plus, X, Activity, UserMinus, ShieldAlert, MoreVertical, CheckCircle2, Coins } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -300,9 +300,10 @@ export default function StaffManager() {
           <p className="text-sm text-zinc-500 font-medium max-w-md">Manage POS PIN codes, track sessions, and monitor enterprise register closures.</p>
         </div>
         <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
-          <DialogTrigger asChild>
-              <Button 
-                className="rounded-2xl px-8 h-14 bg-zinc-900 text-white hover:bg-zinc-800 font-black shadow-2xl shadow-zinc-900/20 text-xs uppercase tracking-widest w-full md:w-auto"
+          <DialogTrigger 
+            render={
+              <button 
+                className={cn(buttonVariants({ variant: "default" }), "rounded-2xl px-8 h-14 bg-zinc-900 text-white hover:bg-zinc-800 font-black shadow-2xl shadow-zinc-900/20 text-xs uppercase tracking-widest w-full md:w-auto border-none cursor-pointer")}
                 onClick={() => {
                   setIsEditing(false);
                   setNewUser({ 
@@ -321,8 +322,9 @@ export default function StaffManager() {
                 }}
               >
                 <Plus className="w-4 h-4 mr-2" /> Provision Access
-              </Button>
-          </DialogTrigger>
+              </button>
+            }
+          />
           <DialogContent className="rounded-3xl border-zinc-100 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto">
             <div className="p-6 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between sticky top-0 z-10">
               <div className="flex items-center gap-3">
@@ -676,11 +678,13 @@ export default function StaffManager() {
                               <p className="text-[9px] text-zinc-400 font-bold uppercase tracking-widest">Lifetime GMV</p>
                            </div>
                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl text-zinc-400 hover:bg-white hover:shadow-sm hover:text-zinc-900 border border-transparent hover:border-zinc-100">
+                              <DropdownMenuTrigger 
+                                render={
+                                   <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-9 w-9 rounded-xl text-zinc-400 hover:bg-white hover:shadow-sm hover:text-zinc-900 border border-transparent hover:border-zinc-100 flex items-center justify-center cursor-pointer")}>
                                      <MoreVertical className="w-4 h-4" />
-                                  </Button>
-                              </DropdownMenuTrigger>
+                                   </button>
+                                }
+                              />
                               <DropdownMenuContent align="end" className="w-56 rounded-2xl font-medium shadow-2xl border-zinc-100">
                                 <DropdownMenuItem className="gap-2 py-3" onClick={() => setSelectedStaffMember(s)}>
                                   <Activity className="w-4 h-4 text-blue-600" />

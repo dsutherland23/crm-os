@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { 
@@ -1440,10 +1440,10 @@ export default function CRM() {
                 <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <Button variant="outline" className="rounded-xl border-zinc-200 h-12 px-6 font-bold text-xs bg-white shadow-sm hover:bg-zinc-50 transition-all">
+                    <button className={cn(buttonVariants({ variant: "outline" }), "rounded-xl border-zinc-200 h-12 px-6 font-bold text-xs bg-white shadow-sm hover:bg-zinc-50 transition-all cursor-pointer")}>
                       <MoreHorizontal className="w-4 h-4 mr-2" />
                       Actions
-                    </Button>
+                    </button>
                   }
                 />
                 <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 p-2 shadow-xl">

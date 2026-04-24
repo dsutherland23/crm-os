@@ -1,7 +1,14 @@
 import admin from "firebase-admin";
 import { v4 as uuidv4 } from "uuid";
 
-import firebaseConfig from "./firebase-applet-config.json";
+import * as dotenv from "dotenv";
+
+dotenv.config();
+
+const firebaseConfig = {
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+  firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID
+};
 
 if (!admin.apps.length) {
   admin.initializeApp({

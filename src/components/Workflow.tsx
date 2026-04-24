@@ -27,7 +27,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -622,13 +622,15 @@ export default function Workflow() {
                               onCheckedChange={() => handleToggle(wf)}
                             />
                             <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-9 w-9 min-w-[36px] rounded-xl hover:bg-zinc-100">
+                              <DropdownMenuTrigger 
+                                render={
+                                  <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-9 w-9 min-w-[36px] rounded-xl hover:bg-zinc-100 border-none cursor-pointer flex items-center justify-center")}>
                                     {deletingId === wf.id
                                       ? <Loader2 className="w-4 h-4 animate-spin" />
                                       : <MoreHorizontal className="w-4 h-4" />}
-                                  </Button>
-                              </DropdownMenuTrigger>
+                                  </button>
+                                }
+                              />
                               <DropdownMenuContent align="end" className="w-48 rounded-xl border-zinc-200">
                                 <DropdownMenuItem
                                   className="flex items-center gap-2 py-2 cursor-pointer"

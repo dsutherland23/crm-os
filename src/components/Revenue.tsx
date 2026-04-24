@@ -50,7 +50,7 @@ import {
   Legend
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { 
@@ -967,10 +967,10 @@ export default function Revenue() {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button className="flex-1 md:flex-none rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs">
+                <button className={cn(buttonVariants({ variant: "default" }), "flex-1 md:flex-none rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-10 md:h-11 px-4 md:px-6 font-bold text-[10px] md:text-xs border-none cursor-pointer")}>
                   <Plus className="w-3.5 h-3.5 md:w-4 md:h-4 mr-2" />
                   New Document
-                </Button>
+                </button>
               }
             />
             <DropdownMenuContent align="end" className="w-56 rounded-xl border-zinc-200">
@@ -1289,9 +1289,9 @@ export default function Revenue() {
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
-                              <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-zinc-100">
+                              <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 rounded-lg hover:bg-zinc-100 border-none cursor-pointer flex items-center justify-center")}>
                                 <MoreHorizontal className="w-4 h-4" />
-                              </Button>
+                              </button>
                             }
                           />
                           <DropdownMenuContent align="end" className="w-48 rounded-xl">

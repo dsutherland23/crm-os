@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Star, Gift, Crown, TrendingUp, Search, Plus, MoreHorizontal, Percent, Tags, Box, Calendar, Key, Loader2, AlertCircle, Edit3, Trash2, ClipboardCheck, History, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -249,12 +249,14 @@ export default function Loyalty() {
               Reward Logic
             </Button>
             <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className="rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs transition-transform hover:scale-[1.02]">
-                  <Plus className="w-4 h-4 mr-2" />
-                  New Campaign
-                </Button>
-              </DropdownMenuTrigger>
+              <DropdownMenuTrigger 
+                render={
+                  <button className={cn(buttonVariants({ variant: "default" }), "rounded-xl bg-zinc-900 text-white hover:bg-zinc-800 shadow-lg shadow-zinc-900/20 h-11 px-6 font-bold text-xs transition-transform hover:scale-[1.02] border-none cursor-pointer flex items-center")}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    New Campaign
+                  </button>
+                }
+              />
               <DropdownMenuContent align="end" className="w-56 rounded-xl">
                 <DropdownMenuItem onClick={() => handleOpenDialog("Standard")} className="py-3 px-4 font-medium text-xs cursor-pointer">
                   <Percent className="w-4 h-4 mr-3 text-emerald-600" />
@@ -461,9 +463,13 @@ export default function Loyalty() {
                     <TableCell className="py-4 text-xs font-mono text-zinc-500">{c.end_date || "N/A"}</TableCell>
                     <TableCell className="py-4 text-right">
                       <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg"><MoreHorizontal className="w-4 h-4" /></Button>
-                        </DropdownMenuTrigger>
+                        <DropdownMenuTrigger 
+                          render={
+                            <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 rounded-lg border-none cursor-pointer flex items-center justify-center")}>
+                              <MoreHorizontal className="w-4 h-4" />
+                            </button>
+                          }
+                        />
                         <DropdownMenuContent align="end" className="w-40 rounded-xl">
                           <DropdownMenuItem onClick={() => handleEditCampaign(c)} className="py-2 px-3 font-bold text-[10px] uppercase tracking-widest cursor-pointer">
                             <Edit3 className="w-3.5 h-3.5 mr-2 text-blue-600" />

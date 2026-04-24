@@ -1237,9 +1237,9 @@ export default function POS() {
                     <DropdownMenu>
                       <DropdownMenuTrigger 
                         render={
-                          <div 
+                          <button 
                             className={cn(
-                              "rounded-xl h-11 px-4 border border-zinc-200 bg-white hover:bg-zinc-50 shadow-sm transition-all flex items-center gap-3 cursor-pointer select-none",
+                              "outline-none rounded-xl h-11 px-4 border border-zinc-200 bg-white hover:bg-zinc-50 shadow-sm transition-all flex items-center gap-3 cursor-pointer select-none",
                               (currentSessionData?.status === 'ON_BREAK') && "border-amber-200 bg-amber-50/30 text-amber-600",
                               (currentSessionData?.status === 'ON_LUNCH') && "border-orange-200 bg-orange-50/30 text-orange-600",
                               (currentSessionData?.status === 'IN_MEETING') && "border-indigo-200 bg-indigo-50/30 text-indigo-600"
@@ -1258,7 +1258,7 @@ export default function POS() {
                                </span>
                             </div>
                             <ChevronRight className="w-4 h-4 rotate-90 text-zinc-400" />
-                          </div>
+                          </button>
                         }
                       />
                       <DropdownMenuContent className="w-64 rounded-2xl p-1 shadow-2xl border-none bg-white/95 backdrop-blur-xl" align="end">

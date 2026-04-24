@@ -749,24 +749,26 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
       <div className="flex items-center gap-4">
         <DropdownMenu>
           <DropdownMenuTrigger 
-            className="hidden sm:flex items-center gap-2 h-auto py-1.5 px-3 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 hover:text-zinc-900 shadow-sm transition-all text-left outline-none focus:ring-2 focus:ring-blue-500/20"
-          >
-            <div className="flex items-center gap-2">
-              <div className={cn(
-                "w-6 h-6 rounded-md flex items-center justify-center border",
-                activeBranch === "all" ? "bg-indigo-50 border-indigo-100 text-indigo-600" : "bg-emerald-50 border-emerald-100 text-emerald-600"
-              )}>
-                {activeBranch === "all" ? <Globe className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
-              </div>
-              <div className="flex flex-col">
-                <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest leading-none mb-0.5">
-                  {activeBranch === "all" ? "Business View" : "Location View"}
-                </span>
-                <span className="text-xs font-bold text-zinc-900 leading-none">{activeBranchName}</span>
-              </div>
-            </div>
-            <ChevronsUpDown className="w-3.5 h-3.5 text-zinc-400 ml-2" />
-          </DropdownMenuTrigger>
+            render={
+              <button className="hidden sm:flex items-center gap-2 h-auto py-1.5 px-3 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 hover:text-zinc-900 shadow-sm transition-all text-left outline-none focus:ring-2 focus:ring-blue-500/20">
+                <div className="flex items-center gap-2">
+                  <div className={cn(
+                    "w-6 h-6 rounded-md flex items-center justify-center border",
+                    activeBranch === "all" ? "bg-indigo-50 border-indigo-100 text-indigo-600" : "bg-emerald-50 border-emerald-100 text-emerald-600"
+                  )}>
+                    {activeBranch === "all" ? <Globe className="w-3.5 h-3.5" /> : <MapPin className="w-3.5 h-3.5" />}
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest leading-none mb-0.5">
+                      {activeBranch === "all" ? "Business View" : "Location View"}
+                    </span>
+                    <span className="text-xs font-bold text-zinc-900 leading-none">{activeBranchName}</span>
+                  </div>
+                </div>
+                <ChevronsUpDown className="w-3.5 h-3.5 text-zinc-400 ml-2" />
+              </button>
+            }
+          />
           <DropdownMenuContent align="end" className="w-[280px] rounded-2xl p-2 border-zinc-200 shadow-xl">
             <DropdownMenuGroup>
               <DropdownMenuLabel className="text-xs font-bold text-zinc-400 uppercase tracking-widest px-2 py-1.5 flex items-center gap-2">
@@ -829,26 +831,30 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
         {/* POS Operator Session Chip */}
         {posSession && (
           <DropdownMenu>
-            <DropdownMenuTrigger className="outline-none">
-              <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200/70 shadow-sm hover:bg-emerald-100/50 transition-colors cursor-pointer">
-                <div className="relative shrink-0">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-[11px]">
-                    {posSession.staffName.substring(0,2).toUpperCase()}
+            <DropdownMenuTrigger 
+              render={
+                <button className="outline-none appearance-none border-none bg-transparent p-0 text-left">
+                  <div className="hidden sm:flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200/70 shadow-sm hover:bg-emerald-100/50 transition-colors cursor-pointer">
+                    <div className="relative shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold text-[11px]">
+                        {posSession.staffName.substring(0,2).toUpperCase()}
+                      </div>
+                      <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-white animate-pulse" />
+                    </div>
+                    <div className="flex flex-col leading-none text-left">
+                      <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest">Terminal Active</span>
+                      <span className="text-xs font-bold text-zinc-800 leading-tight truncate max-w-[80px]">{posSession.staffName}</span>
+                    </div>
+                    <span className={cn(
+                      "text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md border shrink-0",
+                      posSession.payGrade === "EXECUTIVE" ? "bg-purple-50 text-purple-600 border-purple-200" :
+                      posSession.payGrade === "SUPERVISOR" ? "bg-blue-50 text-blue-600 border-blue-200" :
+                      "bg-zinc-100 text-zinc-500 border-zinc-200"
+                    )}>{posSession.payGrade}</span>
                   </div>
-                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-white animate-pulse" />
-                </div>
-                <div className="flex flex-col leading-none text-left">
-                  <span className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest">Terminal Active</span>
-                  <span className="text-xs font-bold text-zinc-800 leading-tight truncate max-w-[80px]">{posSession.staffName}</span>
-                </div>
-                <span className={cn(
-                  "text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md border shrink-0",
-                  posSession.payGrade === "EXECUTIVE" ? "bg-purple-50 text-purple-600 border-purple-200" :
-                  posSession.payGrade === "SUPERVISOR" ? "bg-blue-50 text-blue-600 border-blue-200" :
-                  "bg-zinc-100 text-zinc-500 border-zinc-200"
-                )}>{posSession.payGrade}</span>
-              </div>
-            </DropdownMenuTrigger>
+                </button>
+              }
+            />
             <DropdownMenuContent align="end" className="w-56 rounded-2xl p-2 border-zinc-200 shadow-xl">
               <DropdownMenuGroup>
                 <DropdownMenuLabel className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-2 py-1.5">

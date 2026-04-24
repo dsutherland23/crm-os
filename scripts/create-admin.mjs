@@ -26,8 +26,12 @@ import { dirname, join } from "path";
 import readline from "readline/promises";
 import { stdin as input, stdout as output } from "process";
 
+import * as dotenv from "dotenv";
+
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+dotenv.config({ path: join(__dirname, "../.env") });
 
 // ── Check service account exists ─────────────────────────────────────────────
 const SA_PATH = join(__dirname, "service-account.json");
@@ -48,12 +52,13 @@ if (!existsSync(SA_PATH)) {
   process.exit(1);
 }
 
-// ── Load Firebase Admin SDK ───────────────────────────────────────────────────
 const admin = require("firebase-admin");
 const serviceAccount = JSON.parse(readFileSync(SA_PATH, "utf8"));
-const appletConfig = JSON.parse(
-  readFileSync(join(__dirname, "../firebase-applet-config.json"), "utf8")
-);
+
+const appletConfig = {
+  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
+  firestoreDatabaseId: process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID
+};
 
 if (!admin.apps.length) {
   admin.initializeApp({

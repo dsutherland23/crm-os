@@ -48,7 +48,7 @@ import {
   Landmark
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useModules } from "@/context/ModuleContext";
@@ -201,7 +201,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   const [editingRole, setEditingRole] = useState<any>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [isKeysDialogOpen, setIsKeysDialogOpen] = useState(false);
-  const [apiKey, setApiKey] = useState("sk_test_1234567890abcdef1234567890abcdef");
+  const [apiKey, setApiKey] = useState(import.meta.env.VITE_TEST_API_KEY || "sk_test_1234567890abcdef1234567890abcdef");
   const [commissionPin, setCommissionPin] = useState("1234");
   const [isCommissionPinDialogOpen, setIsCommissionPinDialogOpen] = useState(false);
   const [currentPinInput, setCurrentPinInput] = useState("");
@@ -1041,10 +1041,10 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
             <Dialog open={isBranchDialogOpen} onOpenChange={setIsBranchDialogOpen}>
               <DialogTrigger
                 render={
-                  <Button className="rounded-xl bg-zinc-900 text-white h-10 px-6 font-bold text-xs">
+                  <button className={cn(buttonVariants({ variant: "default" }), "rounded-xl bg-zinc-900 text-white h-10 px-6 font-bold text-xs border-none cursor-pointer")}>
                     <Plus className="w-4 h-4 mr-2" />
                     Add Branch
-                  </Button>
+                  </button>
                 }
               />
               <DialogContent className="rounded-3xl border-zinc-100 p-6 sm:max-w-md">
@@ -1304,9 +1304,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
-                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-zinc-100">
+                            <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-8 w-8 rounded-full hover:bg-zinc-100 border-none cursor-pointer flex items-center justify-center")}>
                               <MoreHorizontal className="w-4 h-4" />
-                            </Button>
+                            </button>
                           }
                         />
                         <DropdownMenuContent align="end" className="rounded-xl">
@@ -1349,10 +1349,10 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
               <Dialog open={isRoleDialogOpen} onOpenChange={setIsRoleDialogOpen}>
                 <DialogTrigger
                   render={
-                    <Button className="rounded-xl bg-zinc-900 text-white h-11 px-8 font-bold text-xs shadow-xl shadow-zinc-900/10 hover:scale-[1.02] active:scale-95 transition-all">
+                    <button className={cn(buttonVariants({ variant: "default" }), "rounded-xl bg-zinc-900 text-white h-11 px-8 font-bold text-xs shadow-xl shadow-zinc-900/10 hover:scale-[1.02] active:scale-95 transition-all border-none cursor-pointer")}>
                       <ShieldCheck className="w-4 h-4 mr-2" />
                       New Role
-                    </Button>
+                    </button>
                   }
                 />
               <DialogContent className="rounded-[2rem] border-zinc-100 p-0 overflow-hidden sm:max-w-xl shadow-2xl">
@@ -1554,9 +1554,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                     <Dialog>
                       <DialogTrigger 
                         render={
-                          <Button variant="ghost" size="sm" className="text-[10px] font-bold text-zinc-500 hover:bg-zinc-100 rounded-lg h-8">
+                          <button className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "text-[10px] font-bold text-zinc-500 hover:bg-zinc-100 rounded-lg h-8 border-none cursor-pointer")}>
                             View Staff
-                          </Button>
+                          </button>
                         }
                       />
                       <DialogContent className="rounded-3xl border-zinc-100 p-6 max-w-md">
@@ -1805,9 +1805,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                 <Dialog open={isKeysDialogOpen} onOpenChange={setIsKeysDialogOpen}>
                   <DialogTrigger
                     render={
-                      <Button variant="outline" size="sm" className="rounded-lg font-bold text-[10px] uppercase">
+                      <button className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-lg font-bold text-[10px] uppercase cursor-pointer px-3")}>
                         Manage Keys
-                      </Button>
+                      </button>
                     }
                   />
 
@@ -1865,9 +1865,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                 <Dialog open={isCommissionPinDialogOpen} onOpenChange={setIsCommissionPinDialogOpen}>
                   <DialogTrigger
                     render={
-                      <Button variant="outline" size="sm" className="rounded-lg font-bold text-[10px] uppercase">
+                      <button className={cn(buttonVariants({ variant: "outline", size: "sm" }), "rounded-lg font-bold text-[10px] uppercase cursor-pointer px-3")}>
                         Change PIN
-                      </Button>
+                      </button>
                     }
                   />
                   <DialogContent className="rounded-3xl border-zinc-100 p-6">
@@ -1940,9 +1940,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
               <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
                 <DialogTrigger
                   render={
-                    <Button variant="destructive" className="rounded-xl font-bold px-8 h-11">
+                    <button className={cn(buttonVariants({ variant: "destructive" }), "rounded-xl font-bold px-8 h-11 border-none cursor-pointer")}>
                       Reset Data
-                    </Button>
+                    </button>
                   }
                 />
                 <DialogContent className="rounded-3xl border-rose-100 p-6">

@@ -1,5 +1,8 @@
 import express from "express";
+import * as dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
+
+dotenv.config();
 import path from "path";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
@@ -9,13 +12,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Initialize Firebase Admin
-// In this environment, we'll assume the service account is either not needed 
-// (if running in a GCP environment with a service account) or we'll use a mock/client-side fallback 
-// if it fails. However, for "API-first" we should try to use it.
 if (!admin.apps.length) {
   try {
     admin.initializeApp({
-      projectId: process.env.FIREBASE_PROJECT_ID || "crm-os-enterprise",
+      projectId: process.env.VITE_FIREBASE_PROJECT_ID || "crm-os-enterprise",
     });
   } catch (error) {
     console.warn("Firebase Admin failed to initialize. Some backend features may be limited.", error);

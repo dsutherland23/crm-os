@@ -3,7 +3,7 @@ import { Bell, Check, Info, AlertTriangle, AlertCircle, CheckCircle2, X } from "
 import { collection, onSnapshot, query, orderBy, limit, updateDoc, doc, writeBatch, where } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
@@ -84,14 +84,14 @@ export default function NotificationsMenu() {
     <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
       <DropdownMenuTrigger
         render={
-          <Button variant="ghost" size="icon" className="relative hover:bg-zinc-200 rounded-xl transition-colors">
+          <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "relative hover:bg-zinc-200 rounded-xl transition-colors border-none cursor-pointer flex items-center justify-center")}>
             <Bell className={cn("w-5 h-5 transition-colors", isOpen ? "text-zinc-900" : "text-zinc-600")} />
             {unreadCount > 0 && (
               <span className="absolute top-2.5 right-2 text-[10px] w-4 h-4 flex items-center justify-center font-bold text-white bg-rose-500 rounded-full border-2 border-zinc-50 outline outline-1 outline-rose-500/20">
                 {unreadCount > 9 ? "9+" : unreadCount}
               </span>
             )}
-          </Button>
+          </button>
         }
       />
       <DropdownMenuContent align="end" className="w-[380px] p-0 rounded-2xl overflow-hidden shadow-2xl border-zinc-200/60 z-[100]">
