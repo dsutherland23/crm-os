@@ -54,6 +54,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import BarcodeScanner from './BarcodeScanner';
 import { motion, AnimatePresence } from 'motion/react';
 import { useModules } from "@/context/ModuleContext";
+import { recordAuditLog } from "@/lib/audit";
 
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-US', {
@@ -367,6 +368,16 @@ export default function Inventory() {
           }
 
           toast.success(`Strategic Import Complete: ${importedCount} assets onboarded.`, { id: loadingToast });
+          
+          await recordAuditLog({
+            enterpriseId,
+            action: "INVENTORY_IMPORT",
+            details: `Bulk CSV import completed. ${importedCount} products added/updated.`,
+            severity: "IMPORTANT",
+            type: "SYSTEM",
+            metadata: { importedCount, fileName: file.name }
+          });
+
           setIsImportDialogOpen(false);
           fetchData();
         } catch (error: any) {
@@ -491,6 +502,15 @@ export default function Inventory() {
 
       await batch.commit();
 
+      await recordAuditLog({
+        enterpriseId,
+        action: "INVENTORY_PO_RECEIVE",
+        details: `Logistical reception complete for PO ${poToReceive.id}. Assets deployed to branch.`,
+        severity: "IMPORTANT",
+        type: "SYSTEM",
+        metadata: { poId: poToReceive.id, supplierId: poToReceive.supplier_id, itemCount: poToReceive.items?.length }
+      });
+
       // Log the financial event for Double-Entry Ledger (Expense / Accounts Payable)
       if (poToReceive.total_cost && poToReceive.total_cost > 0) {
         await recordFinancialEvent({
@@ -569,6 +589,15 @@ export default function Inventory() {
 
       await batch.commit();
 
+      await recordAuditLog({
+        enterpriseId,
+        action: "INVENTORY_AUDIT_COMPLETE",
+        details: `Stocktake reconciliation completed for branch audit ${st.id.substring(0, 8)}.`,
+        severity: "CRITICAL",
+        type: "SYSTEM",
+        metadata: { auditId: st.id, shrinkageValue: totalShrinkageValue, discoveryValue: totalDiscoveryValue }
+      });
+
       if (totalShrinkageValue > 0) {
         await recordFinancialEvent({
           enterpriseId,
@@ -644,6 +673,15 @@ export default function Inventory() {
       batchOp.delete(doc(db, 'inventory_batches', batchItem.id));
 
       await batchOp.commit();
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "INVENTORY_LIQUIDATION",
+        details: `Liquidation protocol executed for Batch ${batchItem.batch_number}. assets removed from circulation.`,
+        severity: "WARNING",
+        type: "SYSTEM",
+        metadata: { batchId: batchItem.id, batchNumber: batchItem.batch_number, qty: batchItem.quantity }
+      });
 
       const product = products.find(p => p.id === batchItem.product_id);
       const cost = product?.cost || 0;

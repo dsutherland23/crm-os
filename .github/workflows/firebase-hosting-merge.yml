@@ -25,4 +25,11 @@ jobs:
           repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_GEN_LANG_CLIENT_0882288265 }}
           channelId: live
-          projectId: gen-lang-client-0882288265
+          projectId: ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+      
+      - name: Deploy Firestore Rules
+        run: npx firebase-tools deploy --only firestore:rules --project ${{ secrets.VITE_FIREBASE_PROJECT_ID }}
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.auth.outputs.credentials_file_path }}
+          # Alternatively, use a FIREBASE_TOKEN if service account doesn't work for CLI
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

@@ -84,16 +84,14 @@ service cloud.firestore {
 
     // ── USER PROFILES ────────────────────────────────────────────────
     // Users can always read/write their own profile.
-    // Needed for first-time setup and self-repair flows.
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      allow create: if isOwner(userId) || isAdmin();
+      allow read: if isSignedIn() && (isOwner(userId) || belongsToEnterprise(resource.data.enterprise_id) || isAdmin());
+      allow create: if isSignedIn();
       allow update: if isOwner(userId) || isAdmin();
       allow delete: if isAdmin();
     }
 
     // ── ENTERPRISE SETTINGS ──────────────────────────────────────────
-    // Keyed by enterpriseId. Any signed-in user can create (first-time setup).
     match /enterprise_settings/{entId} {
       allow read: if belongsToEnterprise(entId);
       allow create: if isSignedIn();
@@ -101,38 +99,25 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── LOYALTY SETTINGS ────────────────────────────────────────────
-    // Keyed by enterpriseId. Read is allowed if:
-    //  a) user is an admin/developer, OR
-    //  b) the user's enterprise_id matches the doc ID
-    // We also allow create for signed-in users (first-time setup)
-    match /loyalty_settings/{entId} {
+    // ── DASHBOARD & INTEL ───────────────────────────────────────────
+    match /dashboard_stats/{entId} {
       allow read: if belongsToEnterprise(entId);
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin() || belongsToEnterprise(entId);
-    }
-
-    match /settings/{entId} {
-      allow read: if belongsToEnterprise(entId);
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin() || belongsToEnterprise(entId);
+      allow write: if isAdmin();
     }
 
     // ── TENANT-SCOPED COLLECTIONS ────────────────────────────────────
-    // Generic catch-all for all other collections.
     match /{collection}/{docId} {
       allow read: if isAdmin() || isDeveloper() ||
-                     belongsToEnterprise(resource.data.get('enterprise_id', '')) ||
+                     (resource != null && belongsToEnterprise(resource.data.get('enterprise_id', ''))) ||
                      belongsToEnterprise(docId);
 
       allow create: if isSignedIn() && (
         isAdmin() || isDeveloper() ||
-        request.resource.data.get('enterprise_id', '') == userEnterpriseId()
+        belongsToEnterprise(request.resource.data.get('enterprise_id', ''))
       );
 
       allow update, delete: if isAdmin() || isDeveloper() || (
-        isSignedIn() &&
-        resource.data.get('enterprise_id', '') == userEnterpriseId()
+        resource != null && belongsToEnterprise(resource.data.get('enterprise_id', ''))
       );
     }
   }

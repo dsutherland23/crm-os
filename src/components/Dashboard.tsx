@@ -36,7 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useModules } from "@/context/ModuleContext";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { db, collection, query, onSnapshot, orderBy, limit, where, doc } from "@/lib/firebase";
+import { db, collection, query, onSnapshot, orderBy, limit, where, doc, auth } from "@/lib/firebase";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePendingAction } from "@/context/PendingActionContext";
 
@@ -269,7 +269,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     subscriptionRef.current.forEach((u) => u());
     subscriptionRef.current = [];
 
-    if (!enterpriseId) return;
+    if (!enterpriseId || !auth.currentUser) return;
 
     setLoadingMap({ transactions: true, customers: true, inventory: true, logs: true, stats: true });
     setErrorMap({ transactions: null, customers: null, inventory: null, logs: null, stats: null });

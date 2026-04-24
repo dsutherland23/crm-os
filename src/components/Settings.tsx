@@ -501,7 +501,17 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     }
 
     try {
-      await addDoc(collection(db, "branches"), { ...newBranch, name: newBranch.name.trim(), enterprise_id: enterpriseId });
+      const docRef = await addDoc(collection(db, "branches"), { ...newBranch, name: newBranch.name.trim(), enterprise_id: enterpriseId });
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "BRANCH_CREATE",
+        details: `New branch created: ${newBranch.name}`,
+        severity: "INFO",
+        type: "SYSTEM",
+        metadata: { branchId: docRef.id, branchName: newBranch.name }
+      });
+
       setIsBranchDialogOpen(false);
       setNewBranch({ name: "", address: "", parish: "", contactInfo: "", manager: "", status: "ACTIVE" });
       toast.success("Branch added successfully!");
@@ -518,6 +528,16 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     try {
       const { id, ...data } = editingBranch;
       await setDoc(doc(db, "branches", id), { ...data, enterprise_id: enterpriseId }, { merge: true });
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "BRANCH_UPDATE",
+        details: `Branch configurations updated for: ${editingBranch.name}`,
+        severity: "INFO",
+        type: "SYSTEM",
+        metadata: { branchId: id, updates: data }
+      });
+
       setIsEditBranchDialogOpen(false);
       setEditingBranch(null);
       toast.success("Branch updated successfully!");
@@ -529,6 +549,16 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   const handleDeleteBranch = async (id: string) => {
     try {
       await deleteDoc(doc(db, "branches", id));
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "BRANCH_DELETE",
+        details: `Branch with ID ${id} was permanently removed.`,
+        severity: "WARNING",
+        type: "SYSTEM",
+        metadata: { branchId: id }
+      });
+
       toast.success("Branch deleted successfully!");
     } catch (err: any) {
       toast.error("Failed to delete branch: " + err.message);
@@ -726,7 +756,17 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
       customerData.forEach(c => batch.set(doc(db, "customers", c.id), c));
 
       await batch.commit();
-      toast.success("Initial data seeded successfully!");
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "SYSTEM_SEED_DATA",
+        details: "Factory seed data (branches, products) was injected into the enterprise workspace.",
+        severity: "CRITICAL",
+        type: "SYSTEM",
+        metadata: { branchCount: branchData.length, productCount: productData.length }
+      });
+
+      toast.success("Enterprise workspace seeded with factory defaults.");
     } catch (error: any) {
       toast.error("Seeding failed: " + error.message);
     } finally {

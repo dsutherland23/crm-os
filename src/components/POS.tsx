@@ -78,6 +78,7 @@ import { PrintableInvoice } from "./PrintableInvoice";
 import { POSReceipt } from "./POSReceipt";
 import { POSAIUpsell } from "./POSAIUpsell";
 import { recordFinancialEvent } from "@/lib/ledger";
+import { recordAuditLog } from "@/lib/audit";
 
 interface CartDiscount {
   id: string;
@@ -1185,12 +1186,18 @@ export default function POS() {
           notes: closeRegisterNotes
         });
         
-        await addDoc(collection(db, "audit_logs"), {
-          action: "Shift Closed",
-          details: `Staff member ${selectedAdmin?.name || 'Unknown'} closed register. Expected: ${formatCurrency(sessionExpectedCash)}, Counted: ${formatCurrency(actualCount)}, Variance: ${formatCurrency(variance)}`,
-          timestamp: new Date().toISOString(),
-          user: selectedAdmin?.name || "System",
-          enterprise_id: enterpriseId
+        await recordAuditLog({
+          enterpriseId,
+          action: "POS_REGISTER_CLOSE",
+          details: `Staff member ${selectedAdmin?.name || 'Unknown'} closed register. Variance: ${formatCurrency(variance)}`,
+          severity: Math.abs(variance) > 5 ? "CRITICAL" : "INFO",
+          type: "FINANCE",
+          metadata: { 
+            sessionId: currentSessionId, 
+            expected: sessionExpectedCash, 
+            actual: actualCount,
+            variance: variance
+          }
         });
       } catch (error) {
         console.error("Failed to update session record", error);

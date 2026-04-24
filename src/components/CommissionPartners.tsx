@@ -13,6 +13,7 @@ import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
 import { Badge } from "@/components/ui/badge";
 import { LineChart, Line, ResponsiveContainer } from "recharts";
+import { recordAuditLog } from "@/lib/audit";
 
 export default function CommissionPartners() {
   const { formatCurrency, enterpriseId } = useModules();
@@ -121,6 +122,16 @@ export default function CommissionPartners() {
        for (const p of payablePartners) {
           await handleSettleBalance(p);
        }
+       
+       await recordAuditLog({
+         enterpriseId,
+         action: "COMMISSION_BULK_SETTLE",
+         details: `Bulk settlement processed for ${payablePartners.length} partners.`,
+         severity: "CRITICAL",
+         type: "FINANCE",
+         metadata: { partnerCount: payablePartners.length, totalSettled: stats.totalPending }
+       });
+
        toast.success(`Successfully settled funds for ${payablePartners.length} partners.`);
        setIsBulkSettleOpen(false);
     } catch (err) {
@@ -161,7 +172,7 @@ export default function CommissionPartners() {
       return;
     }
     try {
-      await addDoc(collection(db, "commission_partners"), {
+      const docRef = await addDoc(collection(db, "commission_partners"), {
         ...newPartner,
         status: "ACTIVE",
         totalEarned: 0,
@@ -176,6 +187,16 @@ export default function CommissionPartners() {
         createdAt: serverTimestamp(),
         enterprise_id: enterpriseId
       });
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "COMMISSION_PARTNER_CREATE",
+        details: `New commission partner registered: ${newPartner.name}`,
+        severity: "INFO",
+        type: "FINANCE",
+        metadata: { partnerId: docRef.id, partnerName: newPartner.name, referralCode: newPartner.referralCode }
+      });
+
       setIsAddPartnerOpen(false);
       setNewPartner({ name: "", phone: "", type: "percentage", value: 0, notes: "", referralCode: "", category: "General" });
       toast.success("Commission partner registered");
@@ -187,6 +208,16 @@ export default function CommissionPartners() {
   const handleDeletePartner = async (id: string) => {
     try {
       await deleteDoc(doc(db, "commission_partners", id));
+      
+      await recordAuditLog({
+        enterpriseId,
+        action: "COMMISSION_PARTNER_DELETE",
+        details: `Commission partner with ID ${id} was removed from the network.`,
+        severity: "WARNING",
+        type: "FINANCE",
+        metadata: { partnerId: id }
+      });
+
       toast.success("Partner removed");
     } catch (error) {
       toast.error("Delete failed");
@@ -199,7 +230,8 @@ export default function CommissionPartners() {
         return;
      }
      try {
-        await setDoc(doc(db, "commission_settlements", `${partner.id}_${Date.now()}`), {
+        const settlementId = `${partner.id}_${Date.now()}`;
+        await setDoc(doc(db, "commission_settlements", settlementId), {
            partnerId: partner.id,
            partnerName: partner.name,
            amount: partner.pendingBalance,
@@ -213,6 +245,15 @@ export default function CommissionPartners() {
            totalEarned: (partner.totalEarned || 0) + partner.pendingBalance,
            pendingBalance: 0
         }, { merge: true });
+
+        await recordAuditLog({
+          enterpriseId,
+          action: "COMMISSION_SETTLEMENT",
+          details: `Commission payout of ${formatCurrency(partner.pendingBalance)} completed for ${partner.name}.`,
+          severity: "IMPORTANT",
+          type: "FINANCE",
+          metadata: { partnerId: partner.id, amount: partner.pendingBalance, settlementId }
+        });
 
         toast.success(`Settled ${formatCurrency(partner.pendingBalance)} for ${partner.name}`);
      } catch (error: any) {
