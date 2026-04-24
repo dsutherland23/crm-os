@@ -203,6 +203,28 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   const [rolePermissions, setRolePermissions] = useState<Record<string, string | boolean> | null>(null);
   const [shiftTimePolicies, setShiftTimePolicies] = useState({ breakDuration: 15, lunchDuration: 30, meetingDuration: 60, gracePeriod: 5 });
 
+  // Listen for Role Permissions in Real-time
+  useEffect(() => {
+    if (!enterpriseId || !userRole || userRole === "Owner") {
+      setRolePermissions(null);
+      return;
+    }
+
+    const unsub = onSnapshot(
+      query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId), where("name", "==", userRole)),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const roleData = snapshot.docs[0].data();
+          setRolePermissions(roleData.permissions || {});
+        } else {
+          setRolePermissions(null);
+        }
+      }
+    );
+
+    return () => unsub();
+  }, [enterpriseId, userRole]);
+
   const updateShiftStatus = (status: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING") => {
     setPosSession(prev => prev ? { ...prev, shiftStatus: status, statusSince: new Date().toISOString() } : null);
   };

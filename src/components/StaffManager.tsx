@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, where, orderBy, addDoc } from "@/lib/firebase";
+import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, where, orderBy, addDoc, setAdminRole } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
 import { cn } from "@/lib/utils";
@@ -109,14 +109,34 @@ export default function StaffManager() {
       toast.error("Please enter a valid name and 4-digit PIN");
       return;
     }
+    const loadingToast = toast.loading(isEditing ? "Updating staff record..." : "Creating staff record...");
     try {
       if (isEditing && selectedStaffMember) {
+        // 1. Update the Staff record (for POS)
         await updateDoc(doc(db, "staff", selectedStaffMember.id), {
           ...newUser,
           enterprise_id: enterpriseId,
           updatedAt: new Date().toISOString()
         });
-        toast.success("Staff profile updated");
+
+        // 2. If this staff member has a linked portal account (UID), sync the role to Auth Claims
+        // Firebase UIDs are typically 28 chars, while our generated IDs are name-based
+        if (selectedStaffMember.id.length >= 20) {
+          try {
+            // Update the 'users' collection used for the web portal
+            await updateDoc(doc(db, "users", selectedStaffMember.id), {
+              role: newUser.role
+            });
+
+            // Trigger the Cloud Function to update Auth Custom Claims (Permissions)
+            await setAdminRole(selectedStaffMember.id, newUser.role);
+            console.log(`Role Claims synced for ${selectedStaffMember.id}: ${newUser.role}`);
+          } catch (syncErr) {
+            console.warn("Auth Claims sync skipped: Member might not have a portal identity yet.");
+          }
+        }
+
+        toast.success("Staff profile updated", { id: loadingToast });
       } else {
         const id = newUser.name.toLowerCase().replace(/\s+/g, '-') + Math.floor(Math.random() * 1000);
         await setDoc(doc(db, "staff", id), {
@@ -135,15 +155,7 @@ export default function StaffManager() {
         };
         await addDoc(collection(db, "audit_logs"), logData);
         
-        await addDoc(collection(db, "notifications"), {
-          title: "Staff Member Created",
-          message: `${newUser.name} has been provisioned as a ${newUser.role}.`,
-          type: "success",
-          isRead: false,
-          createdAt: new Date().toISOString(),
-          enterprise_id: enterpriseId
-        });
-        toast.success("Staff profile created");
+        toast.success("Staff profile created", { id: loadingToast });
       }
 
       setIsAddUserOpen(false);
@@ -161,7 +173,7 @@ export default function StaffManager() {
         productivityTarget: 2500
       });
     } catch (error: any) {
-      toast.error("Operation failed: " + error.message);
+      toast.error("Operation failed: " + error.message, { id: loadingToast });
     }
   };
 

@@ -1,0 +1,7 @@
+src/components/Auth.tsx(423,52): error TS2339: Property 'status' does not exist on type 'unknown'.
+src/components/Auth.tsx(431,30): error TS2339: Property 'fullName' does not exist on type 'unknown'.
+src/components/Auth.tsx(433,26): error TS2339: Property 'role' does not exist on type 'unknown'.
+src/components/Auth.tsx(434,35): error TS2339: Property 'enterprise_id' does not exist on type 'unknown'.
+src/components/Auth.tsx(435,36): error TS2339: Property 'enterpriseName' does not exist on type 'unknown'.
+src/components/Auth.tsx(443,44): error TS2339: Property 'fullName' does not exist on type 'unknown'.
+src/components/Auth.tsx(443,80): error TS2339: Property 'enterpriseName' does not exist on type 'unknown'.

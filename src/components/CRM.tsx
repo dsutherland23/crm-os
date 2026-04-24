@@ -182,6 +182,10 @@ export default function CRM() {
     }
 
     const tid = toast.loading("Optimizing profile photo...");
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Sync Timeout')), 30000)
+    );
+
     try {
       // Resize image before upload to avoid large files
       const img = new Image();
@@ -221,14 +225,19 @@ export default function CRM() {
       });
 
       const storageRef = ref(getStorage(), `customers/profiles/photo_${Date.now()}.jpg`);
-      await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
-      const url = await getDownloadURL(storageRef);
+      
+      const uploadTask = (async () => {
+        await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
+        return await getDownloadURL(storageRef);
+      })();
+
+      const url = await Promise.race([uploadTask, timeoutPromise]) as string;
       
       setCustomerFormData({ ...customerFormData, photo_url: url });
       toast.success("Photo synchronized", { id: tid });
     } catch (error: any) {
       console.error(error);
-      toast.error("Process failed: " + error.message, { id: tid });
+      toast.error(error.message === 'Sync Timeout' ? 'Cloud sync delayed - try again' : "Process failed: " + error.message, { id: tid });
     }
   };
 
@@ -375,7 +384,7 @@ export default function CRM() {
     const q = query(
       collection(db, "transactions"), 
       where("enterprise_id", "==", enterpriseId),
-      where("customer_id", "==", selectedCustomer.id)
+      where("customer_id", "==", selectedCustomer.id === 'walk-in' ? null : selectedCustomer.id)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const txs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
@@ -515,41 +524,59 @@ export default function CRM() {
     return activities.sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
   }, [selectedCustomer, customerTransactions]);
 
-  const filteredCustomers = useMemo(() => customers.filter(c => {
-    const name = (c.name || "").toLowerCase();
-    const email = (c.email || "").toLowerCase();
-    const phone = (c.phone || "");
+  const filteredCustomers = useMemo(() => {
     const term = searchTerm.toLowerCase();
+    const filtered = customers.filter(c => {
+      const name = (c.name || "").toLowerCase();
+      const email = (c.email || "").toLowerCase();
+      const phone = (c.phone || "");
 
-    const matchesSearch = !term ||
-      name.includes(term) ||
-      email.includes(term) ||
-      phone.includes(term);
+      const matchesSearch = !term ||
+        name.includes(term) ||
+        email.includes(term) ||
+        phone.includes(term);
 
-    let matchesSegment = true;
-    const segment = selectedSegment.toUpperCase();
+      let matchesSegment = true;
+      const segment = selectedSegment.toUpperCase();
 
-    if (segment === "ALL") matchesSegment = true;
-    else if (segment === "CUSTOMERS") matchesSegment = c.segment !== "LEAD" && c.segment !== "Leads";
-    else if (segment === "LEADS") matchesSegment = c.segment === "LEAD" || c.segment === "Leads";
-    else if (segment === "VIP") matchesSegment = c.segment === "VIP";
-    else if (segment === "PROSPECTS") matchesSegment = c.segment === "Prospects" || (Number(c.total_spent || c.spend || 0) === 0);
-    else if (segment === "INACTIVE") {
-      const lastContact = new Date(c.lastContact || 0);
-      const diffDays = Math.floor((Date.now() - lastContact.getTime()) / 86400000);
-      matchesSegment = diffDays > 90;
-    } else if (segment === "AT RISK") {
-      const lastContact = new Date(c.lastContact || 0);
-      const diffDays = Math.floor((Date.now() - lastContact.getTime()) / 86400000);
-      matchesSegment = diffDays > 30 && diffDays <= 90;
-    } else if (segment === "OWING") {
-      matchesSegment = Number(c.balance || 0) > 0;
-    } else {
-      matchesSegment = c.segment?.toUpperCase() === segment;
+      if (segment === "ALL") matchesSegment = true;
+      else if (segment === "VIP") matchesSegment = c.segment === "VIP";
+      else if (segment === "PROSPECTS") matchesSegment = c.segment === "Prospects" || (Number(c.total_spent || c.spend || 0) === 0);
+      else if (segment === "INACTIVE") {
+        const lastContact = new Date(c.lastContact || 0);
+        const diffDays = Math.floor((Date.now() - lastContact.getTime()) / 86400000);
+        matchesSegment = diffDays > 90;
+      } else if (segment === "AT RISK") {
+        const lastContact = new Date(c.lastContact || 0);
+        const diffDays = Math.floor((Date.now() - lastContact.getTime()) / 86400000);
+        matchesSegment = diffDays > 30 && diffDays <= 90;
+      } else if (segment === "OWING") {
+        matchesSegment = Number(c.balance || 0) > 0;
+      } else {
+        matchesSegment = c.segment?.toUpperCase() === segment;
+      }
+
+      return matchesSearch && matchesSegment;
+    });
+
+    // Prepend virtual Walk-in account if viewing all or searching for it
+    if (selectedSegment === "ALL" && (!term || "walk-in".includes(term))) {
+      filtered.unshift({
+        id: 'walk-in',
+        name: 'Walk-in Customers',
+        email: 'Anonymous checkout',
+        phone: 'N/A',
+        customer_type: 'Walk-in',
+        segment: 'Retail',
+        photo_url: '',
+        spend: 0,
+        total_spent: 0,
+        status: 'ACTIVE'
+      });
     }
 
-    return matchesSearch && matchesSegment;
-  }), [customers, searchTerm, selectedSegment]);
+    return filtered;
+  }, [customers, searchTerm, selectedSegment]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1449,27 +1476,29 @@ export default function CRM() {
                 <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 p-2 shadow-xl">
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-3 py-2">Profile Management</DropdownMenuLabel>
-                    <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => {
-                      setCustomerFormData({
-                        name: selectedCustomer.name || "",
-                        first_name: selectedCustomer.first_name || "",
-                        last_name: selectedCustomer.last_name || "",
-                        customer_number: selectedCustomer.customer_number || "",
-                        customer_type: selectedCustomer.customer_type || "Individual",
-                        email: selectedCustomer.email || "",
-                        phone: selectedCustomer.phone || "",
-                        other_emails: selectedCustomer.other_emails || [],
-                        credit_limit: selectedCustomer.credit_limit || 0,
-                        birthday: selectedCustomer.birthday || "",
-                        segment: selectedCustomer.segment || "No Group",
-                        address: selectedCustomer.address || "",
-                        photo_url: selectedCustomer.photo_url || ""
-                      });
-                      setIsEditCustomerOpen(true);
-                    }}>
-                      <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Users className="w-4 h-4" /></div>
-                      <span className="font-bold text-xs text-zinc-700">Edit Profile</span>
-                    </DropdownMenuItem>
+                    {selectedCustomer.id !== 'walk-in' && (
+                      <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => {
+                        setCustomerFormData({
+                          name: selectedCustomer.name || "",
+                          first_name: selectedCustomer.first_name || "",
+                          last_name: selectedCustomer.last_name || "",
+                          customer_number: selectedCustomer.customer_number || "",
+                          customer_type: selectedCustomer.customer_type || "Individual",
+                          email: selectedCustomer.email || "",
+                          phone: selectedCustomer.phone || "",
+                          other_emails: selectedCustomer.other_emails || [],
+                          credit_limit: selectedCustomer.credit_limit || 0,
+                          birthday: selectedCustomer.birthday || "",
+                          segment: selectedCustomer.segment || "No Group",
+                          address: selectedCustomer.address || "",
+                          photo_url: selectedCustomer.photo_url || ""
+                        });
+                        setIsEditCustomerOpen(true);
+                      }}>
+                        <div className="p-2 bg-blue-50 rounded-lg text-blue-600"><Users className="w-4 h-4" /></div>
+                        <span className="font-bold text-xs text-zinc-700">Edit Profile</span>
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsInvoiceDialogOpen(true)}>
                       <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600"><FileText className="w-4 h-4" /></div>
                       <span className="font-bold text-xs text-zinc-700">Create Invoice</span>

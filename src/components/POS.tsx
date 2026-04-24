@@ -76,6 +76,7 @@ import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDo
 import { PrintableInvoice } from "./PrintableInvoice";
 import { POSReceipt } from "./POSReceipt";
 import { POSAIUpsell } from "./POSAIUpsell";
+import { recordFinancialEvent } from "@/lib/ledger";
 
 interface CartDiscount {
   id: string;
@@ -285,51 +286,50 @@ export default function POS() {
   useEffect(() => {
     if (!enterpriseId || !isAuthorized) {
       if (!isAuthorized) {
-        // Optionally clear data when de-authorized
         setLoading(false);
       }
       return;
     }
 
-    const unsubBranches = onSnapshot(
-      query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => setBranches(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("branches sync error:", err)
-    );
+    let isMounted = true;
 
-    const unsubProducts = onSnapshot(
-      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => {
-        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+    // Load static data once on authorization to reduce listener pressure
+    const loadStaticData = async () => {
+      try {
+        const [bSnap, pSnap, cSnap, campSnap] = await Promise.all([
+          getDocs(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId))),
+          getDocs(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId))),
+          getDocs(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived"))),
+          getDocs(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")))
+        ]);
+
+        if (!isMounted) return;
+
+        setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setCustomers(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setCampaigns(campSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
-      },
-      (err) => { console.error("products sync error:", err); setLoading(false); }
-    );
+      } catch (err) {
+        console.error("Static data load error:", err);
+        if (isMounted) setLoading(false);
+      }
+    };
 
+    loadStaticData();
+
+    // Critical real-time inventory monitor
     const unsubInventory = onSnapshot(
       query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
-      (snapshot) => setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
+      (snapshot) => {
+        if (isMounted) setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
       (err) => console.error("inventory sync error:", err)
     );
 
-    const unsubCustomers = onSnapshot(
-      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived")),
-      (snapshot) => setCustomers(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("customers sync error:", err)
-    );
-
-    const unsubCampaigns = onSnapshot(
-      query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
-      (snapshot) => setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
-      (err) => console.error("campaigns sync error:", err)
-    );
-
     return () => {
-      unsubBranches?.();
-      unsubProducts?.();
+      isMounted = false;
       unsubInventory?.();
-      unsubCustomers?.();
-      unsubCampaigns?.();
     };
   }, [enterpriseId, isAuthorized]);
 
@@ -567,8 +567,8 @@ export default function POS() {
       name: campaign.name,
       type: type as any,
       value: val,
-      target_products: targetProducts,
-      isLoyaltyReward: (campaign as any).isLoyaltyReward
+      target_products: targetProducts || null,
+      isLoyaltyReward: (campaign as any).isLoyaltyReward || false
     });
     setIsDiscountDialogOpen(false);
     toast.success(`Applied ${campaign.name} discount!`);
@@ -741,7 +741,7 @@ export default function POS() {
         subtotal,
         discount: cartDiscount ? { ...cartDiscount, amount: discountAmount } : null,
         discount_amount: discountAmount,
-        tax_rate: globalTaxRate,
+        tax_rate: globalTaxRate || 0,
         tax_enabled: isTaxEnabled,
         tax,
         total,
@@ -750,6 +750,16 @@ export default function POS() {
         cashier_name: selectedAdmin?.name || null,
         timestamp: serverTimestamp(),
         enterprise_id: enterpriseId
+      });
+
+      // 1.5 Record to Double-Entry Ledger
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: total,
+        sourceId: txRef.id,
+        sourceType: "POS_TRANSACTION",
+        description: `POS Sale - ${cart.length} items`,
+        metadata: { cashier: selectedAdmin?.name, customer: selectedCustomer?.name }
       });
 
       // 2. Deduct inventory quantity for each item

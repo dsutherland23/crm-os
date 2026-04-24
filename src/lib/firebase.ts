@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 import * as fs from 'firebase/firestore';
 import { getMockUser } from './auth-mock';
@@ -171,5 +172,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   console.error('Firestore Error: ', JSON.stringify(errInfo, null, 2));
   throw new Error(JSON.stringify(errInfo));
 }
+
+// ── CLOUD FUNCTIONS ──────────────────────────────────────────
+export const functions = getFunctions(app);
+
+export const setAdminRole = async (targetUid: string, role: string) => {
+  const callSetRole = httpsCallable(functions, 'setAdminRole');
+  return callSetRole({ targetUid, role });
+};
 
 export default app;

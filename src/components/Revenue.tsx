@@ -123,11 +123,13 @@ export default function Revenue() {
   const [searchTerm, setSearchTerm] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [posTransactions, setPosTransactions] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
   const [recurring, setRecurring] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [financialSummary, setFinancialSummary] = useState<any>(null);
 
   // Dialog & Sheet states
   const [isExpenseSheetOpen, setIsExpenseSheetOpen] = useState(false);
@@ -449,6 +451,10 @@ export default function Revenue() {
       setQuotes(docs);
     }, (error) => console.error("quotes:", error));
 
+    const unsubPos = onSnapshot(query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+      setPosTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (error) => console.error("pos transactions:", error));
+
     const unsubRecurring = onSnapshot(query(collection(db, "recurring_billing"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       docs.sort((a, b) => new Date(a.next_billing_date || 0).getTime() - new Date(b.next_billing_date || 0).getTime());
@@ -478,16 +484,24 @@ export default function Revenue() {
       setBankAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     }, (error) => console.error("bankAccounts:", error));
 
+    const unsubSummary = onSnapshot(doc(db, "financial_summaries", enterpriseId), (snapshot) => {
+      if (snapshot.exists()) {
+        setFinancialSummary(snapshot.data());
+      }
+    });
+
     return () => {
       unsubInvoices();
       unsubExpenses();
       unsubQuotes();
+      unsubPos();
       unsubRecurring();
       unsubCustomers();
       unsubProducts();
       unsubStaff();
       unsubSessions();
       unsubBankAccounts();
+      unsubSummary();
     };
   }, [enterpriseId]);
 
@@ -735,7 +749,17 @@ export default function Revenue() {
         status: saveAndSend ? "SENT" : newInvoiceData.status
       };
 
-      await addDoc(collection(db, "invoices"), invoiceData);
+      const docRef = await addDoc(collection(db, "invoices"), invoiceData);
+      
+      // 1.5 Record to Double-Entry Ledger
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: grandTotal,
+        sourceId: docRef.id,
+        sourceType: "INVOICE",
+        description: `Invoice ${newInvoiceData.invoiceNumber || docRef.id.slice(0,6)} created`,
+        metadata: { status: invoiceData.status, customer: invoiceData.customer_name }
+      });
       
       await addDoc(collection(db, "audit_logs"), {
         action: "INVOICE_CREATED",
@@ -777,13 +801,23 @@ export default function Revenue() {
     setIsSubmitting(true);
     try {
       const targetBranch = activeBranch === "all" ? "main" : activeBranch;
-      await addDoc(collection(db, "expenses"), {
+      const docRef = await addDoc(collection(db, "expenses"), {
         ...newExpense,
         amount: parseFloat(newExpense.amount),
         timestamp: new Date().toISOString(), // keep for legacy backwards compatibility
         created_at: serverTimestamp(),
         author_id: auth.currentUser?.uid,
         branch_id: targetBranch
+      });
+
+      // 1.5 Record to Double-Entry Ledger
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: parseFloat(newExpense.amount),
+        sourceId: docRef.id,
+        sourceType: "EXPENSE",
+        description: `Expense: ${newExpense.description}`,
+        metadata: { category: newExpense.category, status: newExpense.status }
       });
       toast.success("Expense recorded successfully");
       setIsExpenseSheetOpen(false);
@@ -845,8 +879,11 @@ export default function Revenue() {
     setTimeout(() => {
       const csvContent = [
         ["Date", "Entity/Details", "Type", "Amount", "Status"],
-        ...invoices.filter(i => i.status === "PAID").map(i => [new Date(i.timestamp?.toDate() || i.date || Date.now()).toLocaleDateString(), `Invoice #${i.invoice_number?.slice(0,6) || i.id.slice(0,6)}`, "Credit", (i.amount || 0).toFixed(2), "Verified"]),
-        ...expenses.filter(e => e.status === "PAID").map(e => [new Date(e.timestamp?.toDate() || e.date || Date.now()).toLocaleDateString(), e.description || e.category, "Debit", (e.amount || 0).toFixed(2), "Verified"])
+        ...[
+          ...invoices.filter(i => i.status === "PAID").map(i => [new Date(i.timestamp?.toDate() || i.date || Date.now()).toLocaleDateString(), `Invoice #${i.invoice_number?.slice(0,6) || i.id.slice(0,6)}`, "Credit", (i.total || i.amount || 0).toFixed(2), "Verified"]),
+          ...posTransactions.map(tx => [new Date(tx.timestamp?.toDate ? tx.timestamp.toDate() : tx.timestamp || Date.now()).toLocaleDateString(), `POS Order #${tx.id.slice(0,6)}`, "Credit", (tx.total || 0).toFixed(2), "Verified"]),
+          ...expenses.filter(e => e.status === "PAID").map(e => [new Date(e.timestamp?.toDate() || e.date || Date.now()).toLocaleDateString(), e.description || e.category, "Debit", (e.amount || 0).toFixed(2), "Verified"])
+        ]
       ].map(e => e.join(",")).join("\n");
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -862,9 +899,13 @@ export default function Revenue() {
     }, 1500);
   };
 
-  const totalRevenue = invoices.filter(inv => inv.status === "PAID").reduce((acc, curr) => acc + (curr.total || 0), 0);
-  const totalExpenses = expenses.reduce((acc, curr) => acc + (curr.amount || 0), 0);
-  const netProfit = totalRevenue - totalExpenses;
+  const totalInvoiceRevenue = invoices.filter(inv => inv.status === "PAID").reduce((acc, curr) => acc + (curr.total || 0), 0);
+  const totalPosRevenue = posTransactions.reduce((acc, curr) => acc + (curr.total || 0), 0);
+  
+  // Use pre-aggregated summary if available, otherwise fallback to client-side calc
+  const totalRevenue = financialSummary?.total_revenue || (totalInvoiceRevenue + totalPosRevenue);
+  const totalExpenses = financialSummary?.total_expenses || expenses.reduce((acc, curr) => acc + (curr.amount || 0), 0);
+  const netProfit = financialSummary?.net_profit || (totalRevenue - totalExpenses);
   const netProfitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : "0.0";
   
   const accountsReceivable = invoices.filter(inv => inv.status === "PENDING" || inv.status === "OVERDUE").reduce((acc, curr) => acc + (curr.total || 0), 0);
@@ -891,6 +932,14 @@ export default function Revenue() {
       }
     });
 
+    posTransactions.forEach(tx => {
+      const date = tx.timestamp?.toDate ? tx.timestamp.toDate() : new Date(tx.timestamp || 0);
+      const key = `${date.getFullYear()}-${date.getMonth()}`;
+      if (dataMap.has(key)) {
+        dataMap.get(key).inflow += tx.total || 0;
+      }
+    });
+
     expenses.forEach(exp => {
       const date = exp.timestamp?.toDate ? exp.timestamp.toDate() : new Date(exp.timestamp || 0);
       const key = `${date.getFullYear()}-${date.getMonth()}`;
@@ -903,7 +952,7 @@ export default function Revenue() {
     });
 
     return Array.from(dataMap.values());
-  }, [invoices, expenses]);
+  }, [invoices, expenses, posTransactions]);
 
   const expenseCategories = React.useMemo(() => {
     const categories: Record<string, number> = {};

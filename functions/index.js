@@ -306,3 +306,39 @@ exports.grantBootstrapAdmin = functions.https.onCall(async (data) => {
 
   return { success: true, message: `Super admin granted to ${data.email}` };
 });
+
+// ════════════════════════════════════════════════════════════════════
+// FUNCTION 8: Aggregate Financials (on ledger write)
+// ════════════════════════════════════════════════════════════════════
+exports.aggregateFinancials = functions.firestore
+  .document("ledger/{entryId}")
+  .onCreate(async (snap) => {
+    const data = snap.data();
+    const { enterprise_id, amount, type, account } = data;
+
+    if (!enterprise_id) return null;
+
+    const summaryRef = db.collection("financial_summaries").doc(enterprise_id);
+    const increment = admin.firestore.FieldValue.increment;
+
+    const updates = {
+      last_updated: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    // Aggregation Logic for Income Statement:
+    // Only aggregate Revenue (SALES) and Expense accounts to calculate Net Profit.
+    // Asset accounts (CASH, RECEIVABLE) are for Balance Sheet and handled separately if needed.
+    if (account === "SALES" && type === "CREDIT") {
+      updates.total_revenue = increment(amount);
+      updates.net_profit = increment(amount);
+    } else if (account === "EXPENSE" && type === "DEBIT") {
+      updates.total_expenses = increment(amount);
+      updates.net_profit = increment(-amount);
+    } else {
+      // For other accounts (CASH, etc.), we don't update Income Statement metrics
+      return null;
+    }
+
+    return summaryRef.set(updates, { merge: true });
+  });
+
