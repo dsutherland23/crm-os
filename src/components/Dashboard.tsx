@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { db, collection, query, onSnapshot, orderBy, limit, where } from "@/lib/firebase";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { usePendingAction } from "@/context/PendingActionContext";
 
 // ─────────────────────────────────────────────────────────────
 // SUB-COMPONENTS
@@ -233,6 +234,7 @@ const CustomChartTooltip = ({ active, payload, label, formatCurrency }: any) => 
 // ─────────────────────────────────────────────────────────────
 export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: string) => void }) {
   const { activeBranch, formatCurrency, enterpriseId, hasPermission } = useModules();
+  const { setPendingAction } = usePendingAction();
 
   // ── State ──────────────────────────────────────────────────
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -474,17 +476,13 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
   }, [isRegenerating, subscribe]);
 
   // ── Quick Action dispatcher ────────────────────────────────
-  // Uses requestAnimationFrame instead of setTimeout for deterministic timing
+  // Sets a pending action in context so the target module consumes it safely on mount.
   const dispatchAction = useCallback(
     (tab: string, action: string) => {
+      setPendingAction({ module: tab, action });
       setActiveTab?.(tab);
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          window.dispatchEvent(new CustomEvent("app:action", { detail: action }));
-        });
-      });
     },
-    [setActiveTab]
+    [setActiveTab, setPendingAction]
   );
 
   // ── Aggregate loading state ────────────────────────────────

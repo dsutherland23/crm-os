@@ -27,6 +27,7 @@ import AdminPortal from "./components/AdminPortal";
 import Support from "./components/Support";
 import { SocialHub } from "./components/SocialHub";
 import { ModuleProvider, useModules } from "./context/ModuleContext";
+import { PendingActionProvider } from "./context/PendingActionContext";
 import { Sparkles } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { Button } from "@/components/ui/button";
@@ -392,7 +393,9 @@ function AppContent() {
 export default function App() {
   return (
     <ModuleProvider>
-      <AppContent />
+      <PendingActionProvider>
+        <AppContent />
+      </PendingActionProvider>
     </ModuleProvider>
   );
 }

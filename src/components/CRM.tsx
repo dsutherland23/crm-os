@@ -95,9 +95,11 @@ import { useModules } from "@/context/ModuleContext";
 import { motion, AnimatePresence } from "motion/react";
 
 import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, where, addDoc, serverTimestamp, deleteDoc, getStorage, ref, uploadBytes, getDownloadURL } from "@/lib/firebase";
+import { usePendingAction } from "@/context/PendingActionContext";
 
 export default function CRM() {
   const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId } = useModules();
+  const { consumeAction } = usePendingAction();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSegment, setSelectedSegment] = useState("All");
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -369,18 +371,23 @@ export default function CRM() {
     return () => unsubscribe();
   }, [enterpriseId]);
 
+  // Reset mobile detail view on unmount so the user lands on the list next time
   useEffect(() => {
-    const handleAction = (e: any) => {
-      if (e.detail === "ADD_CUSTOMER") {
-        setIsAddCustomerOpen(true);
-      }
-    };
-    window.addEventListener("app:action", handleAction);
-    return () => window.removeEventListener("app:action", handleAction);
+    return () => { setShowDetailOnMobile(false); };
   }, []);
+
+  // Consume pending cross-module actions from Dashboard quick-actions
+  useEffect(() => {
+    const action = consumeAction("crm");
+    if (action?.action === "ADD_CUSTOMER") {
+      setIsAddCustomerOpen(true);
+    }
+  }, [consumeAction]);
 
   useEffect(() => {
     if (!selectedCustomer) return;
+    // Walk-in customers query transactions where customer_id is explicitly null.
+    // POS must always write customer_id: null (not omit the field) for this to work.
     const q = query(
       collection(db, "transactions"), 
       where("enterprise_id", "==", enterpriseId),
@@ -598,6 +605,7 @@ export default function CRM() {
 
       await addDoc(collection(db, "documents"), {
         customer_id: selectedCustomer.id,
+        enterprise_id: enterpriseId,  // ✅ Fix: ensures security rules & orphan cleanup can filter by tenant
         name: file.name,
         type: file.type,
         size: file.size,
@@ -636,9 +644,6 @@ export default function CRM() {
     setIsSummarizing(true);
     setAiSummary(null);
     try {
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
-      
       const prompt = `You are a Senior CRM Strategist. Analyze this customer profile and provide:
       1. A professional 3-sentence summary highlighting their value and relationship health.
       2. Exactly 2 highly specific, data-driven "Next Best Actions" (NBA) to drive revenue or retention.
@@ -659,16 +664,31 @@ export default function CRM() {
       - [Action 1]
       - [Action 2]`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: prompt
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
       });
-      
-      setAiSummary(response.text);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw Object.assign(new Error(err.error || "AI request failed"), { status: res.status });
+      }
+
+      const data = await res.json();
+      setAiSummary(data.text);
       toast.success("Profile summary generated");
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Error:", error);
-      toast.error("Failed to generate AI summary");
+      if (error?.status === 429) {
+        toast.error("AI quota exceeded — please try again later.");
+      } else if (error?.status === 503) {
+        toast.error("AI service not configured — contact your administrator.");
+      } else if (error?.message?.includes("network") || error?.message?.includes("fetch")) {
+        toast.error("Network error — check your connection and retry.");
+      } else {
+        toast.error("Failed to generate AI summary. Please try again.");
+      }
     } finally {
       setIsSummarizing(false);
     }
@@ -697,9 +717,6 @@ export default function CRM() {
     if (!selectedCustomer) return;
     setIsGeneratingOutreach(true);
     try {
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
-      
       const prompt = `Write a professional and friendly personalized outreach email for a customer.
       Customer Name: ${selectedCustomer.name}
       Segment: ${selectedCustomer.segment}
@@ -708,15 +725,28 @@ export default function CRM() {
       
       The email should be concise, helpful, and encourage them to connect or check out our latest offers.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: prompt,
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
       });
 
-      setOutreachMessage(response.text || "");
-    } catch (error) {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw Object.assign(new Error(err.error || "AI request failed"), { status: res.status });
+      }
+
+      const data = await res.json();
+      setOutreachMessage(data.text || "");
+    } catch (error: any) {
       console.error(error);
-      toast.error("Failed to generate outreach");
+      if (error?.status === 429) {
+        toast.error("AI quota exceeded — please try again later.");
+      } else if (error?.status === 503) {
+        toast.error("AI service not configured — contact your administrator.");
+      } else {
+        toast.error("Failed to generate outreach message.");
+      }
     } finally {
       setIsGeneratingOutreach(false);
     }

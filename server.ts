@@ -35,6 +35,42 @@ async function startServer() {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
 
+  // ── SECURE AI PROXY ─────────────────────────────────────────────────
+  // Keeps the Gemini API key server-side so it never ships in the client bundle.
+  app.post("/api/ai/generate", async (req, res) => {
+    const { prompt, model = "gemini-1.5-flash" } = req.body;
+    if (!prompt || typeof prompt !== "string" || prompt.length > 8000) {
+      return res.status(400).json({ error: "Invalid prompt" });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: "AI service not configured" });
+    }
+
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({ model, contents: prompt });
+      res.json({ text: response.text });
+    } catch (err: any) {
+      console.error("AI proxy error:", err);
+      const status = err?.status || 500;
+      res.status(status >= 400 && status < 600 ? status : 500)
+         .json({ error: err?.message || "AI generation failed" });
+    }
+  });
+
+  // ── ORPHANED FILE CLEANUP ──────────────────────────────────────────
+  // Triggered by a scheduler (e.g. Cloud Scheduler → cron) to remove Storage
+  // files uploaded to customer profiles that were abandoned (no Firestore ref).
+  app.post("/api/cleanup/orphaned-files", async (req, res) => {
+    // This requires Firebase Storage Admin which needs a service account key.
+    // Implementation placeholder — enable when a service account is configured.
+    res.json({ message: "Orphan cleanup scheduled. Implement with Storage Admin SDK when service account is available." });
+  });
+
+
   // POS Checkout Logic
   app.post("/api/pos/checkout", async (req, res) => {
     const { items, customerId, branchId, paymentMethod, subtotal, discount, tax, total } = req.body;
