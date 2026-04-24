@@ -11,26 +11,48 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || ""
 };
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-// ── Firestore initialization ─────────────────────────────────────────
-// We use in-memory Firestore (no local persistence cache) deliberately:
-//  - Firebase Auth has its OWN persistence (localStorage/IndexedDB) that keeps users logged in.
-//  - Firestore's IndexedDB persistence layer causes "INTERNAL ASSERTION FAILED: Unexpected state"
-//    errors when the cache becomes corrupted (common after switching between persistence modes).
-//  - By explicitly using memoryLocalCache(), we guarantee no disk access and resolve assertion errors.
-export const db = initializeFirestore(app, {
-  localCache: memoryLocalCache()
-});
+// Resilient initialization: check for missing keys before calling Firebase SDK
+const hasRequiredKeys = !!(firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId);
+
+let appInstance;
+let authInstance;
+let dbInstance;
+let functionsInstance;
+
+try {
+  if (!hasRequiredKeys) {
+    console.warn("Firebase configuration is incomplete. App will fall back to demo mode.");
+    appInstance = initializeApp({ ...firebaseConfig, apiKey: "DUMMY", projectId: "dummy", appId: "dummy" });
+  } else {
+    appInstance = initializeApp(firebaseConfig);
+  }
+  
+  authInstance = getAuth(appInstance);
+  dbInstance = initializeFirestore(appInstance, {
+    localCache: memoryLocalCache(),
+    databaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "(default)"
+  });
+  functionsInstance = getFunctions(appInstance);
+} catch (error) {
+  console.error("Firebase failed to initialize:", error);
+  // Fallback to satisfy imports and prevent white-screen crashes
+  if (!appInstance) appInstance = initializeApp({ apiKey: "DUMMY", projectId: "dummy", appId: "dummy" });
+  if (!authInstance) authInstance = getAuth(appInstance);
+  if (!dbInstance) dbInstance = initializeFirestore(appInstance, { localCache: memoryLocalCache() });
+  if (!functionsInstance) functionsInstance = getFunctions(appInstance);
+}
+
+export const auth = authInstance;
+export const db = dbInstance;
+export const functions = functionsInstance;
+export { appInstance as default };
 
 // Proactively clean up any stale Firestore IndexedDB databases left from previous sessions.
-// This prevents "Unexpected state" assertion errors from corrupted cache on page load.
 (async () => {
   try {
     const dbs = await indexedDB.databases();
@@ -40,7 +62,7 @@ export const db = initializeFirestore(app, {
       }
     }
   } catch {
-    // indexedDB.databases() not supported in all browsers — silently skip
+    // indexedDB.databases() not supported in all browsers
   }
 })();
 
@@ -104,23 +126,10 @@ export const setDoc = (ref: any, data: any, options?: any) =>
 import * as storageFs from 'firebase/storage';
 
 // ── STORAGE ENGINE ──────────────────────────────────────────
-export const getStorage = () => storageFs.getStorage(app);
+export const getStorage = () => storageFs.getStorage(appInstance);
 export const ref = (storage: any, path: string) => storageFs.ref(storage, path);
 export const uploadBytes = (ref: any, data: any, metadata?: any) => storageFs.uploadBytes(ref, data, metadata);
 export const getDownloadURL = (ref: any) => storageFs.getDownloadURL(ref);
-
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Firestore connection successful");
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. The client is offline.");
-    }
-    // Skip logging for other errors, as this is simply a connection test.
-  }
-}
-// testConnection();
 
 export enum OperationType {
   CREATE = 'create',
@@ -173,12 +182,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// ── CLOUD FUNCTIONS ──────────────────────────────────────────
-export const functions = getFunctions(app);
-
 export const setAdminRole = async (targetUid: string, role: string) => {
   const callSetRole = httpsCallable(functions, 'setAdminRole');
   return callSetRole({ targetUid, role });
 };
-
-export default app;
