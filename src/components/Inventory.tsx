@@ -4086,9 +4086,35 @@ export default function Inventory() {
               </div>
 
               <div className="space-y-3">
+                {/* Header Row for Asset Selection */}
+                {poForm.items.length > 0 && (
+                  <div className="hidden md:flex items-center gap-4 px-4 py-1">
+                    <div className="flex-1 flex items-center gap-1.5">
+                      <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Asset</label>
+                      <Info className="w-2.5 h-2.5 text-zinc-300" title="The physical inventory item being acquired" />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="w-24 flex items-center gap-1.5">
+                        <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Quantity</label>
+                        <Info className="w-2.5 h-2.5 text-zinc-300" title="Number of units to procure" />
+                      </div>
+                      <div className="w-32 flex items-center gap-1.5">
+                        <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Unit Cost</label>
+                        <Info className="w-2.5 h-2.5 text-zinc-300" title="Purchase price per individual unit" />
+                      </div>
+                      <div className="w-40 flex items-center gap-1.5 justify-end pr-4">
+                        <label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Line Total</label>
+                        <Info className="w-2.5 h-2.5 text-zinc-300" title="Total expenditure for this asset line (Qty x Cost)" />
+                      </div>
+                      <div className="w-10" /> {/* Spacer for delete button */}
+                    </div>
+                  </div>
+                )}
+                
                 {poForm.items.map((item: any, index: number) => (
                   <div key={index} className="flex flex-col md:flex-row items-start md:items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 animate-in fade-in slide-in-from-top-2">
                     <div className="flex-1 w-full">
+                      <label className="md:hidden text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-1 block">Asset</label>
                       <Select 
                         value={item.product_id}
                         onValueChange={(val) => {
@@ -4116,6 +4142,7 @@ export default function Inventory() {
                     </div>
                     <div className="flex items-center gap-3 w-full md:w-auto">
                       <div className="flex-1 md:w-24">
+                        <label className="md:hidden text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-1 block">Quantity</label>
                         <Input 
                           type="number"
                           placeholder="Qty"
@@ -4129,6 +4156,7 @@ export default function Inventory() {
                         />
                       </div>
                       <div className="flex-1 md:w-32">
+                        <label className="md:hidden text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-1 block">Unit Cost</label>
                         <div className="relative group/cost">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-zinc-400 group-focus-within/cost:text-blue-500 transition-colors uppercase">{currency === 'USD' ? '$' : currency}</span>
                           <Input 
@@ -4145,6 +4173,7 @@ export default function Inventory() {
                         </div>
                       </div>
                       <div className="flex-1 md:w-40">
+                        <label className="md:hidden text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-1 block">Line Total</label>
                         <div className="h-10 px-4 rounded-xl bg-blue-50/30 border border-blue-100/50 flex items-center justify-end font-black text-xs text-blue-600">
                           {formatCurrency((item.cost || 0) * (item.qty || 0))}
                         </div>
