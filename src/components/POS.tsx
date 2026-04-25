@@ -103,10 +103,52 @@ export default function POS() {
   const { consumeAction } = usePendingAction();
   
   const [cart, setCart] = useState<{ product: any; quantity: number; discount?: { type: "Percentage" | "Fixed Amount"; value: number } | null }[]>([]);
+
   const [isTaxEnabled, setIsTaxEnabled] = useState(true);
   const [isItemDiscountDialogOpen, setIsItemDiscountDialogOpen] = useState(false);
   const [selectedItemForDiscount, setSelectedItemForDiscount] = useState<string | null>(null);
   const [itemDiscount, setItemDiscount] = useState({ type: "Percentage", value: "" });
+
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [selectedAdmin, setSelectedAdmin] = useState<any>(null);
+  const [pinEntry, setPinEntry] = useState("");
+  // NOTE: PINs are validated against Firestore staffList records.
+  // There is no client-side default PIN — all auth is server-driven.
+
+  const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
+  const [isStockSynced, setIsStockSynced] = useState(false);
+  const [isOpeningFloatOpen, setIsOpeningFloatOpen] = useState(false);
+  const [showResolution, setShowResolution] = useState<{ type: "NO_SESSION" | "BRANCH_MISMATCH" | "NETWORK_OFFLINE" } | null>(null);
+
+  // ── Cart Persistence ──────────────────────────────────────────
+  const cartKey = useMemo(() => 
+    enterpriseId && selectedAdmin?.id ? `crm_pos_cart_${enterpriseId}_${selectedAdmin.id}` : null
+  , [enterpriseId, selectedAdmin?.id]);
+
+  useEffect(() => {
+    if (!cartKey) return;
+    const saved = localStorage.getItem(cartKey);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCart(parsed);
+        }
+      } catch (e) {
+        console.error("Cart restoration failed:", e);
+      }
+    }
+  }, [cartKey]);
+
+  useEffect(() => {
+    if (!cartKey) return;
+    if (cart.length > 0) {
+      localStorage.setItem(cartKey, JSON.stringify(cart));
+    } else {
+      localStorage.removeItem(cartKey);
+    }
+  }, [cart, cartKey]);
+  // ─────────────────────────────────────────────────────────────
   
   useEffect(() => {
     setHasActiveTransaction(cart.length > 0);
@@ -172,17 +214,6 @@ export default function POS() {
       setSelectedCustomer(null);
     }
   }, [activeBranch]);
-
-  const [isAuthorized, setIsAuthorized] = useState(false);
-  const [selectedAdmin, setSelectedAdmin] = useState<any>(null);
-  const [pinEntry, setPinEntry] = useState("");
-  // NOTE: PINs are validated against Firestore staffList records.
-  // There is no client-side default PIN — all auth is server-driven.
-
-  const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
-  const [isStockSynced, setIsStockSynced] = useState(false);
-  const [isOpeningFloatOpen, setIsOpeningFloatOpen] = useState(false);
-  const [showResolution, setShowResolution] = useState<{ type: "NO_SESSION" | "BRANCH_MISMATCH" | "NETWORK_OFFLINE" } | null>(null);
 
   // Reset sync state when opening close dialog
   useEffect(() => {
@@ -956,6 +987,7 @@ export default function POS() {
       });
       setShowReceipt(true);
       setCart([]);
+      if (cartKey) localStorage.removeItem(cartKey);
       setCartDiscount(null);
       setSelectedCustomer(null);
       toast.success("Transaction completed!");
@@ -1187,152 +1219,6 @@ export default function POS() {
     return { label, formattedTimer, styles };
   };
 
-  if (!isAuthorized) {
-    return (
-      <div className="flex h-full items-center justify-center bg-zinc-50/50 p-6">
-        <Card className="card-modern shadow-xl overflow-hidden rounded-3xl border-zinc-200 max-w-md w-full">
-          <CardContent className="p-8 space-y-6 relative">
-            
-            <div className="flex flex-col items-center justify-center gap-3 pb-4">
-              <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-2">
-                <Lock className="w-8 h-8 text-blue-600" />
-              </div>
-              <h2 className="text-2xl font-bold tracking-tight text-zinc-900 font-display">Terminal Locked</h2>
-              <p className="text-zinc-500 text-sm text-center">Select your profile and enter your PIN to access the register.</p>
-            </div>
-
-            {!selectedAdmin ? (
-              <div className="space-y-4 pt-4 border-t border-zinc-100 max-h-[400px] overflow-y-auto pr-2">
-                <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest text-center sticky top-0 bg-white z-10 py-2">Select User</p>
-                {staffList.map(admin => {
-                  const statusInfo = getSessionStatusInfo(admin.id);
-                  return (
-                    <div 
-                      key={admin.id}
-                      className="flex items-center justify-between p-4 rounded-2xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 cursor-pointer transition-all shadow-sm"
-                      onClick={() => setSelectedAdmin(admin)}
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center shrink-0">
-                          <span className="text-white font-bold text-sm tracking-wider">{admin.initials}</span>
-                        </div>
-                        <div>
-                          <p className="font-bold text-zinc-900">{admin.name}</p>
-                          <p className="text-xs font-medium text-zinc-500">{admin.role}</p>
-                        </div>
-                      </div>
-                      {statusInfo && (
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <Badge className={cn("text-[9px] uppercase font-bold py-0.5", statusInfo.styles)}>{statusInfo.label}</Badge>
-                          <span className="text-xs font-mono font-bold text-zinc-500">{statusInfo.formattedTimer}</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="space-y-6 pt-4 border-t border-zinc-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                <div className="flex items-center justify-center flex-col gap-3 relative">
-                  <Button variant="ghost" size="icon" className="absolute left-0 top-0 h-8 w-8 rounded-full" onClick={() => { setSelectedAdmin(null); setPinEntry(""); }}>
-                    <ArrowLeft className="w-4 h-4" />
-                  </Button>
-                  <div className="w-16 h-16 rounded-full bg-zinc-900 flex items-center justify-center shadow-lg shadow-zinc-900/20">
-                    <span className="text-white font-bold text-lg tracking-wider">{selectedAdmin.initials}</span>
-                  </div>
-                  <div className="text-center">
-                    <p className="font-bold text-zinc-900 text-lg leading-tight">{selectedAdmin.name}</p>
-                  </div>
-                </div>
-
-                <div className="text-center space-y-4">
-                  <div className="flex justify-center gap-4">
-                    {[0, 1, 2, 3].map((index) => (
-                      <div 
-                        key={index} 
-                        className={cn(
-                          "w-4 h-4 rounded-full border-2 transition-all duration-200",
-                          pinEntry.length > index ? "bg-zinc-900 border-zinc-900" : "border-zinc-300"
-                        )}
-                      />
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3 pt-4">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                    <Button 
-                      key={num} 
-                      variant="outline" 
-                      className="h-16 rounded-2xl text-2xl font-bold bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm transition-all active:scale-95"
-                      onClick={() => handlePinInput(num.toString())}
-                    >
-                      {num}
-                    </Button>
-                  ))}
-                  <Button variant="outline" className="h-16 rounded-2xl text-sm font-bold uppercase tracking-widest bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm text-zinc-500 transition-all active:scale-95" onClick={handleClear}>Clear</Button>
-                  <Button variant="outline" className="h-16 rounded-2xl text-2xl font-bold bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm transition-all active:scale-95" onClick={() => handlePinInput("0")}>0</Button>
-                  <Button variant="outline" className="h-16 rounded-2xl text-lg font-bold bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm text-zinc-500 flex items-center justify-center transition-all active:scale-95" onClick={handleBackspace}>
-                    <X className="w-6 h-6" />
-                  </Button>
-                </div>
-              </div>
-            )}
-            
-          </CardContent>
-        </Card>
-
-        {/* Opening Float Dialog (Must be rendered here to show during auth flow) */}
-        <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
-          if (!open) {
-            setIsOpeningFloatOpen(false);
-            setIsAuthorized(false);
-            setSelectedAdmin(null);
-            setPinEntry("");
-          }
-        }}>
-          <DialogContent className="sm:max-w-md rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden z-[110]">
-            <div className="bg-zinc-950 p-8 text-white">
-              <DialogHeader>
-                <DialogTitle className="text-2xl font-black tracking-tight">Opening Setup</DialogTitle>
-                <DialogDescription className="text-zinc-400 font-medium">
-                  Initialize terminal with starting cash balance.
-                </DialogDescription>
-              </DialogHeader>
-            </div>
-            <div className="p-8 space-y-6">
-              <div className="space-y-3">
-                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Starting Float (Cash)</label>
-                <div className="relative group">
-                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-zinc-300 group-focus-within:text-blue-600 transition-colors">
-                    {currency === 'USD' ? '$' : currency}
-                  </span>
-                  <Input 
-                    type="number"
-                    placeholder="0.00"
-                    className="h-20 pl-16 pr-8 rounded-[1.5rem] bg-zinc-50 border-zinc-100 text-3xl font-black focus:ring-4 focus:ring-blue-500/10 transition-all"
-                    value={openingFloat}
-                    onChange={(e) => setOpeningFloat(e.target.value)}
-                    autoFocus
-                  />
-                </div>
-                <p className="text-[10px] text-zinc-400 font-medium px-1">
-                  * All sales will be audited against this opening balance.
-                </p>
-              </div>
-              <Button 
-                className="w-full h-16 rounded-[1.5rem] bg-zinc-900 text-white hover:bg-zinc-800 font-black text-lg shadow-xl shadow-zinc-950/10 transition-all active:scale-95"
-                onClick={handleConfirmOpeningFloat}
-              >
-                Open Terminal
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-    );
-  }
-
   const handleCloseRegister = async () => {
     if (currentSessionId) {
       try {
@@ -1378,6 +1264,8 @@ export default function POS() {
     setCloseRegisterNotes("");
     setCurrentSessionId(null);
     setPosSession(null);
+    setCart([]);
+    if (cartKey) localStorage.removeItem(cartKey);
 
     if (isStandard) {
       toast.info("Standard session ended. Signing out of website...", { duration: 3000 });
@@ -1387,7 +1275,9 @@ export default function POS() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden bg-zinc-50/50 relative touch-pan-y overscroll-y-contain">
-      {/* Resolution Center Overlay */}
+      {/* ──────────────────────────────────────────────────────────────────
+          DIALOGS & OVERLAYS (Rendered once at top level)
+          ────────────────────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showResolution && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-zinc-950/40 backdrop-blur-sm">
@@ -1449,6 +1339,217 @@ export default function POS() {
           </div>
         )}
       </AnimatePresence>
+
+      <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsOpeningFloatOpen(false);
+          setIsAuthorized(false);
+          setSelectedAdmin(null);
+          setPinEntry("");
+        }
+      }}>
+        <DialogContent 
+          className="sm:max-w-xl rounded-[2.5rem] p-10 border-none shadow-2xl bg-white overflow-hidden max-h-[90vh] overflow-y-auto z-[120]"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-indigo-500/5 pointer-events-none" />
+          <DialogHeader className="relative space-y-4">
+            <div className="flex justify-between items-start">
+              <div className="w-16 h-16 bg-blue-100 rounded-3xl flex items-center justify-center shadow-inner">
+                <History className="w-8 h-8 text-blue-600" />
+              </div>
+              <div className="flex bg-zinc-100 p-1 rounded-2xl gap-1">
+                <button 
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", !isCountingBills ? "bg-white shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700")}
+                  onClick={() => setIsCountingBills(false)}
+                >
+                  Simple
+                </button>
+                <button 
+                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", isCountingBills ? "bg-white shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700")}
+                  onClick={() => setIsCountingBills(true)}
+                >
+                  Count bills
+                </button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <DialogTitle className="text-3xl font-black tracking-tight text-zinc-900">Start Registry</DialogTitle>
+              <DialogDescription className="text-zinc-500 font-bold text-base">
+                Initialize the floating amount for terminal #{selectedAdmin?.id?.substring(0,4).toUpperCase()}.
+              </DialogDescription>
+            </div>
+          </DialogHeader>
+          
+          <div className="space-y-8 pt-8 relative">
+            {!isCountingBills ? (
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">Opening Floating Amount ({currency})</Label>
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-zinc-100 rounded-full text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                      <Clock className="w-3 h-3" /> {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                  <div className="relative group">
+                    <span className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-400 font-black text-3xl group-focus-within:text-blue-500 transition-colors">
+                      {currency === 'USD' ? '$' : `${currency} `}
+                    </span>
+                    <Input 
+                      placeholder="0.00" 
+                      type="number"
+                      step="0.01"
+                      className={cn(
+                        "h-24 pr-6 rounded-3xl border-none bg-zinc-50 font-black text-5xl text-zinc-900 focus:ring-4 focus:ring-blue-500/10 placeholder:text-zinc-200 transition-all shadow-inner",
+                        currency.length > 1 ? "pl-32" : "pl-14"
+                      )}
+                      value={openingFloat}
+                      onChange={(e) => setOpeningFloat(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[100, 250, 500].map((amt) => (
+                      <button 
+                        key={amt}
+                        className="h-14 rounded-2xl border border-zinc-100 font-black text-zinc-600 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-600 transition-all active:scale-95 shadow-sm bg-white"
+                        onClick={() => setOpeningFloat(amt.toString())}
+                      >
+                        {formatCurrency(amt)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="grid grid-cols-2 gap-4">
+                  {[1000, 500, 100, 50, 20, 10, 5, 1].map(denom => (
+                    <div key={denom} className="flex items-center gap-3 p-3 bg-zinc-50 rounded-2xl border border-zinc-100 focus-within:border-blue-500/50 transition-colors">
+                      <div className="w-12 h-10 bg-white rounded-xl border border-zinc-200 flex items-center justify-center font-black text-zinc-400 text-xs shadow-sm">
+                        {denom}
+                      </div>
+                      <Input 
+                        type="number"
+                        placeholder="0"
+                        className="h-10 border-none bg-transparent font-bold text-lg text-zinc-900 p-0 focus-visible:ring-0"
+                        value={billCounts[denom] || ""}
+                        onChange={(e) => handleBillCountChange(denom, e.target.value)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="pt-4 border-t border-zinc-100 flex flex-col gap-3">
+              <Button 
+                className="w-full h-16 rounded-3xl bg-zinc-900 text-white hover:bg-zinc-800 font-black text-lg shadow-xl shadow-zinc-950/20 transition-all active:scale-95"
+                disabled={!openingFloat || parseFloat(openingFloat) < 0}
+                onClick={handleConfirmOpeningFloat}
+              >
+                Start Shift
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {!isAuthorized ? (
+        <div className="flex h-full items-center justify-center bg-zinc-50/50 p-6 w-full">
+          <Card className="card-modern shadow-xl overflow-hidden rounded-3xl border-zinc-200 max-w-md w-full">
+            <CardContent className="p-8 space-y-6 relative">
+              <div className="flex flex-col items-center justify-center gap-3 pb-4">
+                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-2">
+                  <Lock className="w-8 h-8 text-blue-600" />
+                </div>
+                <h2 className="text-2xl font-bold tracking-tight text-zinc-900 font-display">Terminal Locked</h2>
+                <p className="text-zinc-500 text-sm text-center">Select your profile and enter your PIN to access the register.</p>
+              </div>
+
+              {!selectedAdmin ? (
+                <div className="space-y-4 pt-4 border-t border-zinc-100 max-h-[400px] overflow-y-auto pr-2">
+                  <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest text-center sticky top-0 bg-white z-10 py-2">Select User</p>
+                  {staffList.map(admin => {
+                    const statusInfo = getSessionStatusInfo(admin.id);
+                    return (
+                      <div 
+                        key={admin.id}
+                        className="flex items-center justify-between p-4 rounded-2xl border border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 cursor-pointer transition-all shadow-sm"
+                        onClick={() => setSelectedAdmin(admin)}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-full bg-zinc-900 flex items-center justify-center shrink-0">
+                            <span className="text-white font-bold text-sm tracking-wider">{admin.initials}</span>
+                          </div>
+                          <div>
+                            <p className="font-bold text-zinc-900">{admin.name}</p>
+                            <p className="text-xs font-medium text-zinc-500">{admin.role}</p>
+                          </div>
+                        </div>
+                        {statusInfo && (
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <Badge className={cn("text-[9px] uppercase font-bold py-0.5", statusInfo.styles)}>{statusInfo.label}</Badge>
+                            <span className="text-xs font-mono font-bold text-zinc-500">{statusInfo.formattedTimer}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-6 pt-4 border-t border-zinc-100 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                  <div className="flex items-center justify-center flex-col gap-3 relative">
+                    <Button variant="ghost" size="icon" className="absolute left-0 top-0 h-8 w-8 rounded-full" onClick={() => { setSelectedAdmin(null); setPinEntry(""); }}>
+                      <ArrowLeft className="w-4 h-4" />
+                    </Button>
+                    <div className="w-16 h-16 rounded-full bg-zinc-900 flex items-center justify-center shadow-lg shadow-zinc-900/20">
+                      <span className="text-white font-bold text-lg tracking-wider">{selectedAdmin.initials}</span>
+                    </div>
+                    <div className="text-center">
+                      <p className="font-bold text-zinc-900 text-lg leading-tight">{selectedAdmin.name}</p>
+                    </div>
+                  </div>
+
+                  <div className="text-center space-y-4">
+                    <div className="flex justify-center gap-4">
+                      {[0, 1, 2, 3].map((index) => (
+                        <div 
+                          key={index} 
+                          className={cn(
+                            "w-4 h-4 rounded-full border-2 transition-all duration-200",
+                            pinEntry.length > index ? "bg-zinc-900 border-zinc-900" : "border-zinc-300"
+                          )}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 pt-4">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                      <Button 
+                        key={num} 
+                        variant="outline" 
+                        className="h-16 rounded-2xl text-2xl font-bold bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm transition-all active:scale-95"
+                        onClick={() => handlePinInput(num.toString())}
+                      >
+                        {num}
+                      </Button>
+                    ))}
+                    <Button variant="outline" className="h-16 rounded-2xl text-sm font-bold uppercase tracking-widest bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm text-zinc-500 transition-all active:scale-95" onClick={handleClear}>Clear</Button>
+                    <Button variant="outline" className="h-16 rounded-2xl text-2xl font-bold bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm transition-all active:scale-95" onClick={() => handlePinInput("0")}>0</Button>
+                    <Button variant="outline" className="h-16 rounded-2xl text-lg font-bold bg-white hover:bg-zinc-50 border-zinc-200 shadow-sm text-zinc-500 flex items-center justify-center transition-all active:scale-95" onClick={handleBackspace}>
+                      <X className="w-6 h-6" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : (
+        <>
+          {/* Resolution Center Overlay removed from here and moved to top */}
 
       {/* Product Catalog */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
@@ -2626,137 +2727,6 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
-        if (!open) {
-          // If they close without setting float, reset everything to the login screen
-          setIsOpeningFloatOpen(false);
-          setSelectedAdmin(null);
-          setPinEntry("");
-          setIsAuthorized(false);
-        }
-      }}>
-        <DialogContent className="sm:max-w-xl rounded-[2.5rem] p-10 border-none shadow-2xl bg-white overflow-hidden max-h-[90vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
-          <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-indigo-500/5 pointer-events-none" />
-          <DialogHeader className="relative space-y-4">
-            <div className="flex justify-between items-start">
-              <div className="w-16 h-16 bg-blue-100 rounded-3xl flex items-center justify-center shadow-inner">
-                <History className="w-8 h-8 text-blue-600" />
-              </div>
-              <div className="flex bg-zinc-100 p-1 rounded-2xl gap-1">
-                <button 
-                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", !isCountingBills ? "bg-white shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700")}
-                  onClick={() => setIsCountingBills(false)}
-                >
-                  Simple
-                </button>
-                <button 
-                  className={cn("px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all", isCountingBills ? "bg-white shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700")}
-                  onClick={() => setIsCountingBills(true)}
-                >
-                  Count bills
-                </button>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <DialogTitle className="text-3xl font-black tracking-tight text-zinc-900">Start Registry</DialogTitle>
-              <DialogDescription className="text-zinc-500 font-bold text-base">
-                Initialize the floating amount for terminal #{selectedAdmin?.id?.substring(0,4).toUpperCase()}.
-              </DialogDescription>
-            </div>
-          </DialogHeader>
-          
-          <div className="space-y-8 pt-8 relative">
-            {!isCountingBills ? (
-              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-[11px] font-black uppercase tracking-[0.2em] text-zinc-400">Opening Floating Amount ({currency})</Label>
-                    <div className="flex items-center gap-1.5 px-3 py-1 bg-zinc-100 rounded-full text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
-                      <Clock className="w-3 h-3" /> {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </div>
-                  </div>
-                  <div className="relative group">
-                    <span className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-400 font-black text-3xl group-focus-within:text-blue-500 transition-colors">
-                      {currency === 'USD' ? '$' : `${currency} `}
-                    </span>
-                    <Input 
-                      placeholder="0.00" 
-                      type="number"
-                      step="0.01"
-                      className={cn(
-                        "h-24 pr-6 rounded-3xl border-none bg-zinc-50 font-black text-5xl text-zinc-900 focus:ring-4 focus:ring-blue-500/10 placeholder:text-zinc-200 transition-all shadow-inner",
-                        currency.length > 1 ? "pl-32" : "pl-14"
-                      )}
-                      value={openingFloat}
-                      onChange={(e) => setOpeningFloat(e.target.value)}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    {[100, 250, 500].map((amt) => (
-                      <button 
-                        key={amt}
-                        className="h-14 rounded-2xl border border-zinc-100 font-black text-zinc-600 hover:border-blue-500 hover:bg-blue-50 hover:text-blue-600 transition-all active:scale-95 shadow-sm bg-white"
-                        onClick={() => setOpeningFloat(amt.toString())}
-                      >
-                        {formatCurrency(amt)}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="grid grid-cols-2 gap-4">
-                  {[1000, 500, 100, 50, 20, 10, 5, 1].map(denom => (
-                    <div key={denom} className="flex items-center gap-3 p-3 bg-zinc-50 rounded-2xl border border-zinc-100 focus-within:border-blue-500/50 transition-colors">
-                      <div className="w-12 h-10 bg-white rounded-xl border border-zinc-200 flex items-center justify-center font-black text-zinc-400 text-xs shadow-sm">
-                        {denom}
-                      </div>
-                      <Input 
-                        type="number"
-                        placeholder="0"
-                        className="h-10 border-none bg-transparent font-bold text-lg text-zinc-900 p-0 focus-visible:ring-0"
-                        value={billCounts[denom] || ""}
-                        onChange={(e) => handleBillCountChange(denom, e.target.value)}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="p-6 rounded-3xl bg-blue-600 text-white flex justify-between items-center shadow-xl shadow-blue-600/20">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-widest opacity-70">Total Count</p>
-                    <p className="text-3xl font-black">{formatCurrency(parseFloat(openingFloat) || 0)}</p>
-                  </div>
-                  <History className="w-8 h-8 opacity-20" />
-                </div>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-5 rounded-3xl bg-zinc-50/50 border border-zinc-100/50 space-y-1.5 shadow-sm">
-                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Operator</p>
-                <div className="flex items-center gap-2">
-                   <div className="w-5 h-5 rounded-full bg-zinc-900 flex items-center justify-center text-[8px] text-white font-bold">{selectedAdmin?.initials}</div>
-                   <p className="font-bold text-zinc-900 truncate text-xs">{selectedAdmin?.name}</p>
-                </div>
-              </div>
-              <div className="p-5 rounded-3xl bg-zinc-50/50 border border-zinc-100/50 space-y-1.5 text-right shadow-sm">
-                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Registry ID</p>
-                <p className="font-bold text-zinc-900 truncate text-xs">{(activeBranch || 'all').toUpperCase()}-01</p>
-              </div>
-            </div>
-
-            <Button 
-              className="w-full h-16 rounded-[1.5rem] bg-zinc-900 hover:bg-zinc-800 text-white font-black text-xl shadow-2xl shadow-zinc-900/20 transition-all hover:scale-[1.02] active:scale-95 group relative overflow-hidden"
-              onClick={handleConfirmOpeningFloat}
-              disabled={!openingFloat || parseFloat(openingFloat) <= 0}
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-600/0 via-white/10 to-blue-600/0 -translate-x-full group-hover:animate-shimmer" />
-              Initialize Terminal Session
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={isShiftHistoryOpen} onOpenChange={setIsShiftHistoryOpen}>
         <DialogContent className="sm:max-w-3xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
@@ -3096,55 +3066,8 @@ export default function POS() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Opening Float Dialog (Must also be here for authorized users who lose session) */}
-      <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
-        if (!open) {
-          setIsOpeningFloatOpen(false);
-          // If they close this, they shouldn't be in the terminal without a session
-          setIsAuthorized(false);
-          setSelectedAdmin(null);
-          setPinEntry("");
-        }
-      }}>
-        <DialogContent className="sm:max-w-md rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden z-[110]">
-          <div className="bg-zinc-950 p-8 text-white">
-            <DialogHeader>
-              <DialogTitle className="text-2xl font-black tracking-tight">Opening Setup</DialogTitle>
-              <DialogDescription className="text-zinc-400 font-medium">
-                Initialize terminal with starting cash balance.
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-          <div className="p-8 space-y-6">
-            <div className="space-y-3">
-              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Starting Float (Cash)</label>
-              <div className="relative group">
-                <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-zinc-300 group-focus-within:text-blue-600 transition-colors">
-                  {currency === 'USD' ? '$' : currency}
-                </span>
-                <Input 
-                  type="number"
-                  placeholder="0.00"
-                  className="h-20 pl-16 pr-8 rounded-[1.5rem] bg-zinc-50 border-zinc-100 text-3xl font-black focus:ring-4 focus:ring-blue-500/10 transition-all"
-                  value={openingFloat}
-                  onChange={(e) => setOpeningFloat(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <p className="text-[10px] text-zinc-400 font-medium px-1">
-                * All sales will be audited against this opening balance.
-              </p>
-            </div>
-            <Button 
-              className="w-full h-16 rounded-[1.5rem] bg-zinc-900 text-white hover:bg-zinc-800 font-black text-lg shadow-xl shadow-zinc-950/10 transition-all active:scale-95"
-              onClick={handleConfirmOpeningFloat}
-            >
-              Open Terminal
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+    </>
+  )}
+</div>
+);
 }
