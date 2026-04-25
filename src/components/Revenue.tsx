@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "motion/react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   DollarSign, 
@@ -2196,7 +2196,7 @@ export default function Revenue() {
                         <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
                           <motion.div 
                             initial={{ width: 0 }}
-                            animate={{ width: `${Math.min(100, (bucket.value / (subtotal || 1)) * 100)}%` }}
+                            animate={{ width: `${Math.min(100, (bucket.value / (accountsReceivable || 1)) * 100)}%` }}
                             className={cn("h-full", bucket.color)}
                           />
                         </div>
