@@ -322,6 +322,12 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
       const code = err.code;
       if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
         toast.error("Incorrect email or password.");
+      } else if (code === "auth/email-already-in-use") {
+        toast.error("Email already exists.", {
+          description: "This admin account is already registered. Switching to Login mode...",
+          duration: 5000,
+        });
+        setIsRegister(false);
       } else if (code === "auth/too-many-requests") {
         toast.error("Too many failed attempts. Try again later.");
         setLocked(true);
@@ -346,7 +352,12 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
           </div>
           <div className="text-center space-y-1">
             <h1 className="text-xl font-black text-white tracking-tight">Admin Portal</h1>
-            <p className="text-zinc-600 text-xs font-medium">Orivo CRM — Restricted Access</p>
+            <p className={cn(
+              "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md inline-block",
+              isRegister ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "text-zinc-600"
+            )}>
+              {isRegister ? "SYSTEM BOOTSTRAP MODE" : "Orivo CRM — Restricted Access"}
+            </p>
           </div>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
