@@ -2,10 +2,13 @@ import { db, collection, addDoc, serverTimestamp, doc, updateDoc, increment } fr
 
 export enum LedgerAccount {
   CASH = "CASH",
+  PETTY_CASH = "PETTY_CASH",
   SALES = "SALES",
+  SALES_RETURNS = "SALES_RETURNS",
   EXPENSE = "EXPENSE",
   RECEIVABLE = "RECEIVABLE",
-  PAYABLE = "PAYABLE"
+  PAYABLE = "PAYABLE",
+  TAX_LIABILITY = "TAX_LIABILITY"
 }
 
 export interface LedgerEntry {
@@ -15,7 +18,7 @@ export interface LedgerEntry {
   type: "DEBIT" | "CREDIT";
   account: LedgerAccount;
   source_id: string; // ID of the transaction, invoice, or expense
-  source_type: "POS_TRANSACTION" | "INVOICE" | "EXPENSE";
+  source_type: "POS_TRANSACTION" | "INVOICE" | "EXPENSE" | "CREDIT_NOTE" | "RETURN" | "PETTY_CASH_FUNDING";
   description: string;
   metadata?: any;
 }
@@ -28,7 +31,7 @@ export async function recordFinancialEvent(params: {
   enterpriseId: string;
   amount: number;
   sourceId: string;
-  sourceType: "POS_TRANSACTION" | "INVOICE" | "EXPENSE";
+  sourceType: LedgerEntry["source_type"];
   description: string;
   metadata?: any;
 }) {
@@ -43,10 +46,13 @@ export async function recordFinancialEvent(params: {
     }
   });
 
+  const taxAmount = Number(metadata?.tax || 0);
+  const netAmount = amount - taxAmount;
+
   // Logic for Double-Entry mapping
   switch (sourceType) {
     case "POS_TRANSACTION":
-      // Debit Cash (Asset increases), Credit Sales (Revenue increases)
+      // Debit Cash (Asset increases)
       entries.push({
         enterprise_id: enterpriseId,
         timestamp: serverTimestamp(),
@@ -58,10 +64,11 @@ export async function recordFinancialEvent(params: {
         description,
         metadata
       });
+      // Credit Sales (Revenue increases) - Net Amount
       entries.push({
         enterprise_id: enterpriseId,
         timestamp: serverTimestamp(),
-        amount,
+        amount: netAmount,
         type: "CREDIT",
         account: LedgerAccount.SALES,
         source_id: sourceId,
@@ -69,12 +76,25 @@ export async function recordFinancialEvent(params: {
         description,
         metadata
       });
+      // Credit Tax Liability (GCT) if applicable
+      if (taxAmount > 0) {
+        entries.push({
+          enterprise_id: enterpriseId,
+          timestamp: serverTimestamp(),
+          amount: taxAmount,
+          type: "CREDIT",
+          account: LedgerAccount.TAX_LIABILITY,
+          source_id: sourceId,
+          source_type: sourceType,
+          description: `GCT collected from ${sourceType}`,
+          metadata
+        });
+      }
       break;
 
     case "INVOICE":
-      // If Paid: Debit Cash, Credit Sales
-      // If Pending: Debit Receivable, Credit Sales
       const isPaid = metadata?.status === "PAID";
+      // Debit Cash or Receivable
       entries.push({
         enterprise_id: enterpriseId,
         timestamp: serverTimestamp(),
@@ -86,12 +106,69 @@ export async function recordFinancialEvent(params: {
         description,
         metadata
       });
+      // Credit Sales (Net)
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount: netAmount,
+        type: "CREDIT",
+        account: LedgerAccount.SALES,
+        source_id: sourceId,
+        source_type: sourceType,
+        description,
+        metadata
+      });
+      // Credit Tax Liability
+      if (taxAmount > 0) {
+        entries.push({
+          enterprise_id: enterpriseId,
+          timestamp: serverTimestamp(),
+          amount: taxAmount,
+          type: "CREDIT",
+          account: LedgerAccount.TAX_LIABILITY,
+          source_id: sourceId,
+          source_type: sourceType,
+          description: `GCT collected from ${sourceType}`,
+          metadata
+        });
+      }
+      break;
+
+    case "RETURN":
+    case "CREDIT_NOTE":
+      // Reverses a sale: Debit Sales Returns, Credit Cash/Receivable
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount: netAmount,
+        type: "DEBIT",
+        account: LedgerAccount.SALES_RETURNS,
+        source_id: sourceId,
+        source_type: sourceType,
+        description,
+        metadata
+      });
+      // Reverse Tax Liability
+      if (taxAmount > 0) {
+        entries.push({
+          enterprise_id: enterpriseId,
+          timestamp: serverTimestamp(),
+          amount: taxAmount,
+          type: "DEBIT",
+          account: LedgerAccount.TAX_LIABILITY,
+          source_id: sourceId,
+          source_type: sourceType,
+          description: `GCT reversal from ${sourceType}`,
+          metadata
+        });
+      }
+      // Credit Cash (if refund) or Receivable (if credit note)
       entries.push({
         enterprise_id: enterpriseId,
         timestamp: serverTimestamp(),
         amount,
         type: "CREDIT",
-        account: LedgerAccount.SALES,
+        account: metadata?.isRefund ? LedgerAccount.CASH : LedgerAccount.RECEIVABLE,
         source_id: sourceId,
         source_type: sourceType,
         description,
@@ -100,7 +177,8 @@ export async function recordFinancialEvent(params: {
       break;
 
     case "EXPENSE":
-      // Debit Expense (Expense increases), Credit Cash (Asset decreases)
+      // Debit Expense, Credit Cash or Petty Cash
+      const isPettyCash = metadata?.source === "PETTY_CASH";
       entries.push({
         enterprise_id: enterpriseId,
         timestamp: serverTimestamp(),
@@ -117,10 +195,36 @@ export async function recordFinancialEvent(params: {
         timestamp: serverTimestamp(),
         amount,
         type: "CREDIT",
-        account: LedgerAccount.CASH,
+        account: isPettyCash ? LedgerAccount.PETTY_CASH : LedgerAccount.CASH,
         source_id: sourceId,
         source_type: sourceType,
         description,
+        metadata
+      });
+      break;
+
+    case "PETTY_CASH_FUNDING":
+      // Debit Petty Cash (increases), Credit Cash (decreases)
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount,
+        type: "DEBIT",
+        account: LedgerAccount.PETTY_CASH,
+        source_id: sourceId,
+        source_type: sourceType,
+        description: "Petty Cash Imprest Replenishment",
+        metadata
+      });
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount,
+        type: "CREDIT",
+        account: LedgerAccount.CASH,
+        source_id: sourceId,
+        source_type: sourceType,
+        description: "Cash Transfer to Petty Cash Fund",
         metadata
       });
       break;
@@ -130,17 +234,19 @@ export async function recordFinancialEvent(params: {
   const ledgerCol = collection(db, "ledger");
   await Promise.all(entries.map(entry => addDoc(ledgerCol, entry)));
 
-  // Proactive Aggregation (Client-side fast-path using atomic increments)
-  // This ensures the dashboard stays updated even before the Cloud Function fires.
+  // Proactive Aggregation
   const summaryRef = doc(db, "financial_summaries", enterpriseId);
-  
-  const updates: any = {
-    last_updated: serverTimestamp()
-  };
+  const updates: any = { last_updated: serverTimestamp() };
 
-  if (sourceType === "POS_TRANSACTION" || (sourceType === "INVOICE" && metadata?.status === "PAID")) {
-    updates.total_revenue = increment(amount);
-    updates.net_profit = increment(amount);
+  const isRevenue = ["POS_TRANSACTION", "INVOICE"].includes(sourceType) && (sourceType !== "INVOICE" || metadata?.status === "PAID");
+  const isReduction = ["RETURN", "CREDIT_NOTE"].includes(sourceType);
+
+  if (isRevenue) {
+    updates.total_revenue = increment(netAmount);
+    updates.net_profit = increment(netAmount);
+  } else if (isReduction) {
+    updates.total_revenue = increment(-netAmount);
+    updates.net_profit = increment(-netAmount);
   } else if (sourceType === "EXPENSE") {
     updates.total_expenses = increment(amount);
     updates.net_profit = increment(-amount);

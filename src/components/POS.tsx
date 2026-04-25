@@ -35,6 +35,8 @@ import {
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -136,9 +138,11 @@ export default function POS() {
   const [cartDiscount, setCartDiscount] = useState<CartDiscount | null>(null);
   const [isDiscountDialogOpen, setIsDiscountDialogOpen] = useState(false);
   const [discountContext, setDiscountContext] = useState<"Manual" | "Campaign">("Campaign");
-  const [manualDiscount, setManualDiscount] = useState({ name: "Manual Discount", type: "Percentage", value: "" });
+  const [manualDiscount, setManualDiscount] = useState({ name: "Manual Discount", type: "Percentage", value: "", reason: "" });
   const [customerUsage, setCustomerUsage] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
+  const [isReturnMode, setIsReturnMode] = useState(false);
+  const [restockOnReturn, setRestockOnReturn] = useState(true);
 
   useEffect(() => {
     if (!selectedCustomer?.id || !enterpriseId) {
@@ -608,7 +612,8 @@ export default function POS() {
       id: "manual",
       name: manualDiscount.name || "Manual Discount",
       type: manualDiscount.type as "Percentage" | "Fixed Amount",
-      value: val
+      value: val,
+      reason: manualDiscount.reason || "No reason provided"
     });
     setIsDiscountDialogOpen(false);
     toast.success("Discount applied");
@@ -757,7 +762,8 @@ export default function POS() {
         // to compute expected cash. Omitting this field causes $0 discrepancy report.
         sessionId: currentSessionId || null,
         timestamp: serverTimestamp(),
-        enterprise_id: enterpriseId
+        enterprise_id: enterpriseId,
+        type: isReturnMode ? "RETURN" : "SALE"
       });
 
       // 1.5 Record to Double-Entry Ledger
@@ -765,38 +771,48 @@ export default function POS() {
         enterpriseId,
         amount: total,
         sourceId: txRef.id,
-        sourceType: "POS_TRANSACTION",
-        description: `POS Sale - ${cart.length} items`,
+        sourceType: isReturnMode ? "RETURN" : "POS_TRANSACTION",
+        description: `${isReturnMode ? 'RETURN' : 'POS Sale'} - ${cart.length} items`,
         metadata: { 
           cashier: selectedAdmin?.name || null, 
-          customer: selectedCustomer?.name || null 
+          customer: selectedCustomer?.name || null,
+          tax: tax,
+          isRefund: isReturnMode
         }
       });
 
-      // 2. Deduct inventory quantity for each item
+      // 2. Deduct/Add inventory quantity for each item
       await Promise.all(cart.map(async (item) => {
         const invItem = inventory.find(i =>
           i.product_id === item.product.id &&
           (activeBranch === "all" ? true : i.branch_id === resolvedBranch)
         );
         if (invItem) {
-          await updateDoc(doc(db, "inventory", invItem.id), {
-            quantity: increment(-item.quantity)
-          });
+          // If return, we ADD back to inventory ONLY if restockOnReturn is true
+          const qtyAdjustment = isReturnMode 
+            ? (restockOnReturn ? item.quantity : 0) 
+            : -item.quantity;
+
+          if (qtyAdjustment !== 0) {
+            await updateDoc(doc(db, "inventory", invItem.id), {
+              quantity: increment(qtyAdjustment)
+            });
+          }
         }
       }));
 
       // 3. Update customer LTV and Loyalty Points if linked
       if (selectedCustomer?.id) {
         // Calculate point earnings based on settings
-        // Assuming 1 point per dollar spent if not configured elsewhere
         const pointsEarned = Math.floor(total);
-        const pointAdjustment = (cartDiscount as any)?.isLoyaltyReward 
-          ? -(loyaltySettings.pointsRequiredForReward || 100) 
-          : pointsEarned;
+        const pointAdjustment = isReturnMode 
+          ? -pointsEarned // Reverse points on return
+          : ((cartDiscount as any)?.isLoyaltyReward 
+              ? -(loyaltySettings.pointsRequiredForReward || 100) 
+              : pointsEarned);
 
         await updateDoc(doc(db, "customers", selectedCustomer.id), {
-          spend: increment(total),
+          spend: increment(isReturnMode ? -total : total),
           points: increment(pointAdjustment),
           last_purchase_date: serverTimestamp(),
           lastContact: new Date().toISOString()
@@ -805,15 +821,16 @@ export default function POS() {
 
       // 4. Audit log
       await addDoc(collection(db, "audit_logs"), {
-        action: "Sale Completed",
-        details: `${cart.length} item(s) sold for ${formatCurrency(total)} via ${paymentMethod}`,
+        action: isReturnMode ? "Return Completed" : "Sale Completed",
+        details: `${cart.length} item(s) ${isReturnMode ? 'returned' : 'sold'} for ${formatCurrency(total)} via ${paymentMethod}`,
         timestamp: serverTimestamp(),
         user: selectedAdmin?.name || "Cashier",
-        enterprise_id: enterpriseId
+        enterprise_id: enterpriseId,
+        severity: isReturnMode ? "WARNING" : "INFO"
       });
 
       // Record Campaign Usage for one-time rewards
-      if (cartDiscount) {
+      if (cartDiscount && !isReturnMode) {
         const campaign = campaigns.find(c => c.id === cartDiscount.id);
         if (campaign && campaign.one_time_per_customer && selectedCustomer?.id) {
           await addDoc(collection(db, "customer_campaign_usage"), {
@@ -1258,6 +1275,48 @@ export default function POS() {
                     </Button>
                   )}
                 </div>
+
+                <div className="flex items-center gap-2">
+                  <div className={cn(
+                    "flex items-center rounded-xl border p-1 transition-all",
+                    isReturnMode ? "bg-rose-50 border-rose-200" : "bg-zinc-100 border-zinc-200"
+                  )}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsReturnMode(false)}
+                      className={cn(
+                        "rounded-lg h-8 px-4 text-[10px] font-black uppercase tracking-widest transition-all",
+                        !isReturnMode ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
+                      )}
+                    >
+                      Sale
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsReturnMode(true)}
+                      className={cn(
+                        "rounded-lg h-8 px-4 text-[10px] font-black uppercase tracking-widest transition-all",
+                        isReturnMode ? "bg-rose-500 text-white shadow-lg shadow-rose-200" : "text-zinc-500 hover:text-zinc-700"
+                      )}
+                    >
+                      Return
+                    </Button>
+                  </div>
+
+                  {isReturnMode && (
+                    <div className="flex items-center gap-2 bg-rose-50/50 border border-rose-100 px-3 py-1.5 rounded-xl animate-in zoom-in-95 duration-200">
+                      <span className="text-[10px] font-bold text-rose-600 uppercase tracking-tighter">Restock?</span>
+                      <Switch 
+                        checked={restockOnReturn} 
+                        onCheckedChange={setRestockOnReturn}
+                        className="data-[state=checked]:bg-rose-500 scale-75"
+                      />
+                    </div>
+                  )}
+                </div>
+
                 {posSession?.sessionId && (
                   <div className="flex items-center gap-3">
                     {/* Duty Status Dropdown */}
@@ -2001,12 +2060,21 @@ export default function POS() {
             ) : (
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Discount Reason (Optional)</Label>
+                  <Label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Discount Label (Customer Facing)</Label>
                   <Input 
-                    placeholder="e.g., Manager override..."
-                    className="rounded-xl bg-zinc-50"
+                    placeholder="e.g., Manager Special"
+                    className="rounded-xl bg-zinc-50 font-bold"
                     value={manualDiscount.name}
                     onChange={(e) => setManualDiscount(prev => ({ ...prev, name: e.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Audit Justification (Private)</Label>
+                  <Textarea 
+                    placeholder="Provide a reason for the audit trail..."
+                    className="rounded-xl bg-zinc-50 min-h-[80px]"
+                    value={manualDiscount.reason}
+                    onChange={(e) => setManualDiscount(prev => ({ ...prev, reason: e.target.value }))}
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   DollarSign, 
@@ -159,6 +160,14 @@ export default function Revenue() {
   const [expenseSortBy, setExpenseSortBy] = useState("Date (Newest)");
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState("All Categories");
 
+  // Petty Cash & Credit Note states
+  const [isPettyCashDialogOpen, setIsPettyCashDialogOpen] = useState(false);
+  const [isCreditNoteDialogOpen, setIsCreditNoteDialogOpen] = useState(false);
+  const [pettyCashReplenishAmount, setPettyCashReplenishAmount] = useState("");
+  const [targetInvoiceForCredit, setTargetInvoiceForCredit] = useState<any>(null);
+  const [creditNoteData, setCreditNoteData] = useState({ reason: "", amount: 0, isRefund: false });
+
+
 
   const handleRunPayrun = async () => {
     setIsSubmitting(true);
@@ -215,6 +224,76 @@ export default function Revenue() {
       setIsSubmitting(false);
     }
   };
+
+  const handleReplenishPettyCash = async () => {
+    const amt = parseFloat(pettyCashReplenishAmount);
+    if (isNaN(amt) || amt <= 0 || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const docRef = await addDoc(collection(db, "petty_cash_fundings"), {
+        amount: amt,
+        timestamp: serverTimestamp(),
+        enterprise_id: enterpriseId,
+        branch_id: activeBranch === "all" ? "main" : activeBranch,
+        staff_name: auth.currentUser?.displayName || "Admin"
+      });
+
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: amt,
+        sourceId: docRef.id,
+        sourceType: "PETTY_CASH_FUNDING",
+        description: `Petty Cash Imprest Replenishment - ${formatCurrency(amt)}`,
+        metadata: { staff: auth.currentUser?.displayName }
+      });
+
+      toast.success("Petty Cash fund replenished");
+      setIsPettyCashDialogOpen(false);
+      setPettyCashReplenishAmount("");
+    } catch (error) {
+      toast.error("Failed to replenish fund");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleIssueCreditNote = async () => {
+    if (!targetInvoiceForCredit || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const docRef = await addDoc(collection(db, "credit_notes"), {
+        ...creditNoteData,
+        invoice_id: targetInvoiceForCredit.id,
+        invoice_number: targetInvoiceForCredit.invoice_number || targetInvoiceForCredit.invoiceNumber,
+        customer_id: targetInvoiceForCredit.customer_id,
+        customer_name: targetInvoiceForCredit.customer_name,
+        timestamp: serverTimestamp(),
+        enterprise_id: enterpriseId,
+        branch_id: targetInvoiceForCredit.branch_id
+      });
+
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: creditNoteData.amount,
+        sourceId: docRef.id,
+        sourceType: "CREDIT_NOTE",
+        description: `Credit Note issued for Inv: ${targetInvoiceForCredit.invoiceNumber || targetInvoiceForCredit.invoice_number}`,
+        metadata: { 
+          reason: creditNoteData.reason, 
+          isRefund: creditNoteData.isRefund,
+          tax: (creditNoteData.amount * (globalTaxRate / 100)) // Estimated tax reversal
+        }
+      });
+
+      toast.success("Credit Note issued successfully");
+      setIsCreditNoteDialogOpen(false);
+    } catch (error) {
+      toast.error("Failed to issue credit note");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
 
   const handleCreateExpense = async () => {
     if (!newExpense.amount || !newExpense.description || isSubmitting) {
@@ -680,6 +759,65 @@ export default function Revenue() {
     const matchesCustomer = customerFilter === "All Customers" || sub.customer_id === customerFilter;
     return matchesSearch && matchesStatus && matchesCustomer;
   }), [recurring, searchTerm, statusFilter, customerFilter]);
+
+  // --- Advanced Reporting Logic ---
+  
+  const arAging = useMemo(() => {
+    const buckets = { current: 0, thirty: 0, sixty: 0, ninety: 0, overNinety: 0 };
+    const now = new Date();
+    invoices.filter(inv => inv.status !== "PAID" && inv.status !== "Draft").forEach(inv => {
+      const dueDate = new Date(inv.due_date || inv.timestamp?.toDate?.() || now);
+      const diffDays = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+      const amount = inv.total || 0;
+      
+      if (diffDays <= 0) buckets.current += amount;
+      else if (diffDays <= 30) buckets.thirty += amount;
+      else if (diffDays <= 60) buckets.sixty += amount;
+      else if (diffDays <= 90) buckets.ninety += amount;
+      else buckets.overNinety += amount;
+    });
+    return buckets;
+  }, [invoices]);
+
+  const gctLiability = useMemo(() => {
+    const collected = invoices.filter(i => i.status === "PAID").reduce((sum, i) => sum + (i.tax_total || 0), 0) +
+                      posTransactions.filter(t => t.type !== "RETURN").reduce((sum, t) => sum + (t.tax || 0), 0);
+    const reversals = posTransactions.filter(t => t.type === "RETURN").reduce((sum, t) => sum + (t.tax || 0), 0);
+    // Assuming 15% GCT on expenses for this example, or we can use an actual field
+    const paid = expenses.reduce((sum, e) => sum + (e.tax || 0), 0); 
+    return { collected: collected - reversals, paid, net: (collected - reversals) - paid };
+  }, [invoices, posTransactions, expenses]);
+
+  const inventoryValuation = useMemo(() => {
+    return products.reduce((sum, p) => {
+      const stock = p.branches ? Object.values(p.branches).reduce((s: any, b: any) => s + (b.quantity || 0), 0) : (p.quantity || 0);
+      const cost = p.cost_price || p.base_price || 0;
+      return sum + (stock * cost);
+    }, 0);
+  }, [products]);
+
+  const creditChurnRisk = useMemo(() => {
+    const now = new Date();
+    return customers.filter(c => (c.balance || 0) > 0).map(c => {
+      const lastPurchase = new Date(c.last_purchase_date?.toDate?.() || 0);
+      const daysSince = Math.floor((now.getTime() - lastPurchase.getTime()) / (1000 * 60 * 60 * 24));
+      return { ...c, daysSince, risk: daysSince > 60 ? "HIGH" : daysSince > 30 ? "MEDIUM" : "LOW" };
+    }).filter(c => c.risk !== "LOW").sort((a, b) => b.daysSince - a.daysSince);
+  }, [customers]);
+
+  const discountAudit = useMemo(() => {
+    const audit: any = {};
+    posTransactions.forEach(t => {
+      if (t.discount?.id === "manual") {
+        const cashier = t.cashier_name || "Unknown";
+        if (!audit[cashier]) audit[cashier] = { count: 0, total: 0 };
+        audit[cashier].count += 1;
+        audit[cashier].total += (t.discount_amount || 0);
+      }
+    });
+    return Object.entries(audit).map(([name, data]: [string, any]) => ({ name, ...data }));
+  }, [posTransactions]);
+
 
   const handleCreateRecurringInvoice = async () => {
     if (isSubmitting) return;
@@ -1247,6 +1385,7 @@ export default function Revenue() {
               <TabsTrigger value="expenses" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Expenses</TabsTrigger>
               <TabsTrigger value="payroll" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm whitespace-nowrap">Payroll & Commissions</TabsTrigger>
               <TabsTrigger value="tax" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Compliance</TabsTrigger>
+              <TabsTrigger value="advanced-reports" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Advanced Reports</TabsTrigger>
             </TabsList>
           </div>
           
@@ -1360,6 +1499,13 @@ export default function Revenue() {
                           <DropdownMenuContent align="end" className="w-48 rounded-xl">
                             <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer">
                               <Download className="w-4 h-4" /> Download PDF
+                            </DropdownMenuItem>
+                            <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer" onClick={() => {
+                              setTargetInvoiceForCredit(inv);
+                              setCreditNoteData({ reason: "", amount: inv.total, isRefund: false });
+                              setIsCreditNoteDialogOpen(true);
+                            }}>
+                              <ArrowUpRight className="w-4 h-4" /> Issue Credit Note
                             </DropdownMenuItem>
                             <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600" onClick={async () => {
                               try {
@@ -1975,6 +2121,205 @@ export default function Revenue() {
                 </Table>
              </div>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="advanced-reports" className="space-y-8 animate-in fade-in duration-500">
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <Card className="card-modern p-6 border-zinc-200">
+               <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-blue-50 rounded-xl text-blue-600">
+                     <TrendingUp className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Inventory Assets</h4>
+               </div>
+               <h3 className="text-2xl font-bold text-zinc-900">{formatCurrency(inventoryValuation)}</h3>
+               <p className="text-[10px] text-zinc-400 mt-2 font-medium">Total Cost Value of Stock</p>
+            </Card>
+
+            <Card className="card-modern p-6 border-zinc-200">
+               <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-emerald-50 rounded-xl text-emerald-600">
+                     <DollarSign className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">GCT Net Payable</h4>
+               </div>
+               <h3 className="text-2xl font-bold text-zinc-900">{formatCurrency(gctLiability.net)}</h3>
+               <p className="text-[10px] text-zinc-400 mt-2 font-medium">Collected: {formatCurrency(gctLiability.collected)}</p>
+            </Card>
+
+            <Card className="card-modern p-6 border-zinc-200">
+               <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-rose-50 rounded-xl text-rose-600">
+                     <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">At Risk Revenue</h4>
+               </div>
+               <h3 className="text-2xl font-bold text-zinc-900">{formatCurrency(arAging.ninety + arAging.overNinety)}</h3>
+               <p className="text-[10px] text-zinc-400 mt-2 font-medium">Over 90 Days Overdue</p>
+            </Card>
+
+            <Card className="card-modern p-6 border-zinc-200">
+               <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 bg-amber-50 rounded-xl text-amber-600">
+                     <Users className="w-5 h-5" />
+                  </div>
+                  <h4 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Credit Churn</h4>
+               </div>
+               <h3 className="text-2xl font-bold text-zinc-900">{creditChurnRisk.length} Clients</h3>
+               <p className="text-[10px] text-zinc-400 mt-2 font-medium">Active balances & Inactive activity</p>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* A/R Aging Chart/Table */}
+            <Card className="card-modern overflow-hidden">
+               <CardHeader className="bg-zinc-50/50 border-b border-zinc-100">
+                  <CardTitle className="text-sm font-bold uppercase tracking-widest text-zinc-900 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-blue-500" />
+                    Accounts Receivable Aging
+                  </CardTitle>
+               </CardHeader>
+               <CardContent className="p-6">
+                  <div className="space-y-6">
+                    {[
+                      { label: "Current (0-30 Days)", value: arAging.thirty + arAging.current, color: "bg-emerald-500" },
+                      { label: "31-60 Days Late", value: arAging.sixty, color: "bg-amber-500" },
+                      { label: "61-90 Days Late", value: arAging.ninety, color: "bg-orange-500" },
+                      { label: "90+ Days Late", value: arAging.overNinety, color: "bg-rose-500" }
+                    ].map((bucket, i) => (
+                      <div key={i} className="space-y-2">
+                        <div className="flex justify-between text-xs font-bold">
+                          <span className="text-zinc-600">{bucket.label}</span>
+                          <span className="text-zinc-900">{formatCurrency(bucket.value)}</span>
+                        </div>
+                        <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
+                          <motion.div 
+                            initial={{ width: 0 }}
+                            animate={{ width: `${Math.min(100, (bucket.value / (subtotal || 1)) * 100)}%` }}
+                            className={cn("h-full", bucket.color)}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+               </CardContent>
+            </Card>
+
+            {/* Discount Audit Leaderboard */}
+            <Card className="card-modern overflow-hidden">
+               <CardHeader className="bg-zinc-50/50 border-b border-zinc-100">
+                  <CardTitle className="text-sm font-bold uppercase tracking-widest text-zinc-900 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    Discount Override Audit
+                  </CardTitle>
+               </CardHeader>
+               <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-zinc-50/30 border-none">
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 px-6">Staff Member</TableHead>
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10">Usage</TableHead>
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 text-right px-6">Total Value</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {discountAudit.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3} className="text-center py-12 text-zinc-400 text-xs italic">No manual overrides recorded this period.</TableCell>
+                        </TableRow>
+                      ) : (
+                        discountAudit.map((staff, idx) => (
+                          <TableRow key={idx} className="border-b border-zinc-50 hover:bg-zinc-50/50 transition-colors">
+                            <TableCell className="font-bold text-sm text-zinc-900 px-6 py-4">{staff.name}</TableCell>
+                            <TableCell className="text-xs text-zinc-500 py-4">{staff.count} Override(s)</TableCell>
+                            <TableCell className="text-right font-black text-rose-600 px-6 py-4">-{formatCurrency(staff.total)}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+               </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Credit Churn Risk Watchlist */}
+            <Card className="lg:col-span-2 card-modern overflow-hidden">
+               <CardHeader className="bg-zinc-50/50 border-b border-zinc-100 flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="text-sm font-bold uppercase tracking-widest text-zinc-900">Credit Churn Watchlist</CardTitle>
+                    <CardDescription className="text-[10px]">Accounts with unpaid balances and low recent activity.</CardDescription>
+                  </div>
+                  <Badge className="bg-rose-50 text-rose-600 border-rose-100">{creditChurnRisk.length} High Risk</Badge>
+               </CardHeader>
+               <div className="overflow-x-auto">
+                 <Table>
+                    <TableHeader>
+                      <TableRow className="bg-zinc-50/30 border-none">
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 px-6">Customer</TableHead>
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10">Last Purchase</TableHead>
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10">Outstanding</TableHead>
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 text-right px-6">Risk Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {creditChurnRisk.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={4} className="text-center py-12 text-zinc-400 text-xs italic">No high-risk credit accounts identified.</TableCell>
+                        </TableRow>
+                      ) : (
+                        creditChurnRisk.map((client, idx) => (
+                          <TableRow key={idx} className="border-b border-zinc-50">
+                            <TableCell className="font-bold text-sm text-zinc-900 px-6 py-4">{client.name}</TableCell>
+                            <TableCell className="text-xs text-zinc-500 py-4">{client.daysSince} Days Ago</TableCell>
+                            <TableCell className="text-xs font-bold text-rose-600 py-4">{formatCurrency(client.balance || 0)}</TableCell>
+                            <TableCell className="text-right px-6 py-4">
+                               <Badge className={cn(
+                                 "text-[9px] font-black px-2 py-0.5",
+                                 client.risk === "HIGH" ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-amber-50 text-amber-600 border-amber-100"
+                               )}>
+                                 {client.risk} RISK
+                               </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                 </Table>
+               </div>
+            </Card>
+
+            {/* Petty Cash Reconciliation Log */}
+            <Card className="card-modern overflow-hidden">
+               <CardHeader className="bg-zinc-50/50 border-b border-zinc-100 flex flex-row items-center justify-between">
+                  <CardTitle className="text-sm font-bold uppercase tracking-widest text-zinc-900">Petty Cash Log</CardTitle>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={() => setIsPettyCashDialogOpen(true)}>
+                    <Plus className="w-4 h-4" />
+                  </Button>
+               </CardHeader>
+               <CardContent className="p-6">
+                 <div className="space-y-4">
+                    <div className="p-4 bg-zinc-900 rounded-2xl text-white shadow-xl">
+                       <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Available Float</p>
+                       <h3 className="text-2xl font-bold">{formatCurrency(bankAccounts.find(a => a.id === "petty")?.balance || 0)}</h3>
+                    </div>
+                    <div className="space-y-3">
+                       <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest border-b border-zinc-100 pb-2">Recent Disks</p>
+                       {expenses.filter(e => e.source === "PETTY_CASH").slice(0, 3).map((e, idx) => (
+                         <div key={idx} className="flex justify-between items-start">
+                            <div>
+                               <p className="text-xs font-bold text-zinc-900">{e.description}</p>
+                               <p className="text-[9px] text-zinc-400">{e.date}</p>
+                            </div>
+                            <span className="text-xs font-bold text-rose-600">-{formatCurrency(e.amount)}</span>
+                         </div>
+                       ))}
+                    </div>
+                 </div>
+               </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 
@@ -3190,6 +3535,126 @@ export default function Revenue() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* Petty Cash Dialog */}
+      <Dialog open={isPettyCashDialogOpen} onOpenChange={setIsPettyCashDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+               <Banknote className="w-5 h-5 text-emerald-600" />
+               Replenish Petty Cash
+            </DialogTitle>
+            <DialogDescription>
+               Add funds to the Petty Cash float from the main bank account.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 pt-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Amount to Fund</Label>
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                <Input 
+                  type="number"
+                  placeholder="0.00"
+                  className="pl-9 rounded-xl h-12 bg-zinc-50 border-zinc-200 font-bold"
+                  value={pettyCashReplenishAmount}
+                  onChange={(e) => setPettyCashReplenishAmount(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+               <div className="flex items-center gap-2 mb-1">
+                  <Info className="w-3.5 h-3.5 text-blue-600" />
+                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-700">Imprest System</span>
+               </div>
+               <p className="text-[10px] text-blue-600 leading-relaxed font-medium">
+                  This will record a transfer from your default Cash/Bank account to the Petty Cash float.
+               </p>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+             <Button variant="ghost" className="rounded-xl flex-1" onClick={() => setIsPettyCashDialogOpen(false)}>Cancel</Button>
+             <Button 
+               className="rounded-xl flex-1 bg-zinc-900 text-white hover:bg-zinc-800"
+               onClick={handleReplenishPettyCash}
+               disabled={isSubmitting || !pettyCashReplenishAmount}
+             >
+               Confirm Funding
+             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Credit Note Dialog */}
+      <Dialog open={isCreditNoteDialogOpen} onOpenChange={setIsCreditNoteDialogOpen}>
+        <DialogContent className="sm:max-w-lg rounded-2xl p-6">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-bold flex items-center gap-2">
+               <ArrowUpRight className="w-5 h-5 text-rose-600" />
+               Issue Credit Note
+            </DialogTitle>
+            <DialogDescription>
+               Reverse revenue for Invoice #{targetInvoiceForCredit?.invoiceNumber || targetInvoiceForCredit?.invoice_number}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 pt-4">
+            <div className="grid grid-cols-2 gap-4">
+               <div className="space-y-2">
+                  <Label className="text-xs font-bold text-zinc-500">Credit Amount</Label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                    <Input 
+                      type="number"
+                      className="pl-9 rounded-xl h-12 bg-zinc-50 font-bold"
+                      value={creditNoteData.amount}
+                      onChange={(e) => setCreditNoteData({...creditNoteData, amount: parseFloat(e.target.value)})}
+                    />
+                  </div>
+               </div>
+               <div className="space-y-2">
+                  <Label className="text-xs font-bold text-zinc-500">Total Invoice</Label>
+                  <Input 
+                    value={formatCurrency(targetInvoiceForCredit?.total || 0)}
+                    readOnly
+                    className="rounded-xl h-12 bg-zinc-100 border-none font-bold text-zinc-500"
+                  />
+               </div>
+            </div>
+            
+            <div className="space-y-2">
+               <Label className="text-xs font-bold text-zinc-500">Adjustment Reason</Label>
+               <Textarea 
+                 placeholder="e.g., Damaged goods returned, Service dispute settlement..."
+                 className="rounded-xl min-h-[100px] bg-zinc-50 border-zinc-200 resize-none pt-4"
+                 value={creditNoteData.reason}
+                 onChange={(e) => setCreditNoteData({...creditNoteData, reason: e.target.value})}
+               />
+            </div>
+
+            <div className="flex items-center justify-between p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+               <div>
+                  <p className="text-xs font-bold text-zinc-900">Issue as Refund?</p>
+                  <p className="text-[10px] text-zinc-500 font-medium">Funds will be returned to customer.</p>
+               </div>
+               <Switch 
+                 checked={creditNoteData.isRefund}
+                 onCheckedChange={(val) => setCreditNoteData({...creditNoteData, isRefund: val})}
+               />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+             <Button variant="ghost" className="rounded-xl flex-1" onClick={() => setIsCreditNoteDialogOpen(false)}>Cancel</Button>
+             <Button 
+               className="rounded-xl flex-1 bg-rose-600 text-white hover:bg-rose-700"
+               onClick={handleIssueCreditNote}
+               disabled={isSubmitting || !creditNoteData.reason || creditNoteData.amount <= 0}
+             >
+               Issue Credit
+             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
     </ScrollArea>
   );
