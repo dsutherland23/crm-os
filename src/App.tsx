@@ -37,6 +37,7 @@ import AuthActionHandler from "./components/AuthActionHandler";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { TrialBanner } from "@/components/ui/trial-banner";
 import { motion, AnimatePresence } from "motion/react";
+import { cn } from "@/lib/utils";
 
 function AppContent() {
   // Navigate to /#/admin or append ?admin=1 to access the portal
@@ -367,7 +368,7 @@ function AppContent() {
                   setActiveTab("settings"); 
                 }} />
 
-                <main className="flex-1 overflow-x-hidden overflow-y-auto">
+                <main className={cn("flex-1 overflow-x-hidden", activeTab === 'pos' ? "overflow-hidden" : "overflow-y-auto")}>
                   {renderContent()}
                 </main>
               </div>

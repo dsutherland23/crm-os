@@ -63,12 +63,13 @@ service cloud.firestore {
 
     // ── ADMIN PORTAL ────────────────────────────────────────────────
     match /admin_users/{uid} {
-      // Allow any signed-in user to check if they are an admin or check registry status
+      // Allow any signed-in user to read — needed to check their own admin status on login
       allow read: if isSignedIn();
-      // Only super_admins can grant/revoke access
+      // Allow write if: you are a super_admin, OR if you are writing your own doc and the registry is empty (bootstrap)
       allow write: if isSignedIn() && (
-        get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin' ||
-        !exists(/databases/$(database)/documents/admin_users/0) // Allow first-ever write if system is empty
+        (exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin') ||
+        (uid == request.auth.uid && !exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)))
       );
     }
 

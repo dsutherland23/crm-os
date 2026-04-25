@@ -1341,9 +1341,9 @@ export default function POS() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-full md:overflow-hidden bg-zinc-50/50 relative touch-pan-y overscroll-y-contain">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden bg-zinc-50/50 relative touch-pan-y overscroll-y-contain">
       {/* Product Catalog */}
-      <div className="flex-1 flex flex-col min-w-0 md:h-full">
+      <div className="flex-1 flex flex-col min-w-0 h-full">
         <div className="p-6 lg:p-8 space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-1">
