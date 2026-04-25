@@ -1341,9 +1341,9 @@ export default function POS() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden bg-zinc-50/50 relative">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden bg-zinc-50/50 relative touch-pan-y">
       {/* Product Catalog */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-full">
         <div className="p-6 lg:p-8 space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-1">
@@ -1552,7 +1552,8 @@ export default function POS() {
           </div>
         </div>
 
-        <ScrollArea className="flex-1 px-6 lg:px-8 pb-8">
+        <div className="flex-1 min-h-0 relative">
+          <ScrollArea className="absolute inset-0 px-6 lg:px-8 pb-8">
           {loading ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -1629,7 +1630,8 @@ export default function POS() {
             </AnimatePresence>
           </div>
           )}
-        </ScrollArea>
+          </ScrollArea>
+        </div>
       </div>
 
       {/* Mobile cart backdrop */}
