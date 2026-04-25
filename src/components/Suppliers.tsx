@@ -747,15 +747,15 @@ export default function Suppliers() {
 
       {/* Create Purchase Order Dialog */}
       <Dialog open={isPODialogOpen} onOpenChange={setIsPODialogOpen}>
-        <DialogContent className="max-w-lg rounded-[2.5rem] p-0 border-none bg-white shadow-2xl overflow-hidden">
-          <div className="p-10">
-            <DialogHeader className="mb-8">
-              <DialogTitle className="text-2xl font-black text-zinc-900 tracking-tight uppercase">Raise Purchase Order</DialogTitle>
-              <DialogDescription className="font-medium text-zinc-500 uppercase tracking-widest text-[10px]">
+        <DialogContent className="w-[95vw] sm:max-w-lg rounded-[1.5rem] sm:rounded-[2.5rem] p-0 border-none bg-white shadow-2xl overflow-hidden">
+          <div className="p-6 sm:p-10">
+            <DialogHeader className="mb-6 sm:mb-8 text-left">
+              <DialogTitle className="text-xl sm:text-2xl font-black text-zinc-900 tracking-tight uppercase">Raise Purchase Order</DialogTitle>
+              <DialogDescription className="font-medium text-zinc-500 uppercase tracking-widest text-[9px] sm:text-[10px]">
                 Initiate procurement from {selectedSupplier?.name}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-5">
+            <div className="space-y-4 sm:space-y-5">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Item / Description *</label>
                 <Input
@@ -765,7 +765,7 @@ export default function Suppliers() {
                   onChange={(e) => setPoForm({...poForm, description: e.target.value})}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Quantity *</label>
                   <Input
@@ -810,15 +810,15 @@ export default function Suppliers() {
               {poForm.unit_cost && (
                 <div className="p-4 rounded-2xl bg-zinc-50 flex items-center justify-between">
                   <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Total Order Value</span>
-                  <span className="text-xl font-black text-zinc-900">{formatCurrency((parseFloat(poForm.unit_cost) || 0) * poForm.quantity)}</span>
+                  <span className="text-lg sm:text-xl font-black text-zinc-900">{formatCurrency((parseFloat(poForm.unit_cost) || 0) * poForm.quantity)}</span>
                 </div>
               )}
             </div>
           </div>
-          <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex justify-end gap-3">
-            <Button variant="ghost" className="rounded-2xl h-12 px-8 font-black text-xs uppercase tracking-widest" onClick={() => setIsPODialogOpen(false)}>Cancel</Button>
+          <div className="p-6 sm:p-8 bg-zinc-50 border-t border-zinc-100 flex flex-col sm:flex-row justify-end gap-3">
+            <Button variant="ghost" className="w-full sm:w-auto rounded-2xl h-12 px-8 font-black text-xs uppercase tracking-widest" onClick={() => setIsPODialogOpen(false)}>Cancel</Button>
             <Button
-              className="rounded-2xl h-12 px-8 bg-zinc-900 text-white font-black text-xs uppercase tracking-widest shadow-xl shadow-zinc-900/10"
+              className="w-full sm:w-auto rounded-2xl h-12 px-8 bg-zinc-900 text-white font-black text-xs uppercase tracking-widest shadow-xl shadow-zinc-900/10"
               onClick={handleCreatePO}
               disabled={isCreatingPO}
             >

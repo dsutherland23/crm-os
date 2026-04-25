@@ -809,21 +809,88 @@ export default function POS() {
       });
 
       // 2. Deduct/Add inventory quantity for each item
+      const evaluateReplenishment = async (productId: string, currentQty: number) => {
+        try {
+          const product = products.find(p => p.id === productId);
+          if (!product || !product.auto_reorder || !product.supplier_id) return;
+
+          const minStock = product.min_stock_level || 10;
+          if (currentQty > minStock) return;
+
+          // Check for existing pending/draft PO for this product from this supplier
+          const existingPOs = await getDocs(query(
+            collection(db, 'purchase_orders'),
+            where('enterprise_id', '==', enterpriseId),
+            where('supplier_id', '==', product.supplier_id),
+            where('status', 'in', ['DRAFT', 'AUTODRAFT', 'PENDING'])
+          ));
+
+          const hasPendingPO = existingPOs.docs.some(doc => {
+            const data = doc.data();
+            return data.items?.some((item: any) => item.product_id === productId);
+          });
+
+          if (hasPendingPO) return;
+
+          // Create new AUTODRAFT PO
+          const suggestedQty = Math.max(minStock * 2, 20);
+          const totalCost = (product.cost || 0) * suggestedQty;
+          
+          await addDoc(collection(db, 'purchase_orders'), {
+            enterprise_id: enterpriseId,
+            supplier_id: product.supplier_id,
+            status: 'AUTODRAFT',
+            items: [{
+              product_id: productId,
+              name: product.name,
+              sku: product.sku,
+              quantity: suggestedQty,
+              cost: product.cost || 0,
+              total: totalCost
+            }],
+            total_cost: totalCost,
+            notes: `Autonomous Replenishment: Stock level reached ${currentQty} units. Triggered via POS terminal.`,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            type: 'AUTO'
+          });
+
+          // Add Notification for Manager
+          await addDoc(collection(db, 'notifications'), {
+            enterprise_id: enterpriseId,
+            title: 'Autonomous Replenishment Triggered',
+            message: `Stock level for ${product.name} is low (${currentQty}). A draft PO has been generated for review.`,
+            type: 'INVENTORY',
+            severity: 'INFO',
+            created_at: serverTimestamp(),
+            read: false,
+            action_link: '/inventory?tab=suppliers'
+          });
+        } catch (error) {
+          console.error('Replenishment evaluation failure:', error);
+        }
+      };
+
       await Promise.all(cart.map(async (item) => {
         const invItem = inventory.find(i =>
           i.product_id === item.product.id &&
           (activeBranch === "all" ? true : i.branch_id === resolvedBranch)
         );
         if (invItem) {
-          // If return, we ADD back to inventory ONLY if restockOnReturn is true
           const qtyAdjustment = isReturnMode 
             ? (restockOnReturn ? item.quantity : 0) 
             : -item.quantity;
 
           if (qtyAdjustment !== 0) {
+            const newQty = (invItem.quantity || 0) + qtyAdjustment;
             await updateDoc(doc(db, "inventory", invItem.id), {
               quantity: increment(qtyAdjustment)
             });
+
+            // Trigger autonomous check if not a return
+            if (!isReturnMode && newQty <= (item.product.min_stock_level || 10)) {
+              await evaluateReplenishment(item.product.id, newQty);
+            }
           }
         }
       }));
@@ -2245,13 +2312,16 @@ export default function POS() {
               <div className="space-y-2">
                 <Label className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Manual Cash Count</Label>
                 <div className="relative group">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-black text-xl group-focus-within:text-white transition-colors">{currency === 'USD' ? '$' : ''}</span>
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-black text-xl group-focus-within:text-white transition-colors">{currency === 'USD' ? '$' : `${currency} `}</span>
                   <Input 
                     placeholder="0.00" 
                     type="number"
                     value={countedCash}
                     onChange={(e) => setCountedCash(e.target.value)}
-                    className="h-14 pl-10 rounded-xl border-none bg-white/10 text-white font-black text-xl focus:ring-4 focus:ring-blue-500/20 placeholder:text-zinc-600 transition-all" 
+                    className={cn(
+                      "h-14 rounded-xl border-none bg-white/10 text-white font-black text-xl focus:ring-4 focus:ring-blue-500/20 placeholder:text-zinc-600 transition-all",
+                      currency.length > 1 ? "pl-20" : "pl-10"
+                    )} 
                   />
                 </div>
               </div>
@@ -2376,13 +2446,16 @@ export default function POS() {
                   </div>
                   <div className="relative group">
                     <span className="absolute left-6 top-1/2 -translate-y-1/2 text-zinc-400 font-black text-3xl group-focus-within:text-blue-500 transition-colors">
-                      {currency === 'USD' ? '$' : ''}
+                      {currency === 'USD' ? '$' : `${currency} `}
                     </span>
                     <Input 
                       placeholder="0.00" 
                       type="number"
                       step="0.01"
-                      className="h-24 pl-14 pr-6 rounded-3xl border-none bg-zinc-50 font-black text-5xl text-zinc-900 focus:ring-4 focus:ring-blue-500/10 placeholder:text-zinc-200 transition-all shadow-inner"
+                      className={cn(
+                        "h-24 pr-6 rounded-3xl border-none bg-zinc-50 font-black text-5xl text-zinc-900 focus:ring-4 focus:ring-blue-500/10 placeholder:text-zinc-200 transition-all shadow-inner",
+                        currency.length > 1 ? "pl-32" : "pl-14"
+                      )}
                       value={openingFloat}
                       onChange={(e) => setOpeningFloat(e.target.value)}
                     />

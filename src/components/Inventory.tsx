@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Papa from 'papaparse';
 import { 
   Plus, Search, Filter, Download, MoreHorizontal, Package, 
   AlertTriangle, ArrowRightLeft, TrendingUp, Layers, Box, BarChart3,
   ChevronRight, ArrowRight, CheckCircle2, AlertCircle, Truck, Clock, RefreshCw, Sparkles,
   Camera, Image as ImageIcon, Scan, ScanLine, Check, Info, MoreVertical, X as XIcon, Zap, ZapOff, Maximize2, Zap as Flashlight, Loader2, Trash2, Users,
-  ShieldCheck, CalendarCheck, CreditCard, Activity, FileText
+  ShieldCheck, CalendarCheck, CreditCard, Activity, FileText, Link2
 } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -46,6 +46,7 @@ import {
   increment,
   serverTimestamp
 } from '@/lib/firebase';
+import * as XLSX from 'xlsx';
 import { recordFinancialEvent } from '@/lib/ledger';
 import { toast } from 'sonner';
 import { cn } from "@/lib/utils";
@@ -148,6 +149,9 @@ export default function Inventory() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [isLinkSupplierDialogOpen, setIsLinkSupplierDialogOpen] = useState(false);
+  const [isBatchLinking, setIsBatchLinking] = useState(false);
+  const [selectedSupplierForBatch, setSelectedSupplierForBatch] = useState('');
   const [isSavingSupplier, setIsSavingSupplier] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [newSupplier, setNewSupplier] = useState({
@@ -315,80 +319,206 @@ export default function Inventory() {
   const handleImportCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    // Reset input so same file can be re-imported
+    event.target.value = '';
 
-    const loadingToast = toast.loading("Analyzing database file...");
+    const loadingToast = toast.loading("Analyzing strategic database...");
+    const fileExt = file.name.split('.').pop()?.toLowerCase();
 
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        try {
-          const data = results.data as any[];
-          if (data.length === 0) throw new Error("No records found in CSV");
+    // Resolve the branch to write stock to — fall back to first branch when on "all"
+    const targetBranch = activeBranch !== 'all' ? activeBranch : (branches[0]?.id || null);
 
-          const parseNumber = (val: any) => {
-            if (typeof val === 'number') return val;
-            if (!val) return 0;
-            const cleaned = String(val).replace(/[^0-9.-]/g, '');
-            return parseFloat(cleaned) || 0;
-          };
+    const parseNumber = (val: any) => {
+      if (typeof val === 'number') return val;
+      if (!val) return 0;
+      const cleaned = String(val).replace(/[^0-9.-]/g, '');
+      return parseFloat(cleaned) || 0;
+    };
 
-          // Firestore has a 500 operation limit per batch
-          const BATCH_SIZE = 500;
-          let importedCount = 0;
-          
-          for (let i = 0; i < data.length; i += BATCH_SIZE) {
-            const chunk = data.slice(i, i + BATCH_SIZE);
-            const batch = writeBatch(db);
-            
-            chunk.forEach((row) => {
-              const name = row.name || row.Name || row.product || row.Product;
-              const sku = row.sku || row.SKU || row.code || row.Code;
-              if (!name || !sku) return;
+    // Shared header-detection for any spreadsheet with decorative top rows
+    const buildRowsFromSheet = (worksheet: any) => {
+      const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+      const headerKeywords = ['STOCK', 'ITEM', 'NAME', 'SKU', 'PRODUCT', 'PRICE', 'RETAIL', 'QTY', 'QUANTITY'];
+      let headerRowIndex = rows.findIndex(row =>
+        row && row.some(cell =>
+          typeof cell === 'string' &&
+          headerKeywords.some(kw => cell.toUpperCase().includes(kw))
+        )
+      );
+      if (headerRowIndex === -1) headerRowIndex = 0;
+      const headers = rows[headerRowIndex];
+      return rows.slice(headerRowIndex + 1)
+        .filter(row => row && row.some(cell => cell !== undefined && cell !== ''))
+        .map(row => {
+          const obj: any = {};
+          headers.forEach((header: any, index: number) => {
+            if (header) obj[String(header)] = row[index];
+          });
+          return obj;
+        });
+    };
 
-              const productRef = doc(collection(db, 'products'));
-              batch.set(productRef, {
-                name,
-                sku,
-                price: parseNumber(row.price || row.Price || row.retail),
-                retail_price: parseNumber(row.price || row.Price || row.retail),
-                cost: parseNumber(row.cost || row.Cost),
-                category: row.category || row.Category || 'General',
-                barcode: row.barcode || row.Barcode || '',
-                unit: row.unit || row.Unit || 'pcs',
-                min_stock_level: parseNumber(row.min_stock || row.minStock || 10),
-                enterprise_id: enterpriseId,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              });
-              importedCount++;
+    const processData = async (data: any[]) => {
+      try {
+        const validRows = data.filter(r => r && typeof r === 'object' && Object.keys(r).length > 0);
+        if (validRows.length === 0) throw new Error("No readable records found. Check that your file has a header row with column names.");
+
+        // ── IMPORTANT: each product + its inventory record = 2 ops
+        // ── so keep batch at 200 rows max (400 ops max per batch, safely under 500)
+        const BATCH_SIZE = 200;
+        let importedCount = 0;
+
+        for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
+          const chunk = validRows.slice(i, i + BATCH_SIZE);
+          const batch = writeBatch(db);
+
+          for (const row of chunk) {
+            // Normalise keys: trim, uppercase, collapse spaces to underscores
+            const normalizedRow: any = {};
+            Object.keys(row).forEach(key => {
+              const nk = key.trim().toUpperCase().replace(/\s+/g, '_');
+              normalizedRow[nk] = row[key];
             });
 
-            await batch.commit();
+            const getVal = (keys: string[]) => {
+              for (const k of keys) {
+                const nk = k.toUpperCase().replace(/\s+/g, '_');
+                if (normalizedRow[nk] !== undefined && normalizedRow[nk] !== null && normalizedRow[nk] !== '') {
+                  return normalizedRow[nk];
+                }
+              }
+              return null;
+            };
+
+            const name = getVal(['NAME', 'PRODUCT', 'STOCK_ITEMS', 'ITEM_NAME', 'DESCRIPTION', 'ITEM', 'PRODUCT_NAME']);
+            if (!name) continue;
+
+            let sku = getVal(['SKU', 'CODE', 'PART_NUMBER', 'PART_NO', 'ID', 'SERIAL', 'ITEM_CODE']);
+            if (!sku) {
+              const prefix = String(name).replace(/[^A-Za-z0-9]/g, '').substring(0, 4).toUpperCase();
+              sku = `${prefix}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+            }
+
+            const price  = parseNumber(getVal(['RETAIL', 'PRICE', 'RETAIL_PRICE', 'SELLING_PRICE', 'SALE_PRICE', 'LIST_PRICE']));
+            const cost   = parseNumber(getVal(['COST', 'UNIT_COST', 'COST_PRICE', 'PURCHASE_PRICE', 'BUY_PRICE']));
+
+            const productRef = doc(collection(db, 'products'));
+
+            batch.set(productRef, {
+              name: String(name),
+              sku: String(sku),
+              price,
+              retail_price: price,
+              cost,
+              category: getVal(['CATEGORY', 'DEPARTMENT', 'GROUP', 'TYPE', 'CLASS']) || 'General',
+              barcode:  getVal(['BARCODE', 'UPC', 'EAN', 'GTIN']) || '',
+              unit:     getVal(['UNIT', 'UOM', 'MEASURE', 'UNIT_OF_MEASURE']) || 'pcs',
+              min_stock_level: parseNumber(getVal(['MIN_STOCK', 'REORDER_POINT', 'SAFETY_STOCK', 'MINIMUM']) || 10),
+              enterprise_id: enterpriseId,
+              created_at: serverTimestamp(),
+              updated_at: serverTimestamp()
+            });
+
+            // Quantity — write to resolved branch (never silently skip)
+            const qtyKey = Object.keys(normalizedRow).find(k =>
+              k.includes('QTY') || k.includes('QUANTITY') || k === 'STOCK' ||
+              k.includes('STOCK_LEVEL') || k.includes('ON_HAND') || k.includes('AVAILABLE')
+            );
+            const qty = qtyKey ? parseNumber(normalizedRow[qtyKey]) : 0;
+
+            if (qty > 0 && targetBranch) {
+              const invRef = doc(collection(db, 'inventory'));
+              batch.set(invRef, {
+                product_id: productRef.id,
+                branch_id:  targetBranch,
+                enterprise_id: enterpriseId,
+                quantity:   qty,
+                last_updated: serverTimestamp()
+              });
+            }
+
+            importedCount++;
           }
 
-          toast.success(`Strategic Import Complete: ${importedCount} assets onboarded.`, { id: loadingToast });
-          
-          await recordAuditLog({
-            enterpriseId,
-            action: "INVENTORY_IMPORT",
-            details: `Bulk CSV import completed. ${importedCount} products added/updated.`,
-            severity: "WARNING",
-            type: "SYSTEM",
-            metadata: { importedCount, fileName: file.name }
-          });
-
-          setIsImportDialogOpen(false);
-          fetchData();
-        } catch (error: any) {
-          toast.error(`Import failure: ${error.message}`, { id: loadingToast });
+          await batch.commit();
         }
-      },
-      error: (error) => {
-        toast.error(`Parsing error: ${error.message}`, { id: loadingToast });
+
+        const withQty = validRows.filter(r => {
+          const nRow: any = {};
+          Object.keys(r).forEach(k => { nRow[k.trim().toUpperCase().replace(/\s+/g, '_')] = r[k]; });
+          return Object.keys(nRow).some(k => (k.includes('QTY') || k.includes('QUANTITY') || k === 'STOCK') && parseNumber(nRow[k]) > 0);
+        }).length;
+
+        toast.success(
+          `Import complete: ${importedCount} products onboarded${withQty > 0 ? `, ${withQty} stock levels synced` : ''}${targetBranch ? ` → ${branches.find(b => b.id === targetBranch)?.name || targetBranch}` : ''}.`,
+          { id: loadingToast, duration: 6000 }
+        );
+
+        await recordAuditLog({
+          enterpriseId,
+          action: "INVENTORY_IMPORT",
+          details: `Bulk ${fileExt?.toUpperCase()} import: ${importedCount} products, ${withQty} stock records.`,
+          severity: "WARNING",
+          type: "SYSTEM",
+          metadata: { importedCount, withQty, fileName: file.name, targetBranch }
+        });
+
+        setIsImportDialogOpen(false);
+        fetchData();
+      } catch (error: any) {
+        console.error('Import error:', error);
+        toast.error(`Import failure: ${error.message}`, { id: loadingToast });
       }
-    });
+    };
+
+    // ── Format Routing ──────────────────────────────────────────────────────────
+    if (fileExt === 'csv') {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => processData(results.data),
+        error: (error) => toast.error(`CSV parse error: ${error.message}`, { id: loadingToast })
+      });
+    } else if (fileExt === 'tsv') {
+      Papa.parse(file, {
+        header: true,
+        delimiter: '\t',
+        skipEmptyLines: true,
+        complete: (results) => processData(results.data),
+        error: (error) => toast.error(`TSV parse error: ${error.message}`, { id: loadingToast })
+      });
+    } else if (fileExt === 'json') {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const parsed = JSON.parse(e.target?.result as string);
+          const rows = Array.isArray(parsed) ? parsed : parsed.data || parsed.products || parsed.inventory || Object.values(parsed);
+          processData(rows);
+        } catch {
+          toast.error("Invalid JSON format", { id: loadingToast });
+        }
+      };
+      reader.onerror = () => toast.error("File read failure", { id: loadingToast });
+      reader.readAsText(file);
+    } else if (['xlsx', 'xls', 'ods'].includes(fileExt || '')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const workbook = XLSX.read(e.target?.result, { type: 'binary' });
+          const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+          processData(buildRowsFromSheet(worksheet));
+        } catch (err: any) {
+          toast.error(`Spreadsheet parse error: ${err.message}`, { id: loadingToast });
+        }
+      };
+      reader.onerror = () => toast.error("File read failure", { id: loadingToast });
+      reader.readAsBinaryString(file);
+    } else {
+      toast.error(`Unsupported format ".${fileExt}". Supported: CSV, TSV, XLSX, XLS, ODS, JSON`, { id: loadingToast });
+    }
   };
+
+
 
   const handleSavePO = async () => {
     if (!poForm.supplier_id || poForm.items.length === 0) {
@@ -937,18 +1067,30 @@ export default function Inventory() {
     if (selectedProducts.length === 0) return;
     setIsBatchDeleting(true);
     try {
-      const batch = writeBatch(db);
-      for (const id of selectedProducts) {
-        batch.delete(doc(db, 'products', id));
-        const q = query(
-          collection(db, 'inventory'), 
-          where('product_id', '==', id),
-          where('enterprise_id', '==', enterpriseId)
-        );
-        const snapshots = await getDocs(q);
-        snapshots.forEach(d => batch.delete(d.ref));
+      // Parallelise all inventory lookups to avoid serial await-in-loop
+      const inventorySnaps = await Promise.all(
+        selectedProducts.map(id =>
+          getDocs(query(
+            collection(db, 'inventory'),
+            where('product_id', '==', id),
+            where('enterprise_id', '==', enterpriseId)
+          ))
+        )
+      );
+
+      const allRefs: any[] = [
+        ...selectedProducts.map(id => doc(db, 'products', id)),
+        ...inventorySnaps.flatMap(snap => snap.docs.map(d => d.ref))
+      ];
+
+      // Commit in chunks of 500 to respect Firestore limits
+      const CHUNK = 500;
+      for (let i = 0; i < allRefs.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        allRefs.slice(i, i + CHUNK).forEach(ref => batch.delete(ref));
+        await batch.commit();
       }
-      await batch.commit();
+
       toast.success(`${selectedProducts.length} assets purged`);
       setSelectedProducts([]);
       fetchData();
@@ -960,13 +1102,51 @@ export default function Inventory() {
     }
   };
 
+  const handleBatchLinkSupplier = async () => {
+    if (selectedProducts.length === 0 || !selectedSupplierForBatch) {
+      toast.error('Linkage violation: Select products and a strategic partner');
+      return;
+    }
+    setIsBatchLinking(true);
+    try {
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < selectedProducts.length; i += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        const chunk = selectedProducts.slice(i, i + CHUNK_SIZE);
+        
+        chunk.forEach(id => {
+          batch.update(doc(db, 'products', id), {
+            supplier_id: selectedSupplierForBatch,
+            updated_at: serverTimestamp()
+          });
+        });
+        
+        await batch.commit();
+      }
+
+      toast.success(`${selectedProducts.length} assets linked to strategic partner`);
+      setSelectedProducts([]);
+      setIsLinkSupplierDialogOpen(false);
+      setSelectedSupplierForBatch('');
+      fetchData();
+    } catch (error) {
+      console.error('Batch linkage error:', error);
+      toast.error('Strategic linkage failed');
+    } finally {
+      setIsBatchLinking(false);
+    }
+  };
+
   const handleBatchDeleteMovements = async () => {
     if (selectedMovements.length === 0) return;
     setIsBatchDeletingMovements(true);
     try {
-      const batch = writeBatch(db);
-      selectedMovements.forEach(id => batch.delete(doc(db, 'inventory_movements', id)));
-      await batch.commit();
+      const CHUNK = 500;
+      for (let i = 0; i < selectedMovements.length; i += CHUNK) {
+        const batch = writeBatch(db);
+        selectedMovements.slice(i, i + CHUNK).forEach(id => batch.delete(doc(db, 'inventory_movements', id)));
+        await batch.commit();
+      }
       toast.success(`${selectedMovements.length} logs purged`);
       setSelectedMovements([]);
       fetchData();
@@ -1368,13 +1548,51 @@ export default function Inventory() {
     { name: 'FastTrack Inc', leadTime: 1, deliveryRate: 85, qualityScore: 90 },
   ];
 
-  const productInsights = {
-    velocity: 4.2,
-    reorderDays: 7,
-    expectedStockOut: '04/27',
-    optimumOrderQty: 150,
-    insightText: "Demand velocity is trending 12% higher than seasonal baseline. Predicted stock-out in 7 days. Autonomous order trigger recommended today."
-  };
+  const productInsights = useMemo(() => {
+    if (!editingProductId) return {
+      velocity: 0,
+      reorderDays: 0,
+      expectedStockOut: 'N/A',
+      optimumOrderQty: 0,
+      insightText: "Select an asset to view strategic supply chain insights."
+    };
+
+    const product = products.find(p => p.id === editingProductId);
+    if (!product) return { velocity: 0, reorderDays: 0, expectedStockOut: 'N/A', optimumOrderQty: 0, insightText: "" };
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const relevantMovements = movements.filter(m => 
+      m.product_id === editingProductId && 
+      (m.type === 'SALE' || m.type === 'OUT') &&
+      (m.date ? new Date(m.date) >= thirtyDaysAgo : false)
+    );
+
+    const totalSold = relevantMovements.reduce((sum, m) => sum + Math.abs(m.quantity || 0), 0);
+    const velocity = Number((totalSold / 30).toFixed(1));
+
+    const currentStock = getProductStock(editingProductId, activeBranch);
+    const reorderDays = velocity > 0 ? Math.floor(currentStock / velocity) : 999;
+
+    const stockOutDate = new Date();
+    stockOutDate.setDate(stockOutDate.getDate() + (reorderDays === 999 ? 365 : reorderDays));
+    const expectedStockOut = stockOutDate.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' });
+
+    const optimumOrderQty = (product.min_stock_level || 10) * 2;
+
+    const insightText = velocity > 0 
+      ? `Observed velocity of ${velocity} units/day. Predicted stock-out in ${reorderDays} days. ${reorderDays < (product.leadTime || 5) ? "CRITICAL: Reorder immediately." : "Inventory levels within safety parameters."}`
+      : "Insufficient sales data to compute velocity baseline. Manual replenishment monitoring advised.";
+
+    return {
+      velocity,
+      reorderDays: reorderDays === 999 ? "∞" : reorderDays,
+      expectedStockOut,
+      optimumOrderQty,
+      insightText
+    };
+  }, [editingProductId, products, movements, inventory, activeBranch]);
 
   return (
     <>
@@ -1713,11 +1931,14 @@ export default function Inventory() {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Unit Cost Price</label>
                   <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-black">$</span>
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-black">{currency === 'USD' ? '$' : `${currency} `}</span>
                     <Input 
                       type="number"
                       step="0.01"
-                      className="rounded-2xl h-16 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-sm transition-all pl-8 py-4 text-base" 
+                      className={cn(
+                        "rounded-2xl h-16 bg-white border-zinc-200 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-sm transition-all py-4 text-base",
+                        currency.length > 1 ? "pl-20" : "pl-8"
+                      )} 
                       value={productForm.cost || ""}
                       onChange={(e) => {
                         const cost = parseFloat(e.target.value) || 0;
@@ -1749,11 +1970,14 @@ export default function Inventory() {
                 <div className="space-y-2">
                   <label className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Market Retail Price</label>
                   <div className="relative group">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-black">{currency === 'USD' ? '$' : currency}</span>
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-emerald-500 font-black">{currency === 'USD' ? '$' : `${currency} `}</span>
                     <Input 
                       type="number"
                       step="0.01"
-                      className="rounded-2xl h-16 bg-emerald-50 border-emerald-100 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-inner transition-all pl-12 text-emerald-700 py-4 text-base" 
+                      className={cn(
+                        "rounded-2xl h-16 bg-emerald-50 border-emerald-100 font-black focus:ring-4 focus:ring-emerald-500/10 shadow-inner transition-all text-emerald-700 py-4 text-base",
+                        currency.length > 1 ? "pl-20" : "pl-12"
+                      )} 
                       value={productForm.price || ""}
                       onChange={(e) => {
                         const price = parseFloat(e.target.value) || 0;
@@ -1769,7 +1993,7 @@ export default function Inventory() {
                    <div className="space-y-1 min-w-0">
                       <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500 truncate">Estimated Unit Profit</p>
                       <p className="text-xl sm:text-2xl md:text-4xl font-black text-emerald-400 tracking-tight truncate leading-none">
-                        ${Math.max(0, productForm.price - productForm.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        {currency === 'USD' ? '$' : `${currency} `}{Math.max(0, productForm.price - productForm.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </p>
                    </div>
                    <div className="space-y-1 text-right min-w-0">
@@ -1816,7 +2040,7 @@ export default function Inventory() {
                           <Zap className="w-4 h-4 text-amber-500 group-hover:scale-110 transition-transform" />
                        </div>
                        <div className="flex items-end gap-2">
-                           <p className="text-2xl font-black text-zinc-900 leading-none">12.5 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'} / week</span></p>
+                           <p className="text-2xl font-black text-zinc-900 leading-none">{(Number(productInsights.velocity) * 7).toFixed(1)} <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'} / week</span></p>
                        </div>
                     </div>
                     <div className="p-7 bg-white rounded-[2.5rem] border border-zinc-100 shadow-sm space-y-3 hover:border-blue-200 transition-colors group">
@@ -1825,7 +2049,7 @@ export default function Inventory() {
                           <Sparkles className="w-4 h-4 text-blue-500 group-hover:rotate-12 transition-transform" />
                        </div>
                        <div className="flex items-end gap-2">
-                           <p className="text-2xl font-black text-zinc-900 leading-none">45 <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'}</span></p>
+                           <p className="text-2xl font-black text-zinc-900 leading-none">{productInsights.optimumOrderQty} <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'}</span></p>
                        </div>
                     </div>
                  </div>
@@ -1837,7 +2061,7 @@ export default function Inventory() {
                     <div className="space-y-1.5">
                        <p className="text-[10px] font-black text-white uppercase tracking-[0.3em] px-0">System Intelligence</p>
                        <p className="text-[12px] font-medium text-zinc-400 leading-relaxed max-w-2xl">
-                         Lead time is calibrated to <b>{productForm.leadTime} days</b>. Logistics simulation indicates replenishment must trigger when stock hits <b>{Math.ceil(4.2 * productForm.leadTime) + productForm.minStock}</b> to ensure continuity.
+                         Lead time is calibrated to <b>{productForm.leadTime} days</b>. Logistics simulation indicates replenishment must trigger when stock hits <b>{Math.ceil(Number(productInsights.velocity) * productForm.leadTime) + productForm.minStock}</b> to ensure continuity.
                        </p>
                     </div>
                  </div>
@@ -2086,6 +2310,7 @@ export default function Inventory() {
                         <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Enterprise Stock</TableHead>
                         <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Unit Value</TableHead>
                         <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Lifecycle</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Partner</TableHead>
                         <TableHead className="text-right font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6">Management</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -2115,7 +2340,7 @@ export default function Inventory() {
                           })
                           .length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="py-24 text-center">
+                            <TableCell colSpan={8} className="py-24 text-center">
                               <div className="flex flex-col items-center gap-4 text-zinc-400">
                                 <Box className="w-16 h-16 opacity-10" />
                                 <div className="space-y-1">
@@ -2214,6 +2439,20 @@ export default function Inventory() {
                                   )}>
                                     {status}
                                   </Badge>
+                                </TableCell>
+                                <TableCell className="py-5">
+                                  <div className="flex items-center gap-2">
+                                    <div className={cn(
+                                      "w-2 h-2 rounded-full",
+                                      item.supplier_id ? "bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]" : "bg-zinc-200"
+                                    )} />
+                                    <span className={cn(
+                                      "text-[10px] font-black uppercase tracking-widest",
+                                      item.supplier_id ? "text-zinc-900" : "text-zinc-400"
+                                    )}>
+                                      {suppliers.find(s => s.id === item.supplier_id)?.name || "Unassigned"}
+                                    </span>
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-right py-5 pr-6">
                                   <DropdownMenu>
@@ -2624,6 +2863,7 @@ export default function Inventory() {
                       suppliers.map((s) => {
                         const partnerPOs = purchaseOrders.filter(po => po.supplier_id === s.id);
                         const totalSpend = partnerPOs.reduce((sum, po) => sum + (po.total_cost || 0), 0);
+                        const linkedProductsCount = products.filter(p => p.supplier_id === s.id).length;
                         
                         return (
                           <TableRow key={s.id} className="hover:bg-zinc-50/30 transition-all border-b border-zinc-50 group/row">
@@ -2647,7 +2887,7 @@ export default function Inventory() {
                             <TableCell className="py-6">
                               <div>
                                 <p className="text-sm font-black text-zinc-900">{formatCurrency(totalSpend)}</p>
-                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{partnerPOs.length} Total Orders</p>
+                                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{partnerPOs.length} Total Orders • {linkedProductsCount} Assets</p>
                               </div>
                             </TableCell>
                             <TableCell className="py-6">
@@ -3394,7 +3634,7 @@ export default function Inventory() {
                   </div>
                   <div className="text-right">
                      <p className="text-[9px] font-black uppercase tracking-[0.3em] text-zinc-500 mb-1">Index Price</p>
-                     <p className="text-sm font-black text-emerald-400 tracking-tighter">${productForm.price || "0.00"}</p>
+                     <p className="text-sm font-black text-emerald-400 tracking-tighter">{currency === 'USD' ? '$' : `${currency} `}{productForm.price || "0.00"}</p>
                   </div>
                </motion.div>
             </div>
@@ -3540,6 +3780,14 @@ export default function Inventory() {
           <div className="flex items-center gap-3 sm:gap-4 w-full sm:w-auto">
             <Button 
               variant="ghost" 
+              className="flex-1 sm:flex-none h-10 text-blue-500 hover:text-white hover:bg-blue-600 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-xl px-4 sm:px-6 transition-all gap-2"
+              onClick={() => setIsLinkSupplierDialogOpen(true)}
+            >
+              <Link2 className="w-4 h-4" />
+              Link Partner
+            </Button>
+            <Button 
+              variant="ghost" 
               className="flex-1 sm:flex-none h-10 text-rose-500 hover:text-white hover:bg-rose-600 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-xl px-4 sm:px-6 transition-all"
               disabled={isBatchDeleting}
               onClick={handleBatchDelete}
@@ -3603,7 +3851,7 @@ export default function Inventory() {
           <div className="border-2 border-dashed border-zinc-100 rounded-[2rem] p-10 text-center hover:border-blue-500/30 hover:bg-blue-50/50 transition-all group relative cursor-pointer">
             <input 
               type="file" 
-              accept=".csv" 
+              accept=".csv,.tsv,.xlsx,.xls,.ods,.json" 
               onChange={handleImportCSV}
               className="absolute inset-0 opacity-0 cursor-pointer z-10"
             />
@@ -3612,7 +3860,7 @@ export default function Inventory() {
                 <Plus className="w-8 h-8 text-zinc-300 group-hover:text-blue-600 transition-colors" />
               </div>
               <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">Select Database Source</p>
-              <p className="text-xs text-zinc-400 mt-2">Maximum file size: 50MB (.csv)</p>
+              <p className="text-xs text-zinc-400 mt-2">CSV · TSV · XLSX · XLS · ODS · JSON — 50MB max</p>
             </div>
           </div>
         </div>
@@ -3630,27 +3878,76 @@ export default function Inventory() {
       </DialogContent>
     </Dialog>
 
-    <Dialog open={isPurchaseOrderOpen} onOpenChange={setIsPurchaseOrderOpen}>
-      <DialogContent className="sm:max-w-3xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
-        <div className="bg-zinc-950 p-8 text-white">
+    <Dialog open={isLinkSupplierDialogOpen} onOpenChange={setIsLinkSupplierDialogOpen}>
+      <DialogContent className="sm:max-w-[500px] rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-blue-600 p-8 text-white">
           <DialogHeader>
-            <DialogTitle className="text-3xl font-black tracking-tight font-display">Strategic Acquisition</DialogTitle>
-            <DialogDescription className="text-zinc-400 font-medium">
+            <DialogTitle className="text-3xl font-black tracking-tight font-display">Partner Linkage</DialogTitle>
+            <DialogDescription className="text-blue-100 font-medium">
+              Mapping {selectedProducts.length} assets to a strategic supplier.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+
+        <div className="p-8 space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Select Strategic Partner</label>
+            <Select 
+              value={selectedSupplierForBatch} 
+              onValueChange={setSelectedSupplierForBatch}
+            >
+              <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
+                <SelectValue placeholder="Select Supplier..." />
+              </SelectTrigger>
+              <SelectContent className="rounded-2xl bg-white border-zinc-200">
+                {suppliers.map(s => (
+                  <SelectItem key={s.id} value={s.id} className="font-bold">{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex items-center justify-end gap-3">
+          <Button 
+            variant="ghost" 
+            className="rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+            onClick={() => setIsLinkSupplierDialogOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button 
+            className="rounded-2xl h-14 px-10 bg-blue-600 text-white hover:bg-blue-700 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-600/20"
+            disabled={isBatchLinking || !selectedSupplierForBatch}
+            onClick={handleBatchLinkSupplier}
+          >
+            {isBatchLinking ? "Linking..." : "Establish Linkage"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={isPurchaseOrderOpen} onOpenChange={setIsPurchaseOrderOpen}>
+      <DialogContent className="w-[95vw] sm:max-w-3xl rounded-[1.5rem] sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-zinc-950 p-6 sm:p-8 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-2xl sm:text-3xl font-black tracking-tight font-display">Strategic Acquisition</DialogTitle>
+            <DialogDescription className="text-zinc-400 font-medium text-xs sm:text-sm">
               Initialize a new procurement cycle with a strategic partner.
             </DialogDescription>
           </DialogHeader>
         </div>
         
-        <ScrollArea className="max-h-[70vh]">
-          <div className="p-8 space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <ScrollArea className="max-h-[80vh] sm:max-h-[70vh]">
+          <div className="p-4 sm:p-8 space-y-6 sm:space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Strategic Partner</label>
                 <Select 
                   value={poForm.supplier_id} 
                   onValueChange={(val) => setPoForm({...poForm, supplier_id: val})}
                 >
-                  <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
+                  <SelectTrigger className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-bold">
                     <SelectValue placeholder="Select Partner" />
                   </SelectTrigger>
                   <SelectContent className="rounded-2xl bg-white border-zinc-200">
@@ -3664,8 +3961,8 @@ export default function Inventory() {
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Commitment Notes</label>
                 <Input 
-                  placeholder="Terms, logistics, or internal references..." 
-                  className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-medium"
+                  placeholder="Terms, logistics..." 
+                  className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-medium"
                   value={poForm.notes}
                   onChange={(e) => setPoForm({...poForm, notes: e.target.value})}
                 />
@@ -3695,65 +3992,58 @@ export default function Inventory() {
 
               <div className="space-y-3">
                 {poForm.items.map((item: any, index: number) => (
-                  <div key={index} className="flex flex-col md:flex-row items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 animate-in fade-in slide-in-from-top-2">
+                  <div key={index} className="flex flex-col md:flex-row items-start md:items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 animate-in fade-in slide-in-from-top-2">
                     <div className="flex-1 w-full">
                       <Select 
                         value={item.product_id}
                         onValueChange={(val) => {
+                          const p = products.find(prod => prod.id === val);
                           const newItems = [...poForm.items];
-                          const prod = products.find(p => p.id === val);
-                          newItems[index] = { ...newItems[index], product_id: val, cost: prod?.cost || 0 };
+                          newItems[index] = { ...item, product_id: val, cost: p?.cost || 0 };
                           setPoForm({ ...poForm, items: newItems });
                         }}
                       >
-                        <SelectTrigger className="rounded-xl h-12 bg-white border-zinc-200 font-bold">
-                          <SelectValue />
+                        <SelectTrigger className="rounded-xl h-10 bg-white border-zinc-100 font-bold text-xs">
+                          <SelectValue placeholder="Select Asset" />
                         </SelectTrigger>
                         <SelectContent className="rounded-xl bg-white border-zinc-200">
                           {products.map(p => (
-                            <SelectItem key={p.id} value={p.id} className="uppercase font-bold">{p.name}</SelectItem>
+                            <SelectItem key={p.id} value={p.id} className="uppercase font-bold text-[10px]">{p.name}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="w-full md:w-32">
-                      <Input 
-                        type="number"
-                        placeholder="Qty"
-                        className="rounded-xl h-12 bg-white border-zinc-200 font-black text-center"
-                        value={item.qty}
-                        onChange={(e) => {
-                          const newItems = [...poForm.items];
-                          newItems[index].qty = Number(e.target.value);
+                    <div className="flex items-center gap-3 w-full md:w-auto">
+                      <div className="flex-1 md:w-24">
+                        <Input 
+                          type="number"
+                          placeholder="Qty"
+                          className="rounded-xl h-10 bg-white border-zinc-100 font-bold text-xs"
+                          value={item.qty}
+                          onChange={(e) => {
+                            const newItems = [...poForm.items];
+                            newItems[index] = { ...item, qty: parseInt(e.target.value) || 0 };
+                            setPoForm({ ...poForm, items: newItems });
+                          }}
+                        />
+                      </div>
+                      <div className="flex-1 md:w-32">
+                        <div className="h-10 px-4 rounded-xl bg-white border border-zinc-100 flex items-center font-black text-xs text-zinc-900">
+                          {formatCurrency((item.cost || 0) * (item.qty || 0))}
+                        </div>
+                      </div>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-10 w-10 rounded-xl text-rose-500 hover:bg-rose-50"
+                        onClick={() => {
+                          const newItems = poForm.items.filter((_: any, i: number) => i !== index);
                           setPoForm({ ...poForm, items: newItems });
                         }}
-                      />
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </div>
-                    <div className="w-full md:w-32 relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 font-black text-[10px]">$</span>
-                      <Input 
-                        type="number"
-                        placeholder="Cost"
-                        className="rounded-xl h-12 bg-white border-zinc-200 font-black pl-7"
-                        value={item.cost}
-                        onChange={(e) => {
-                          const newItems = [...poForm.items];
-                          newItems[index].cost = Number(e.target.value);
-                          setPoForm({ ...poForm, items: newItems });
-                        }}
-                      />
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="rounded-xl text-zinc-300 hover:text-rose-500 transition-colors"
-                      onClick={() => {
-                        const newItems = poForm.items.filter((_: any, i: number) => i !== index);
-                        setPoForm({ ...poForm, items: newItems });
-                      }}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
                   </div>
                 ))}
 
@@ -3767,17 +4057,17 @@ export default function Inventory() {
           </div>
         </ScrollArea>
 
-        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="text-center md:text-left">
+        <div className="p-4 sm:p-8 bg-zinc-50 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-center sm:text-left w-full sm:w-auto">
             <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Total Commitment</p>
             <p className="text-2xl font-black text-zinc-900">
-              {formatCurrency(poForm.items.reduce((sum: number, item: any) => sum + (item.qty * item.cost), 0))}
+              {formatCurrency(poForm.items.reduce((sum: number, item: any) => sum + (item.cost * item.qty), 0))}
             </p>
           </div>
-          <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
             <Button 
               variant="ghost" 
-              className="flex-1 md:flex-none rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+              className="flex-1 sm:flex-none rounded-2xl h-12 sm:h-14 px-6 sm:px-8 font-black text-[10px] uppercase tracking-widest"
               onClick={() => setIsPurchaseOrderOpen(false)}
             >
               Cancel Mission
@@ -3878,33 +4168,33 @@ export default function Inventory() {
     </Dialog>
 
     <Dialog open={isSupplierDialogOpen} onOpenChange={setIsSupplierDialogOpen}>
-      <DialogContent className="sm:max-w-md rounded-[2rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
-        <div className="bg-zinc-950 p-8 text-white">
+      <DialogContent className="w-[95vw] sm:max-w-xl rounded-[1.5rem] sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-zinc-900 p-6 sm:p-8 text-white">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-black font-display tracking-tight text-white">Strategic Partner Profile</DialogTitle>
-            <DialogDescription className="text-zinc-400 font-medium">
-              Configure parameters for your global sourcing network.
+            <DialogTitle className="text-2xl sm:text-3xl font-black tracking-tight font-display">Partner Onboarding</DialogTitle>
+            <DialogDescription className="text-zinc-400 font-medium text-xs sm:text-sm">
+              Initialize a new strategic supply chain node.
             </DialogDescription>
           </DialogHeader>
         </div>
 
-        <div className="p-8 space-y-6">
+        <div className="p-4 sm:p-8 space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Vendor Identity</label>
             <Input 
               placeholder="Strategic Partner Name..." 
-              className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-black uppercase"
+              className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-black uppercase"
               value={newSupplier.name}
               onChange={(e) => setNewSupplier({...newSupplier, name: e.target.value})}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Key Correspondent</label>
               <Input 
                 placeholder="Name..." 
-                className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold"
+                className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-bold"
                 value={newSupplier.contact}
                 onChange={(e) => setNewSupplier({...newSupplier, contact: e.target.value})}
               />
@@ -3914,19 +4204,19 @@ export default function Inventory() {
               <Input 
                 type="email"
                 placeholder="partner@source.com" 
-                className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold"
+                className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-bold"
                 value={newSupplier.email}
                 onChange={(e) => setNewSupplier({...newSupplier, email: e.target.value})}
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Operational Phone</label>
               <Input 
                 placeholder="+1..." 
-                className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-mono font-bold"
+                className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-mono font-bold"
                 value={newSupplier.phone}
                 onChange={(e) => setNewSupplier({...newSupplier, phone: e.target.value})}
               />
@@ -3937,7 +4227,7 @@ export default function Inventory() {
                 value={newSupplier.status} 
                 onValueChange={(val) => setNewSupplier({...newSupplier, status: val})}
               >
-                <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
+                <SelectTrigger className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-bold">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="rounded-2xl bg-white border-zinc-200">
@@ -3950,16 +4240,16 @@ export default function Inventory() {
           </div>
         </div>
 
-        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex items-center justify-end gap-3">
+        <div className="p-4 sm:p-8 bg-zinc-50 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-end gap-3">
           <Button 
             variant="ghost" 
-            className="rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+            className="w-full sm:w-auto rounded-2xl h-12 sm:h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
             onClick={() => setIsSupplierDialogOpen(false)}
           >
-            Suspend Entry
+            Cancel
           </Button>
           <Button 
-            className="rounded-2xl h-14 px-10 bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all"
+            className="w-full sm:w-auto rounded-2xl h-12 sm:h-14 px-10 bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all"
             disabled={isSavingSupplier}
             onClick={handleAddSupplier}
           >
@@ -3970,25 +4260,24 @@ export default function Inventory() {
     </Dialog>
 
     <Dialog open={isStocktakeDialogOpen} onOpenChange={setIsStocktakeDialogOpen}>
-      <DialogContent className="sm:max-w-4xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
-        <div className="bg-blue-600 p-8 text-white">
+      <DialogContent className="w-[95vw] sm:max-w-4xl rounded-[1.5rem] sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+        <div className="bg-blue-600 p-6 sm:p-8 text-white">
           <DialogHeader>
-            <DialogTitle className="text-3xl font-black tracking-tight font-display">Operational Audit</DialogTitle>
-            <DialogDescription className="text-blue-100 font-medium">
+            <DialogTitle className="text-2xl sm:text-3xl font-black tracking-tight font-display">Operational Audit</DialogTitle>
+            <DialogDescription className="text-blue-100 font-medium text-xs sm:text-sm">
               Verifying physical asset presence against digital state.
             </DialogDescription>
           </DialogHeader>
         </div>
 
-        <ScrollArea className="max-h-[70vh]">
-          <div className="p-8 space-y-8">
-            <div className="flex items-center gap-4">
-              <div className="space-y-2 flex-1">
+        <ScrollArea className="max-h-[80vh] sm:max-h-[70vh]">
+          <div className="p-4 sm:p-8 space-y-6 sm:space-y-8">
+            <div className="flex flex-col sm:flex-row items-center gap-4">
+              <div className="space-y-2 flex-1 w-full">
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Branch Node</label>
                 <Select 
                   value={stocktakeForm.branch_id} 
                   onValueChange={(val) => {
-                    // Populate items for this branch
                     const branchProducts = products.map(p => ({
                       product_id: p.id,
                       name: p.name,
@@ -3999,7 +4288,7 @@ export default function Inventory() {
                     setStocktakeForm({ ...stocktakeForm, branch_id: val, items: branchProducts });
                   }}
                 >
-                  <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
+                  <SelectTrigger className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-bold">
                     <SelectValue placeholder="Select Branch" />
                   </SelectTrigger>
                   <SelectContent className="rounded-2xl bg-white border-zinc-200">
@@ -4010,7 +4299,7 @@ export default function Inventory() {
                 </Select>
               </div>
               <Button 
-                className="mt-6 h-14 rounded-2xl bg-white border border-zinc-100 text-zinc-900 font-black text-[10px] uppercase tracking-widest shadow-sm"
+                className="w-full sm:w-auto mt-2 sm:mt-6 h-12 sm:h-14 rounded-2xl bg-white border border-zinc-100 text-zinc-900 font-black text-[10px] uppercase tracking-widest shadow-sm"
                 variant="outline"
                 onClick={() => {
                   const branchProducts = products.map(p => ({
@@ -4028,44 +4317,49 @@ export default function Inventory() {
             </div>
 
             <div className="space-y-4">
-              <div className="grid grid-cols-12 px-4 text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+              <div className="hidden sm:grid grid-cols-12 px-4 text-[10px] font-black text-zinc-400 uppercase tracking-widest">
                 <div className="col-span-6">Asset Specification</div>
                 <div className="col-span-2 text-center">System</div>
                 <div className="col-span-2 text-center">Counted</div>
                 <div className="col-span-2 text-right">Variance</div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {stocktakeForm.items.map((item: any, index: number) => (
-                  <div key={item.product_id} className="grid grid-cols-12 items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group/audit">
-                    <div className="col-span-6 flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-white border border-zinc-100 flex items-center justify-center font-black text-xs text-zinc-400">
+                  <div key={item.product_id} className="flex flex-col sm:grid sm:grid-cols-12 items-start sm:items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group/audit">
+                    <div className="w-full sm:col-span-6 flex items-center gap-3">
+                      <div className="shrink-0 w-8 h-8 rounded-lg bg-white border border-zinc-100 flex items-center justify-center font-black text-xs text-zinc-400">
                         {index + 1}
                       </div>
                       <span className="font-black text-zinc-900 text-sm uppercase truncate">{item.name}</span>
                     </div>
-                    <div className="col-span-2 text-center font-mono font-bold text-zinc-400">
-                      {item.expected}
-                    </div>
-                    <div className="col-span-2">
-                      <Input 
-                        type="number"
-                        className="rounded-xl h-10 bg-white border-zinc-200 font-black text-center"
-                        value={item.counted}
-                        onChange={(e) => {
-                          const newItems = [...stocktakeForm.items];
-                          const counted = Number(e.target.value);
-                          newItems[index].counted = counted;
-                          newItems[index].variance = counted - item.expected;
-                          setStocktakeForm({ ...stocktakeForm, items: newItems });
-                        }}
-                      />
-                    </div>
-                    <div className={cn(
-                      "col-span-2 text-right font-black text-sm",
-                      item.variance === 0 ? "text-zinc-300" : item.variance < 0 ? "text-rose-500" : "text-emerald-500"
-                    )}>
-                      {item.variance > 0 ? `+${item.variance}` : item.variance}
+                    
+                    <div className="w-full sm:col-span-6 grid grid-cols-3 sm:grid-cols-6 items-center gap-4">
+                      <div className="sm:col-span-2 text-center">
+                        <span className="block sm:hidden text-[8px] font-black text-zinc-400 uppercase mb-1">System</span>
+                        <span className="font-mono font-bold text-zinc-400">{item.expected}</span>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="block sm:hidden text-[8px] font-black text-zinc-400 uppercase mb-1">Counted</span>
+                        <Input 
+                          type="number"
+                          className="h-10 rounded-xl bg-white border-zinc-100 font-black text-center text-sm"
+                          value={item.counted}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 0;
+                            const newItems = [...stocktakeForm.items];
+                            newItems[index] = { ...item, counted: val, variance: val - item.expected };
+                            setStocktakeForm({ ...stocktakeForm, items: newItems });
+                          }}
+                        />
+                      </div>
+                      <div className={cn(
+                        "sm:col-span-2 text-right font-black text-sm",
+                        item.variance === 0 ? "text-zinc-400" : item.variance > 0 ? "text-emerald-500" : "text-rose-500"
+                      )}>
+                        <span className="block sm:hidden text-[8px] font-black text-zinc-400 uppercase mb-1">Variance</span>
+                        {item.variance > 0 ? `+${item.variance}` : item.variance}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -4081,32 +4375,23 @@ export default function Inventory() {
           </div>
         </ScrollArea>
 
-        <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex items-center justify-between">
-          <div className="flex gap-8">
-            <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Loss/Shrinkage</p>
-              <p className="text-xl font-black text-rose-500">
-                {stocktakeForm.items.filter((i: any) => i.variance < 0).length} Lines
-              </p>
-            </div>
-            <div className="w-px h-10 bg-zinc-200" />
-            <div>
-              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Audit Coverage</p>
-              <p className="text-xl font-black text-zinc-900">
-                {Math.round((stocktakeForm.items.length / products.length) * 100) || 0}%
-              </p>
-            </div>
+        <div className="p-4 sm:p-8 bg-zinc-50 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="text-center sm:text-left">
+            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Audit Progress</p>
+            <p className="text-sm font-black text-zinc-900 uppercase">
+              {stocktakeForm.items.filter((i: any) => i.counted !== i.expected).length} Discrepancies Detected
+            </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 w-full sm:w-auto">
             <Button 
               variant="ghost" 
-              className="rounded-2xl h-14 px-8 font-black text-[10px] uppercase tracking-widest text-zinc-500"
+              className="flex-1 sm:flex-none rounded-2xl h-12 sm:h-14 px-6 sm:px-8 font-black text-[10px] uppercase tracking-widest"
               onClick={() => setIsStocktakeDialogOpen(false)}
             >
-              Suspend Audit
+              Cancel
             </Button>
             <Button 
-              className="rounded-2xl h-14 px-10 bg-blue-600 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-500/20 hover:scale-[1.02] transition-all"
+              className="flex-1 sm:flex-none rounded-2xl h-12 sm:h-14 px-6 sm:px-10 bg-blue-600 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-600/10 hover:scale-[1.02] transition-all"
               disabled={isSavingStocktake || stocktakeForm.items.length === 0}
               onClick={async () => {
                 setIsSavingStocktake(true);
