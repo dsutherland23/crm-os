@@ -1281,6 +1281,54 @@ export default function POS() {
             
           </CardContent>
         </Card>
+
+        {/* Opening Float Dialog (Must be rendered here to show during auth flow) */}
+        <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
+          if (!open) {
+            setIsOpeningFloatOpen(false);
+            setIsAuthorized(false);
+            setSelectedAdmin(null);
+            setPinEntry("");
+          }
+        }}>
+          <DialogContent className="sm:max-w-md rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden z-[110]">
+            <div className="bg-zinc-950 p-8 text-white">
+              <DialogHeader>
+                <DialogTitle className="text-2xl font-black tracking-tight">Opening Setup</DialogTitle>
+                <DialogDescription className="text-zinc-400 font-medium">
+                  Initialize terminal with starting cash balance.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="p-8 space-y-6">
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Starting Float (Cash)</label>
+                <div className="relative group">
+                  <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-zinc-300 group-focus-within:text-blue-600 transition-colors">
+                    {currency === 'USD' ? '$' : currency}
+                  </span>
+                  <Input 
+                    type="number"
+                    placeholder="0.00"
+                    className="h-20 pl-16 pr-8 rounded-[1.5rem] bg-zinc-50 border-zinc-100 text-3xl font-black focus:ring-4 focus:ring-blue-500/10 transition-all"
+                    value={openingFloat}
+                    onChange={(e) => setOpeningFloat(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[10px] text-zinc-400 font-medium px-1">
+                  * All sales will be audited against this opening balance.
+                </p>
+              </div>
+              <Button 
+                className="w-full h-16 rounded-[1.5rem] bg-zinc-900 text-white hover:bg-zinc-800 font-black text-lg shadow-xl shadow-zinc-950/10 transition-all active:scale-95"
+                onClick={handleConfirmOpeningFloat}
+              >
+                Open Terminal
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -3046,6 +3094,55 @@ export default function POS() {
               Apply Discount
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Opening Float Dialog (Must also be here for authorized users who lose session) */}
+      <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsOpeningFloatOpen(false);
+          // If they close this, they shouldn't be in the terminal without a session
+          setIsAuthorized(false);
+          setSelectedAdmin(null);
+          setPinEntry("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden z-[110]">
+          <div className="bg-zinc-950 p-8 text-white">
+            <DialogHeader>
+              <DialogTitle className="text-2xl font-black tracking-tight">Opening Setup</DialogTitle>
+              <DialogDescription className="text-zinc-400 font-medium">
+                Initialize terminal with starting cash balance.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="p-8 space-y-6">
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Starting Float (Cash)</label>
+              <div className="relative group">
+                <span className="absolute left-5 top-1/2 -translate-y-1/2 text-xl font-black text-zinc-300 group-focus-within:text-blue-600 transition-colors">
+                  {currency === 'USD' ? '$' : currency}
+                </span>
+                <Input 
+                  type="number"
+                  placeholder="0.00"
+                  className="h-20 pl-16 pr-8 rounded-[1.5rem] bg-zinc-50 border-zinc-100 text-3xl font-black focus:ring-4 focus:ring-blue-500/10 transition-all"
+                  value={openingFloat}
+                  onChange={(e) => setOpeningFloat(e.target.value)}
+                  autoFocus
+                />
+              </div>
+              <p className="text-[10px] text-zinc-400 font-medium px-1">
+                * All sales will be audited against this opening balance.
+              </p>
+            </div>
+            <Button 
+              className="w-full h-16 rounded-[1.5rem] bg-zinc-900 text-white hover:bg-zinc-800 font-black text-lg shadow-xl shadow-zinc-950/10 transition-all active:scale-95"
+              onClick={handleConfirmOpeningFloat}
+            >
+              Open Terminal
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
