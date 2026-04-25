@@ -8,6 +8,7 @@ import {
   Settings, 
   BarChart3, 
   Sparkles,
+  Truck,
   Menu,
   X,
   LogOut,
@@ -169,6 +170,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
   const menuItems = [
     { id: "dashboard", label: "Overview", icon: LayoutDashboard, enabled: true },
     { id: "crm", label: "Customers", icon: Users, enabled: isModuleEnabled("crm") && hasPermission("crm") },
+    { id: "suppliers", label: "Suppliers", icon: Truck, enabled: isModuleEnabled("inventory") && hasPermission("inventory") },
     { id: "pos", label: "Point of Sale", icon: ShoppingCart, enabled: isModuleEnabled("pos") && hasPermission("pos") },
     { id: "inventory", label: "Stock Management", icon: Package, enabled: isModuleEnabled("inventory") && hasPermission("inventory") },
     { id: "finance", label: "Revenue", icon: Wallet, enabled: isModuleEnabled("finance") && hasPermission("finance") },
@@ -733,14 +735,15 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
           <Menu className="w-5 h-5" />
         </Button>
         
-        <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-zinc-100 rounded-full border border-zinc-200/50 w-full max-w-md group focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50 transition-all duration-300">
-          <Search className="w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
+        {/* FIX: Search bar now visible on mobile — field staff on tablets need quick search access */}
+        <div className="flex items-center gap-2 px-3 py-2 bg-zinc-100 rounded-full border border-zinc-200/50 w-full max-w-[160px] sm:max-w-xs md:max-w-md group focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50 transition-all duration-300">
+          <Search className="w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors shrink-0" />
           <input 
             type="text" 
-            placeholder="Search commands or ask AI..." 
-            className="bg-transparent border-none outline-none text-sm w-full placeholder:text-zinc-400 text-zinc-700"
+            placeholder="Search..." 
+            className="bg-transparent border-none outline-none text-sm w-full placeholder:text-zinc-400 text-zinc-700 min-w-0"
           />
-          <kbd className="hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border bg-white px-1.5 font-mono text-[10px] font-medium text-zinc-400 opacity-100">
+          <kbd className="hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border bg-white px-1.5 font-mono text-[10px] font-medium text-zinc-400 opacity-100 shrink-0">
             <span className="text-xs">⌘</span>K
           </kbd>
         </div>

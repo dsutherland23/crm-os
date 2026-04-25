@@ -35,7 +35,6 @@ try {
   authInstance = getAuth(appInstance);
   dbInstance = initializeFirestore(appInstance, {
     localCache: memoryLocalCache(),
-    databaseId: import.meta.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || "(default)"
   });
   functionsInstance = getFunctions(appInstance);
 } catch (error) {

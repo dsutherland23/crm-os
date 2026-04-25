@@ -173,7 +173,8 @@ export default function POS() {
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [selectedAdmin, setSelectedAdmin] = useState<any>(null);
   const [pinEntry, setPinEntry] = useState("");
-  const [adminPin, setAdminPin] = useState("1234");
+  // NOTE: PINs are validated against Firestore staffList records.
+  // There is no client-side default PIN — all auth is server-driven.
 
   const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
   const [isStockSynced, setIsStockSynced] = useState(false);
@@ -300,22 +301,18 @@ export default function POS() {
 
     let isMounted = true;
 
-    // Load static data once on authorization to reduce listener pressure
+    // Load branches and customers once on auth (low-change data)
     const loadStaticData = async () => {
       try {
-        const [bSnap, pSnap, cSnap, campSnap] = await Promise.all([
+        const [bSnap, cSnap] = await Promise.all([
           getDocs(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId))),
-          getDocs(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId))),
           getDocs(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived"))),
-          getDocs(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")))
         ]);
 
         if (!isMounted) return;
 
         setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setCustomers(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setCampaigns(campSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setLoading(false);
       } catch (err) {
         console.error("Static data load error:", err);
@@ -324,6 +321,24 @@ export default function POS() {
     };
 
     loadStaticData();
+
+    // FIX: Real-time product price listener — ensures POS always reflects back-office price changes
+    const unsubProducts = onSnapshot(
+      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
+      (snapshot) => {
+        if (isMounted) setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      (err) => console.error("products sync error:", err)
+    );
+
+    // FIX: Real-time campaign listener — ensures expired campaigns are removed from terminal immediately
+    const unsubCampaigns = onSnapshot(
+      query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
+      (snapshot) => {
+        if (isMounted) setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      (err) => console.error("campaigns sync error:", err)
+    );
 
     // Critical real-time inventory monitor
     const unsubInventory = onSnapshot(
@@ -336,6 +351,8 @@ export default function POS() {
 
     return () => {
       isMounted = false;
+      unsubProducts?.();
+      unsubCampaigns?.();
       unsubInventory?.();
     };
   }, [enterpriseId, isAuthorized]);
@@ -716,6 +733,16 @@ export default function POS() {
   const handleCompleteTransaction = async () => {
     if (cart.length === 0) { toast.error("Cart is empty"); return; }
     if (isProcessing) return; // idempotency guard
+
+    // FIX: Guard against null session — a null sessionId makes this transaction invisible
+    // to the cash reconciliation report, causing impossible drawer discrepancies.
+    if (!currentSessionId) {
+      toast.error("Session Error: No active register session detected.", {
+        description: "Please close this terminal and re-authenticate to open a new session before processing sales.",
+        duration: 8000
+      });
+      return;
+    }
 
     setIsProcessing(true);
     try {

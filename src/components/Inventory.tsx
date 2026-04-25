@@ -373,7 +373,7 @@ export default function Inventory() {
             enterpriseId,
             action: "INVENTORY_IMPORT",
             details: `Bulk CSV import completed. ${importedCount} products added/updated.`,
-            severity: "IMPORTANT",
+            severity: "WARNING",
             type: "SYSTEM",
             metadata: { importedCount, fileName: file.name }
           });
@@ -506,7 +506,7 @@ export default function Inventory() {
         enterpriseId,
         action: "INVENTORY_PO_RECEIVE",
         details: `Logistical reception complete for PO ${poToReceive.id}. Assets deployed to branch.`,
-        severity: "IMPORTANT",
+        severity: "WARNING",
         type: "SYSTEM",
         metadata: { poId: poToReceive.id, supplierId: poToReceive.supplier_id, itemCount: poToReceive.items?.length }
       });

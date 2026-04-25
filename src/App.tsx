@@ -22,6 +22,7 @@ import AuditLogs from "./components/AuditLogs";
 import Workflow from "./components/Workflow";
 import Auth from "./components/Auth";
 import StaffManager from "./components/StaffManager";
+import Suppliers from "./components/Suppliers";
 import VerificationGate from "./components/VerificationGate";
 import AdminPortal from "./components/AdminPortal";
 import Support from "./components/Support";
@@ -71,7 +72,7 @@ function AppContent() {
       // 1. Check if a user profile already exists (may have enterprise_id already)
       const { getDoc } = await import("firebase/firestore");
       const existingDoc = await getDoc(doc(db, "users", user.uid));
-      const existingData = existingDoc.exists() ? existingDoc.data() : null;
+      const existingData = existingDoc.exists() ? (existingDoc.data() as any) : null;
 
       // Reuse existing enterprise_id if present, otherwise derive a new one
       const slug = user.email?.split("@")[0].replace(/[^a-zA-Z0-9]/g, "-") || user.uid.substring(0, 8);
@@ -126,10 +127,15 @@ function AppContent() {
         });
       }
 
-      // 5. Clear cached enterprise_id so it re-resolves from Firestore
+      // FIX: Drive state update directly instead of a page reload.
+      // The onSnapshot profile listener in Step 2 will pick this up automatically,
+      // but we accelerate the transition by setting state immediately for a seamless PWA experience.
+      setEnterpriseId(newEnterpriseId);
+      setBranding({ name: profileData.enterpriseName });
+      setUserRole(profileData.role || "Owner");
+      // Still clear the cache so the real-time listener fully re-hydrates
       localStorage.removeItem("crm_enterprise_id");
       toast.success("Workspace ready! Loading your dashboard...");
-      setTimeout(() => window.location.reload(), 1000);
     } catch (error: any) {
       console.error("Failed to complete setup", error);
       toast.error("Failed to create workspace: " + (error.message || "Unknown error"));
@@ -220,6 +226,7 @@ function AppContent() {
       case "groups":    return hasPermission("groups")    ? <Groups />    : fallback;
       case "loyalty":   return hasPermission("loyalty")   ? <Loyalty />   : fallback;
       case "pos":       return hasPermission("pos")       ? <POS />       : fallback;
+      case "suppliers": return hasPermission("inventory") ? <Suppliers /> : fallback;
       case "inventory": return hasPermission("inventory") ? <Inventory /> : fallback;
       case "analytics": return hasPermission("analytics") ? <Analytics /> : fallback;
       case "workflow":  return hasPermission("workflow")  ? <Workflow />  : fallback;

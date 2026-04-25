@@ -385,19 +385,25 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   };
 
   const hasPermission = (moduleId: string, level: "viewer" | "editor" | "admin" = "viewer") => {
+    // Normalization: Map UI tabs to their respective backend module IDs
+    const normalizedId = moduleId === "suppliers" ? "inventory" : 
+                         moduleId === "revenue" ? "finance" : 
+                         moduleId;
+
     // Plan Gating: Check if feature is included in the current plan
     const limits = PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS] || PLAN_LIMITS.starter;
-    if (!limits.features.includes(moduleId) && !["dashboard", "settings", "support", "staff", "billing"].includes(moduleId)) {
+    if (!limits.features.includes(normalizedId) && !["dashboard", "settings", "support", "staff", "billing"].includes(normalizedId)) {
       return false;
     }
 
-    if (grantedOverrides.includes(moduleId)) return true;
+    if (grantedOverrides.includes(normalizedId)) return true;
 
     if (posSession) {
-      if (posSession.payGrade === "EXECUTIVE") return true;
+      // FIX: Use case-insensitive comparison to protect against schema drift (e.g., "executive" vs "EXECUTIVE")
+      if (posSession.payGrade?.toLowerCase() === "executive") return true;
       if (!rolePermissions) return false;
 
-      const perm = rolePermissions[moduleId];
+      const perm = rolePermissions[normalizedId];
       if (perm === true || perm === "admin") return true;
       if (level === "admin") return perm === "admin";
       if (level === "editor") return perm === "editor" || perm === "admin";
@@ -405,10 +411,11 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
 
-    if (userRole === "Owner") return true;
+    // FIX: Case-insensitive role check — "owner", "Owner", "OWNER" all grant full access
+    if (userRole?.toLowerCase() === "owner") return true;
     if (!rolePermissions) return false;
 
-    const perm = rolePermissions[moduleId];
+    const perm = rolePermissions[normalizedId];
     if (perm === true || perm === "admin") return true;
     if (level === "admin") return perm === "admin";
     if (level === "editor") return perm === "editor" || perm === "admin";

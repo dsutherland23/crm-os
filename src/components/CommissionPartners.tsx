@@ -250,7 +250,7 @@ export default function CommissionPartners() {
           enterpriseId,
           action: "COMMISSION_SETTLEMENT",
           details: `Commission payout of ${formatCurrency(partner.pendingBalance)} completed for ${partner.name}.`,
-          severity: "IMPORTANT",
+          severity: "WARNING",
           type: "FINANCE",
           metadata: { partnerId: partner.id, amount: partner.pendingBalance, settlementId }
         });

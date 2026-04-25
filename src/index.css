@@ -238,20 +238,32 @@
 }
 
 @media print {
-  body > :not(#printable-invoice-container),
-  [role="dialog"] > :not(.flex-1),
-  .flex-1 > :not(#printable-invoice-container),
-  button, 
-  nav, 
-  header, 
-  .no-print {
-    display: none !important;
+  body * {
+    visibility: hidden;
+  }
+
+  #printable-report-container, 
+  #printable-report-container *,
+  #printable-invoice-container,
+  #printable-invoice-container * {
+    visibility: visible;
+  }
+
+  #printable-report-container,
+  #printable-invoice-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    display: block !important;
   }
 
   body {
     background: white !important;
     margin: 0 !important;
     padding: 0 !important;
+    overflow: visible !important;
+    visibility: visible !important;
   }
 
   #printable-invoice {

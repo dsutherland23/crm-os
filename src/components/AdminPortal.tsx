@@ -2287,7 +2287,7 @@ function TenantPaymentNotices({ tenantId, adminUser }: { tenantId: string; admin
   useEffect(() => {
     const q = query(collection(db, "billing_notices"), where("enterprise_id", "==", tenantId));
     return onSnapshot(q, snap => {
-      setNotices(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => 
+      setNotices(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => 
         new Date(b.submittedAt || 0).getTime() - new Date(a.submittedAt || 0).getTime()
       ));
     });

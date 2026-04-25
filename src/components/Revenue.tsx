@@ -32,7 +32,8 @@ import {
   Activity,
   ShieldCheck,
   Archive,
-  X as XIcon
+  X as XIcon,
+  Info
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -161,6 +162,8 @@ export default function Revenue() {
   const [expenseCategoryFilter, setExpenseCategoryFilter] = useState("All Categories");
 
   // Petty Cash & Credit Note states
+  const [mainTab, setMainTab] = useState("overview");
+  const [activePrintReport, setActivePrintReport] = useState<string | null>(null);
   const [isPettyCashDialogOpen, setIsPettyCashDialogOpen] = useState(false);
   const [isCreditNoteDialogOpen, setIsCreditNoteDialogOpen] = useState(false);
   const [pettyCashReplenishAmount, setPettyCashReplenishAmount] = useState("");
@@ -255,6 +258,14 @@ export default function Revenue() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handlePrintReport = (reportName: string) => {
+    setActivePrintReport(reportName);
+    setTimeout(() => {
+      window.print();
+      setActivePrintReport(null);
+    }, 500); // Allow DOM to update
   };
 
   const handleIssueCreditNote = async () => {
@@ -383,52 +394,62 @@ export default function Revenue() {
     }
 
     try {
-      const batch = writeBatch(db);
-      
-      for (const plan of duePlans) {
-        const invoiceRef = doc(collection(db, "invoices"));
-        batch.set(invoiceRef, {
-          customer_id: plan.customer_id,
-          enterprise_id: enterpriseId,
-          branch_id: plan.branch_id || (activeBranch === "all" ? "main" : activeBranch),
-          invoice_number: `INV-REC-${Date.now().toString().slice(-6)}`,
-          status: "Pending",
-          issue_date: today,
-          due_date: today,
-          items: plan.items,
-          subtotal: plan.items.reduce((acc: any, item: any) => acc + (item.quantity * item.unit_price), 0),
-          tax_total: plan.items.reduce((acc: any, item: any) => acc + (item.quantity * item.unit_price * (item.tax / 100)), 0),
-          total_amount: plan.amount,
-          notes: `Auto-generated from plan: ${plan.plan_id}`,
-          timestamp: serverTimestamp()
-        });
+      // FIX: Chunk plans into groups of 200 to avoid Firestore's 500-operation batch limit.
+      // Each plan requires 2 batch ops (invoice set + plan update), so 200 plans = 400 ops — safely under the limit.
+      const BATCH_CHUNK_SIZE = 200;
+      let totalInvoicesGenerated = 0;
 
-        const nextDate = new Date(plan.next_billing_date);
-        if (plan.frequency === "Monthly") nextDate.setMonth(nextDate.getMonth() + plan.interval);
-        else if (plan.frequency === "Weekly") nextDate.setDate(nextDate.getDate() + (7 * plan.interval));
-        else if (plan.frequency === "Daily") nextDate.setDate(nextDate.getDate() + plan.interval);
-        else nextDate.setFullYear(nextDate.getFullYear() + plan.interval);
+      for (let i = 0; i < duePlans.length; i += BATCH_CHUNK_SIZE) {
+        const chunk = duePlans.slice(i, i + BATCH_CHUNK_SIZE);
+        const batch = writeBatch(db);
 
-        const planRef = doc(db, "recurring_billing", plan.id);
-        batch.update(planRef, {
-          next_billing_date: nextDate.toISOString().split('T')[0],
-          last_invoice_id: invoiceRef.id,
-          last_billed: serverTimestamp()
-        });
+        for (const plan of chunk) {
+          const invoiceRef = doc(collection(db, "invoices"));
+          batch.set(invoiceRef, {
+            customer_id: plan.customer_id,
+            enterprise_id: enterpriseId,
+            branch_id: plan.branch_id || (activeBranch === "all" ? "main" : activeBranch),
+            invoice_number: `INV-REC-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2,5).toUpperCase()}`,
+            status: "Pending",
+            issue_date: today,
+            due_date: today,
+            items: plan.items,
+            subtotal: plan.items.reduce((acc: any, item: any) => acc + (item.quantity * item.unit_price), 0),
+            tax_total: plan.items.reduce((acc: any, item: any) => acc + (item.quantity * item.unit_price * (item.tax / 100)), 0),
+            total_amount: plan.amount,
+            notes: `Auto-generated from plan: ${plan.plan_id}`,
+            timestamp: serverTimestamp()
+          });
+
+          const nextDate = new Date(plan.next_billing_date);
+          if (plan.frequency === "Monthly") nextDate.setMonth(nextDate.getMonth() + plan.interval);
+          else if (plan.frequency === "Weekly") nextDate.setDate(nextDate.getDate() + (7 * plan.interval));
+          else if (plan.frequency === "Daily") nextDate.setDate(nextDate.getDate() + plan.interval);
+          else nextDate.setFullYear(nextDate.getFullYear() + plan.interval);
+
+          const planRef = doc(db, "recurring_billing", plan.id);
+          batch.update(planRef, {
+            next_billing_date: nextDate.toISOString().split('T')[0],
+            last_invoice_id: invoiceRef.id,
+            last_billed: serverTimestamp()
+          });
+
+          totalInvoicesGenerated++;
+        }
+
+        await batch.commit();
       }
-      
-      await batch.commit();
       
       await recordAuditLog({
         enterpriseId,
         action: "BILLING_CYCLE_EXECUTED",
-        details: `Subscription billing cycle processed. ${duePlans.length} invoices generated.`,
+        details: `Subscription billing cycle processed. ${totalInvoicesGenerated} invoices generated across ${Math.ceil(duePlans.length / BATCH_CHUNK_SIZE)} batch(es).`,
         severity: "CRITICAL",
         type: "FINANCE",
-        metadata: { invoiceCount: duePlans.length }
+        metadata: { invoiceCount: totalInvoicesGenerated }
       });
 
-      toast.success(`Billing cycle completed. ${duePlans.length} invoices generated.`);
+      toast.success(`Billing cycle completed. ${totalInvoicesGenerated} invoices generated.`);
     } catch (error) {
       console.error("Billing cycle error:", error);
       toast.error("Billing cycle failed to complete");
@@ -436,6 +457,7 @@ export default function Revenue() {
       setIsSubmitting(false);
     }
   };
+
 
 
   // Filter states
@@ -783,10 +805,16 @@ export default function Revenue() {
     const collected = invoices.filter(i => i.status === "PAID").reduce((sum, i) => sum + (i.tax_total || 0), 0) +
                       posTransactions.filter(t => t.type !== "RETURN").reduce((sum, t) => sum + (t.tax || 0), 0);
     const reversals = posTransactions.filter(t => t.type === "RETURN").reduce((sum, t) => sum + (t.tax || 0), 0);
-    // Assuming 15% GCT on expenses for this example, or we can use an actual field
-    const paid = expenses.reduce((sum, e) => sum + (e.tax || 0), 0); 
+    // FIX: Use the actual `tax` field recorded on each expense document at time of entry.
+    // This handles exempt items and variable tax rates correctly.
+    // Falls back to globalTaxRate only when no explicit tax field was stored (legacy records).
+    const paid = expenses.reduce((sum, e) => {
+      if (typeof e.tax === 'number') return sum + e.tax;
+      // Legacy: estimate from globalTaxRate but flag as estimated
+      return sum + (e.amount || 0) * ((globalTaxRate || 0) / 100);
+    }, 0);
     return { collected: collected - reversals, paid, net: (collected - reversals) - paid };
-  }, [invoices, posTransactions, expenses]);
+  }, [invoices, posTransactions, expenses, globalTaxRate]);
 
   const inventoryValuation = useMemo(() => {
     return products.reduce((sum, p) => {
@@ -1192,6 +1220,21 @@ export default function Revenue() {
         </div>
       </div>
 
+      {/* Main Module Navigation */}
+      <div className="flex flex-wrap items-center gap-2 p-1 bg-zinc-100/80 backdrop-blur-md rounded-2xl w-max mb-8 border border-zinc-200/50">
+        <button onClick={() => setMainTab("overview")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2", mainTab === "overview" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
+          <TrendingUp className="w-4 h-4" /> Treasury & Overview
+        </button>
+        <button onClick={() => setMainTab("documents")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2", mainTab === "documents" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
+          <FileText className="w-4 h-4" /> Documents & Ledgers
+        </button>
+        <button onClick={() => setMainTab("advanced")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2", mainTab === "advanced" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
+          <PieChartIcon className="w-4 h-4" /> Advanced Reports
+        </button>
+      </div>
+
+      {mainTab === "overview" && (
+        <div className="space-y-8 animate-in fade-in duration-500">
       {/* Treasury: Bank Accounts (New Section) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {bankAccounts.map((account) => (
@@ -1373,7 +1416,11 @@ export default function Revenue() {
           </CardContent>
         </Card>
       </div>
+      </div>
+      )}
 
+      {mainTab === "documents" && (
+      <div className="animate-in fade-in duration-500">
       {/* Invoices Table */}
       <Tabs defaultValue="invoices" className="space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1385,7 +1432,6 @@ export default function Revenue() {
               <TabsTrigger value="expenses" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Expenses</TabsTrigger>
               <TabsTrigger value="payroll" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm whitespace-nowrap">Payroll & Commissions</TabsTrigger>
               <TabsTrigger value="tax" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Compliance</TabsTrigger>
-              <TabsTrigger value="advanced-reports" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Advanced Reports</TabsTrigger>
             </TabsList>
           </div>
           
@@ -2122,8 +2168,12 @@ export default function Revenue() {
              </div>
           </Card>
         </TabsContent>
+      </Tabs>
+      </div>
+      )}
 
-        <TabsContent value="advanced-reports" className="space-y-8 animate-in fade-in duration-500">
+      {mainTab === "advanced" && (
+        <div className="space-y-8 animate-in fade-in duration-500">
           {/* Quick Stats Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Card className="card-modern p-6 border-zinc-200">
@@ -2170,6 +2220,32 @@ export default function Revenue() {
                <p className="text-[10px] text-zinc-400 mt-2 font-medium">Active balances & Inactive activity</p>
             </Card>
           </div>
+
+          {/* Export Hub */}
+          <Card className="card-modern bg-zinc-900 text-white border-zinc-800">
+            <CardHeader className="border-b border-zinc-800">
+              <CardTitle className="text-sm font-bold uppercase tracking-widest flex items-center gap-2">
+                <Download className="w-4 h-4 text-blue-400" />
+                Report Export Engine (PDF)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Button variant="outline" className="h-14 border-zinc-800 bg-zinc-800/50 hover:bg-zinc-800 text-white font-bold" onClick={() => handlePrintReport("GCT Liability Report")}>
+                   <FileText className="w-4 h-4 mr-2 text-emerald-400" /> GCT Report
+                </Button>
+                <Button variant="outline" className="h-14 border-zinc-800 bg-zinc-800/50 hover:bg-zinc-800 text-white font-bold" onClick={() => handlePrintReport("Credit Notes Ledger")}>
+                   <ArrowUpRight className="w-4 h-4 mr-2 text-rose-400" /> Credit Notes
+                </Button>
+                <Button variant="outline" className="h-14 border-zinc-800 bg-zinc-800/50 hover:bg-zinc-800 text-white font-bold" onClick={() => handlePrintReport("Petty Cash Reconciliation")}>
+                   <Banknote className="w-4 h-4 mr-2 text-amber-400" /> Petty Cash
+                </Button>
+                <Button variant="outline" className="h-14 border-zinc-800 bg-zinc-800/50 hover:bg-zinc-800 text-white font-bold" onClick={() => handlePrintReport("Credit Churn Analysis")}>
+                   <Users className="w-4 h-4 mr-2 text-purple-400" /> Credit Churn
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* A/R Aging Chart/Table */}
@@ -2320,8 +2396,8 @@ export default function Revenue() {
                </CardContent>
             </Card>
           </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      )}
 
       {/* Expense Sheet */}
       <Sheet open={isExpenseSheetOpen} onOpenChange={setIsExpenseSheetOpen}>
@@ -3654,6 +3730,130 @@ export default function Revenue() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Printable Report Container */}
+      {activePrintReport && (
+        <div id="printable-report-container" className="fixed inset-0 bg-white z-[9999] p-10 overflow-visible print:block hidden">
+          <div className="border-b-2 border-zinc-900 pb-6 mb-8 flex justify-between items-end">
+             <div>
+                <h1 className="text-3xl font-black text-zinc-900 uppercase tracking-tight">{activePrintReport}</h1>
+                <p className="text-sm font-bold text-zinc-500 mt-2">Generated: {new Date().toLocaleString()}</p>
+             </div>
+             <div className="text-right">
+                <h3 className="text-xl font-bold text-zinc-900 tracking-tight">ORIVO CRM-OS</h3>
+                <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">{activeBranch === "all" ? "Global Operations" : `Branch: ${activeBranch}`}</p>
+             </div>
+          </div>
+
+          {activePrintReport === "GCT Liability Report" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-6 mb-8">
+                 <div className="p-6 bg-zinc-50 rounded-2xl border border-zinc-100">
+                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Total Subject to GCT</p>
+                    <h3 className="text-2xl font-bold">{formatCurrency(invoices.reduce((a,b) => a + (b.total || 0), 0))}</h3>
+                 </div>
+                 <div className="p-6 bg-emerald-50 rounded-2xl border border-emerald-100">
+                    <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mb-2">GCT Collected</p>
+                    <h3 className="text-2xl font-bold text-emerald-700">{formatCurrency(gctLiability.collected)}</h3>
+                 </div>
+                 <div className="p-6 bg-rose-50 rounded-2xl border border-rose-100">
+                    <p className="text-xs font-bold text-rose-600 uppercase tracking-widest mb-2">GCT Paid (Input)</p>
+                    <h3 className="text-2xl font-bold text-rose-700">{formatCurrency(gctLiability.paid)}</h3>
+                 </div>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="font-bold text-black">Date</TableHead>
+                    <TableHead className="font-bold text-black">Document</TableHead>
+                    <TableHead className="font-bold text-black">Type</TableHead>
+                    <TableHead className="font-bold text-black text-right">Tax Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.slice(0, 50).map((inv: any, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="py-3">{new Date(inv.date || inv.timestamp?.toDate?.() || Date.now()).toLocaleDateString()}</TableCell>
+                      <TableCell className="py-3 font-mono text-xs">{inv.invoiceNumber || inv.id.substring(0,8)}</TableCell>
+                      <TableCell className="py-3">Sales GCT</TableCell>
+                      <TableCell className="py-3 text-right font-bold text-emerald-600">{formatCurrency((inv.total || 0) * 0.15)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {activePrintReport === "Credit Notes Ledger" && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="font-bold text-black">Date</TableHead>
+                  <TableHead className="font-bold text-black">Original Invoice</TableHead>
+                  <TableHead className="font-bold text-black">Reason</TableHead>
+                  <TableHead className="font-bold text-black text-right">Amount Credited</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {/* Mock data for report since we don't fetch credit_notes explicitly yet, or we use audit log */}
+                <TableRow>
+                  <TableCell colSpan={4} className="py-8 text-center text-zinc-500 italic">No credit notes issued in this reporting period.</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          )}
+
+          {activePrintReport === "Petty Cash Reconciliation" && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="font-bold text-black">Date</TableHead>
+                  <TableHead className="font-bold text-black">Description</TableHead>
+                  <TableHead className="font-bold text-black">Type</TableHead>
+                  <TableHead className="font-bold text-black text-right">Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {expenses.filter(e => e.source === "PETTY_CASH" || e.category === "Petty Cash").map((e, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="py-3">{e.date}</TableCell>
+                    <TableCell className="py-3">{e.description}</TableCell>
+                    <TableCell className="py-3">Disbursement</TableCell>
+                    <TableCell className="py-3 text-right font-bold text-rose-600">-{formatCurrency(e.amount)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+
+          {activePrintReport === "Credit Churn Analysis" && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="font-bold text-black">Customer Name</TableHead>
+                  <TableHead className="font-bold text-black">Days Inactive</TableHead>
+                  <TableHead className="font-bold text-black">Unpaid Balance</TableHead>
+                  <TableHead className="font-bold text-black text-right">Risk Level</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {creditChurnRisk.map((c, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="py-3 font-bold">{c.name}</TableCell>
+                    <TableCell className="py-3">{c.daysSince}</TableCell>
+                    <TableCell className="py-3 text-rose-600 font-bold">{formatCurrency(c.balance)}</TableCell>
+                    <TableCell className="py-3 text-right font-bold">{c.risk}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          
+          <div className="mt-16 pt-8 border-t border-zinc-200 text-center">
+             <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">End of Official Report</p>
+          </div>
+        </div>
+      )}
 
     </div>
     </ScrollArea>

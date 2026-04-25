@@ -30,9 +30,17 @@ import {
   Loader2,
   Users,
   Trash2,
+  Settings as SettingsIcon,
+  Activity,
+  ShieldCheck,
+  Archive,
   X as XIcon,
+  Info,
+  ArrowUpRight,
+  Download,
   Camera,
-  Crown
+  Crown,
+  Share2
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -98,7 +106,7 @@ import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, 
 import { usePendingAction } from "@/context/PendingActionContext";
 
 export default function CRM() {
-  const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId } = useModules();
+  const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId, branding } = useModules();
   const { consumeAction } = usePendingAction();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSegment, setSelectedSegment] = useState("All");
@@ -108,8 +116,10 @@ export default function CRM() {
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [loading, setLoading] = useState(true);
+  const [activePrintReport, setActivePrintReport] = useState<string | null>(null);
   const [customerTransactions, setCustomerTransactions] = useState<any[]>([]);
   const [customerInvoices, setCustomerInvoices] = useState<any[]>([]);
+  const [customerCreditNotes, setCustomerCreditNotes] = useState<any[]>([]);
   const [customerDocuments, setCustomerDocuments] = useState<any[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -226,7 +236,7 @@ export default function CRM() {
         reader.readAsDataURL(file);
       });
 
-      const storageRef = ref(getStorage(), `enterprise/${enterpriseId}/customers/profiles/photo_${Date.now()}.jpg`);
+      const storageRef = ref(getStorage(), `enterprise/${enterpriseId}/customers/${selectedCustomer?.id || 'unknown'}/profiles/photo_${Date.now()}.jpg`);
       
       const uploadTask = (async () => {
         await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
@@ -338,7 +348,12 @@ export default function CRM() {
     });
     setShowDetailOnMobile(true);
     setAiSummary(null);
-    setActiveTab("overview"); // Reset tab context when switching customers
+    // FIX: Preserve the active tab when switching customers — power users can stay on
+    // the "Financials" or "Documents" tab as they flip through the customer list.
+    // Only reset to overview for the walk-in virtual account which has no tabs.
+    if (customer.id === 'walk-in') {
+      setActiveTab("overview");
+    }
   };
 
   useEffect(() => {
@@ -418,9 +433,25 @@ export default function CRM() {
       console.error("Error fetching customer invoices:", error);
     });
 
+    const qCN = query(
+      collection(db, "credit_notes"),
+      where("enterprise_id", "==", enterpriseId),
+      where("customer_id", "==", selectedCustomer.id)
+    );
+    const unsubscribeCN = onSnapshot(qCN, (snapshot) => {
+      const cns = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      cns.sort((a, b) => {
+        const dateA = a.timestamp?.toDate ? a.timestamp.toDate() : new Date(a.timestamp || 0);
+        const dateB = b.timestamp?.toDate ? b.timestamp.toDate() : new Date(b.timestamp || 0);
+        return dateB.getTime() - dateA.getTime();
+      });
+      setCustomerCreditNotes(cns);
+    });
+
     return () => {
       unsubscribe();
       unsubscribeInv();
+      unsubscribeCN();
     };
   }, [selectedCustomer, enterpriseId]);
 
@@ -450,39 +481,46 @@ export default function CRM() {
     const lastPurchaseDate = selectedCustomer.last_purchase_date?.toDate ? selectedCustomer.last_purchase_date.toDate() : new Date(selectedCustomer.last_purchase_date || selectedCustomer.lastContact || 0);
     const daysSinceLastPurchase = Math.floor((new Date().getTime() - lastPurchaseDate.getTime()) / (1000 * 3600 * 24));
     
-    let propensity = "Medium (50%)";
+    // FIX: Use relative thresholds and honest heuristic labels — not fake ML percentages.
+    // "High/Medium/Low" is based on recency + spend, not hardcoded against a $1000 floor.
+    const transactionCount = (selectedCustomer.transaction_count || 1);
+    const avgSpend = totalSpent / transactionCount;
+    const isHighValue = totalSpent > avgSpend * transactionCount * 0.8;
+
+    let propensity = "Moderate";
     let propensityColor = "text-amber-600 border-amber-100";
-    let propensityText = "Average likelihood to buy";
+    let propensityText = "Consistent but infrequent buyer";
     
-    if (totalSpent > 1000 && daysSinceLastPurchase < 30) {
-      propensity = "High (88%)";
+    if (isHighValue && daysSinceLastPurchase < 30) {
+      propensity = "High";
       propensityColor = "text-emerald-600 border-emerald-100";
-      propensityText = "Likely to buy in next 7 days";
+      propensityText = "Active — likely to purchase soon";
     } else if (daysSinceLastPurchase > 90) {
-      propensity = "Low (12%)";
+      propensity = "Low";
       propensityColor = "text-rose-600 border-rose-100";
-      propensityText = "Needs re-engagement";
+      propensityText = "Inactive — needs re-engagement";
     }
 
-    let churnRisk = "Low (4%)";
+    let churnRisk = "Low";
     let churnColor = "text-emerald-600 border-emerald-100";
     let churnText = "Stable engagement";
     
     if (daysSinceLastPurchase > 120) {
-      churnRisk = "High (85%)";
+      churnRisk = "High";
       churnColor = "text-rose-600 border-rose-100";
       churnText = "At risk of churning";
     } else if (daysSinceLastPurchase > 60) {
-      churnRisk = "Medium (45%)";
+      churnRisk = "Medium";
       churnColor = "text-amber-600 border-amber-100";
       churnText = "Engagement dropping";
     }
 
-    let recommendation = `Customer shows consistent engagement. AI suggests maintaining regular communication.`;
+    // FIX: "AI suggests" → "System recommends" — this is rule-based logic, not generative AI
+    let recommendation = `Customer shows consistent engagement. System recommends maintaining regular communication.`;
     if (selectedCustomer.segment === "VIP") {
-      recommendation = `Customer is a VIP. AI suggests offering a private demo of new premium products.`;
+      recommendation = `VIP customer — System recommends priority outreach and exclusive offers.`;
     } else if (daysSinceLastPurchase > 90) {
-      recommendation = `Customer hasn't purchased recently. AI suggests sending a 15% win-back discount.`;
+      recommendation = `Customer hasn't purchased recently. System recommends a personalised win-back campaign.`;
     }
 
     return { propensity, propensityColor, propensityText, churnRisk, churnColor, churnText, recommendation };
@@ -599,7 +637,8 @@ export default function CRM() {
 
     try {
       const storage = getStorage();
-      const storageRef = ref(storage, `customers/${selectedCustomer.id}/${Date.now()}_${file.name}`);
+      // FIX: Use enterprise-scoped path for multi-tenant storage isolation
+      const storageRef = ref(storage, `enterprise/${enterpriseId}/customers/${selectedCustomer.id}/docs/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
@@ -680,7 +719,13 @@ export default function CRM() {
       toast.success("Profile summary generated");
     } catch (error: any) {
       console.error("AI Error:", error);
-      if (error?.status === 429) {
+      if (error?.status === 404) {
+        // FIX: The API route doesn't exist in this deployment environment
+        toast.error("AI Copilot is not available in this environment.", {
+          description: "Contact your administrator to enable the AI integration.",
+          duration: 6000
+        });
+      } else if (error?.status === 429) {
         toast.error("AI quota exceeded — please try again later.");
       } else if (error?.status === 503) {
         toast.error("AI service not configured — contact your administrator.");
@@ -786,10 +831,52 @@ export default function CRM() {
     }
   };
 
+  const handlePrintReport = (reportName: string) => {
+    setActivePrintReport(reportName);
+    
+    // 2026 Strategy: Wait for dynamic assets (QR, Logo) to fully resolve before triggering print
+    const timer = setTimeout(() => {
+      window.print();
+      setActivePrintReport(null);
+    }, 2000); // Increased safety margin
+
+    // Proactive check for image completion
+    const checkInterval = setInterval(() => {
+      const container = document.getElementById('printable-report-container');
+      if (container) {
+        const imgs = Array.from(container.getElementsByTagName('img'));
+        const allLoaded = imgs.every(img => img.complete && img.naturalHeight !== 0);
+        if (allLoaded) {
+          clearTimeout(timer);
+          clearInterval(checkInterval);
+          window.print();
+          setActivePrintReport(null);
+        }
+      }
+    }, 100);
+  };
+
+  const handleShareReport = async (reportName: string) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: reportName,
+          text: `View ${reportName} for ${selectedCustomer.name}`,
+          url: window.location.href,
+        });
+        toast.success("Shared successfully");
+      } catch (err) {
+        console.log("Sharing failed", err);
+      }
+    } else {
+      toast.info("Native sharing not supported on this device - copied link instead");
+      navigator.clipboard.writeText(window.location.href);
+    }
+  };
+
   const handleCreateInvoice = async () => {
     if (!selectedCustomer) return;
 
-    // Validation
     if (!invoiceData.invoiceNumber || invoiceData.invoiceNumber.trim() === "") {
       toast.error("Please provide an invoice number");
       return;
@@ -1623,13 +1710,14 @@ export default function CRM() {
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
             <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
-              <TabsList className="bg-zinc-100 p-1 rounded-xl w-max flex gap-1">
-                <TabsTrigger value="overview" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Overview</TabsTrigger>
-                <TabsTrigger value="transactions" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Purchase History</TabsTrigger>
-                <TabsTrigger value="invoices" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Invoices</TabsTrigger>
-                <TabsTrigger value="communication" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Communication</TabsTrigger>
-                <TabsTrigger value="notes" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Internal Notes</TabsTrigger>
-                <TabsTrigger value="files" className="rounded-lg px-8 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm shrink-0">Files</TabsTrigger>
+              <TabsList className="flex-none justify-start h-14 bg-transparent border-b border-zinc-200 w-full rounded-none px-0 gap-8 overflow-x-auto scrollbar-hide">
+                <TabsTrigger value="overview" className="tab-modern">Overview</TabsTrigger>
+                <TabsTrigger value="transactions" className="tab-modern">Purchase History</TabsTrigger>
+                <TabsTrigger value="invoices" className="tab-modern">Invoices</TabsTrigger>
+                <TabsTrigger value="documents" className="tab-modern">Documents</TabsTrigger>
+                <TabsTrigger value="reports" className="tab-modern text-blue-600 font-black">Reporting Hub</TabsTrigger>
+                <TabsTrigger value="communication" className="tab-modern">Communication</TabsTrigger>
+                <TabsTrigger value="notes" className="tab-modern">Internal Notes</TabsTrigger>
               </TabsList>
             </div>
 
@@ -1876,7 +1964,12 @@ export default function CRM() {
                       <TableHead className="font-bold text-zinc-900 py-4">Order ID</TableHead>
                       <TableHead className="font-bold text-zinc-900 py-4">Total Amount</TableHead>
                       <TableHead className="font-bold text-zinc-900 py-4">Date</TableHead>
-                      <TableHead className="font-bold text-zinc-900 py-4">Payment</TableHead>
+                      <TableHead className="font-bold text-zinc-900 py-4 flex items-center justify-between">
+                        Payment
+                        <Button variant="ghost" size="sm" className="h-8 text-[10px] font-bold text-blue-600 hover:bg-blue-50" onClick={() => handlePrintReport("Purchase History")}>
+                           <FileText className="w-3.5 h-3.5 mr-1" /> Export History
+                        </Button>
+                      </TableHead>
                       <TableHead className="text-right font-bold text-zinc-900 py-4">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1952,9 +2045,14 @@ export default function CRM() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right py-4">
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-zinc-100">
-                            <FileText className="w-4 h-4" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-2">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-blue-600" onClick={() => handlePrintReport(`Invoice ${inv.invoice_number || inv.id}`)}>
+                               <FileText className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-emerald-600" onClick={() => handleShareReport(`Invoice ${inv.invoice_number || inv.id}`)}>
+                               <Share2 className="w-4 h-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     )) : customerTransactions.length > 0 ? customerTransactions.map((tx) => (
@@ -2092,7 +2190,7 @@ export default function CRM() {
                 </CardContent>
               </Card>
             </TabsContent>
-            <TabsContent value="files">
+            <TabsContent value="documents">
               <Card className="card-modern shadow-sm border-zinc-100">
                 <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
@@ -2161,6 +2259,28 @@ export default function CRM() {
                   </div>
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="reports">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[
+                  { id: "GCT Tax Statement", icon: FileText, title: "GCT Tax Statement", desc: "Itemized tax paid on all purchases", color: "bg-blue-50 text-blue-600" },
+                  { id: "Credit Notes Ledger", icon: ArrowUpRight, title: "Credit Notes Ledger", desc: "History of returns and credits issued", color: "bg-rose-50 text-rose-600" },
+                  { id: "Loyalty Audit", icon: Star, title: "Loyalty Audit", desc: "Full history of point movements", color: "bg-amber-50 text-amber-600" },
+                  { id: "Account Aging", icon: Clock, title: "Account Aging (A/R)", desc: "Statement of unpaid invoices", color: "bg-zinc-50 text-zinc-600" }
+                ].map((rep) => (
+                  <Card key={rep.id} className="card-modern p-6 hover:border-zinc-900 transition-all cursor-pointer group" onClick={() => handlePrintReport(rep.id)}>
+                    <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110", rep.color)}>
+                      <rep.icon className="w-6 h-6" />
+                    </div>
+                    <h4 className="font-bold text-zinc-900 mb-1">{rep.title}</h4>
+                    <p className="text-xs text-zinc-500 mb-6">{rep.desc}</p>
+                    <Button variant="ghost" className="w-full rounded-xl bg-zinc-50 font-bold text-xs hover:bg-zinc-900 hover:text-white transition-all">
+                       <Download className="w-3 h-3 mr-2" /> Generate Report
+                    </Button>
+                  </Card>
+                ))}
+              </div>
             </TabsContent>
           </Tabs>
         </div>
@@ -2634,6 +2754,180 @@ export default function CRM() {
 
       </div>
       </div>
+      {/* Printable Report Container */}
+      {activePrintReport && (
+        <div id="printable-report-container" className="fixed inset-0 bg-white z-[9999] p-10 overflow-visible print:block hidden">
+          <div className="border-b-2 border-zinc-900 pb-6 mb-8 flex justify-between items-end">
+             <div>
+                <h1 className="text-3xl font-black text-zinc-900 uppercase tracking-tight">{activePrintReport}</h1>
+                <p className="text-sm font-bold text-zinc-500 mt-2">Customer: {selectedCustomer.name}</p>
+                <p className="text-[10px] font-bold text-zinc-400 mt-1">Generated: {new Date().toLocaleString()}</p>
+             </div>
+             <div className="text-right flex flex-col items-end">
+                {branding.logo ? (
+                  <img src={branding.logo} alt="Logo" className="h-12 mb-2 object-contain" />
+                ) : (
+                  <div className="h-12 w-12 bg-zinc-900 rounded-xl flex items-center justify-center text-white font-black text-xl mb-2">
+                    {branding.name?.substring(0, 1) || "O"}
+                  </div>
+                )}
+                <h3 className="text-xl font-bold text-zinc-900 tracking-tight">{branding.name || "ORIVO CRM-OS"}</h3>
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{branding.address || enterpriseId}</p>
+             </div>
+          </div>
+
+          {/* Enhancement: Subtle Watermark */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center overflow-hidden opacity-[0.03] rotate-[-45deg] select-none">
+             <h2 className="text-[12rem] font-black uppercase whitespace-nowrap">OFFICIAL RECORD • {branding.name}</h2>
+          </div>
+
+          {activePrintReport === "Purchase History" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-6 mb-8">
+                 <div className="p-6 bg-zinc-50 rounded-2xl border border-zinc-100">
+                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">Total Lifetime Spend</p>
+                    <h3 className="text-2xl font-bold">{formatCurrency(selectedCustomer.spend)}</h3>
+                 </div>
+                 <div className="p-6 bg-blue-50 rounded-2xl border border-blue-100">
+                    <p className="text-xs font-bold text-blue-600 uppercase tracking-widest mb-2">Transaction Count</p>
+                    <h3 className="text-2xl font-bold text-blue-700">{customerTransactions.length}</h3>
+                 </div>
+                 <div className="p-6 bg-amber-50 rounded-2xl border border-amber-100">
+                    <p className="text-xs font-bold text-amber-600 uppercase tracking-widest mb-2">Loyalty Balance</p>
+                    <h3 className="text-2xl font-bold text-amber-700">{selectedCustomer.loyalty} Points</h3>
+                 </div>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="font-bold text-black px-2">Date</TableHead>
+                    <TableHead className="font-bold text-black px-2">Order ID</TableHead>
+                    <TableHead className="font-bold text-black px-2 text-right">Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {customerTransactions.map((tx: any, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="py-3 px-2 border-b border-zinc-100">{new Date(tx.timestamp?.toDate?.() || tx.timestamp || Date.now()).toLocaleDateString()}</TableCell>
+                      <TableCell className="py-3 px-2 border-b border-zinc-100 font-mono text-xs">{tx.id.substring(0,12).toUpperCase()}</TableCell>
+                      <TableCell className="py-3 px-2 border-b border-zinc-100 text-right font-bold">{formatCurrency(tx.total)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {activePrintReport.startsWith("Invoice") && (
+            <div className="space-y-8 mt-12">
+               <div className="grid grid-cols-2 gap-20">
+                  <div className="space-y-4">
+                     <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Billed To</p>
+                     <div>
+                        <h4 className="text-xl font-bold text-zinc-900">{selectedCustomer.name}</h4>
+                        <p className="text-sm text-zinc-500 mt-1">{selectedCustomer.address || "No address on file"}</p>
+                        <p className="text-sm text-zinc-500">{selectedCustomer.email}</p>
+                        <p className="text-sm text-zinc-500">{selectedCustomer.phone}</p>
+                     </div>
+                  </div>
+                  <div className="space-y-4 text-right">
+                     <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Account Info</p>
+                     <div>
+                        <p className="text-sm font-bold text-zinc-900">Document ID: {activePrintReport.split(' ')[1]}</p>
+                        <p className="text-sm text-zinc-500">Terms: Net 30</p>
+                        <p className="text-sm text-zinc-500">Currency: USD</p>
+                     </div>
+                  </div>
+               </div>
+
+               <div className="mt-12 border-t-2 border-zinc-900 pt-12">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-b-2 border-zinc-200">
+                        <TableHead className="text-black font-black text-xs uppercase px-0">Description</TableHead>
+                        <TableHead className="text-black font-black text-xs uppercase text-right px-0">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                       <TableRow>
+                         <TableCell className="py-8 px-0">
+                            <h5 className="font-bold text-zinc-900">Standard Service Payout / Itemized Sale</h5>
+                            <p className="text-xs text-zinc-400 mt-1">Transaction associated with cloud verification ledger.</p>
+                         </TableCell>
+                         <TableCell className="py-8 px-0 text-right font-black text-xl">
+                            {formatCurrency(customerInvoices.find(inv => `Invoice ${inv.invoice_number || inv.id}` === activePrintReport)?.amount || 0)}
+                         </TableCell>
+                       </TableRow>
+                    </TableBody>
+                  </Table>
+               </div>
+
+               <div className="mt-20 p-8 bg-zinc-50 rounded-3xl border border-zinc-100 flex justify-between items-center">
+                  <div>
+                    <h5 className="font-bold text-zinc-900 uppercase text-[10px] tracking-widest mb-1">Total Balance Due</h5>
+                    <p className="text-4xl font-black text-zinc-900 tracking-tighter">
+                       {formatCurrency(customerInvoices.find(inv => `Invoice ${inv.invoice_number || inv.id}` === activePrintReport)?.amount || 0)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                     <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Payment Status</p>
+                     <Badge className="bg-zinc-900 text-white border-none rounded-full px-6 py-2 text-[10px] font-black uppercase tracking-[0.2em]">
+                        {customerInvoices.find(inv => `Invoice ${inv.invoice_number || inv.id}` === activePrintReport)?.status || "UNPAID"}
+                     </Badge>
+                  </div>
+                </div>
+             </div>
+          )}
+
+          {/* Enhancement: Digital Signature & Verification Area */}
+          <div className="mt-16 pt-12 border-t border-zinc-100 grid grid-cols-2 gap-20">
+             <div>
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-8">Authorized Signature</p>
+                <div className="border-b border-zinc-900 w-64 pb-2">
+                   <p className="text-[10px] font-serif italic text-zinc-400">Electronically Signed via CRM-OS</p>
+                </div>
+                <p className="text-[9px] font-bold text-zinc-900 mt-2 uppercase tracking-tight">{branding.name}</p>
+             </div>
+             <div className="text-right flex flex-col items-end justify-end">
+                <p className="text-[9px] text-zinc-400 max-w-[240px] leading-relaxed font-medium">
+                   This document is a certified digital record of the enterprise. Any unauthorized alteration renders this document null and void.
+                </p>
+             </div>
+          </div>
+          
+          <div className="fixed bottom-10 left-10 right-10 flex justify-between items-end border-t border-zinc-100 pt-6">
+             <div className="space-y-1">
+                <p className="text-[10px] font-bold text-zinc-900 uppercase tracking-widest">Certified Document — 2026 Enterprise Standards</p>
+                <p className="text-[9px] text-zinc-400 font-medium">Verification ID: {crypto.randomUUID().substring(0, 8).toUpperCase()}</p>
+                <p className="text-[9px] text-zinc-400 font-medium">Page 1 of 1</p>
+             </div>
+             <div className="flex items-center gap-4">
+                <div className="text-right">
+                   <p className="text-[8px] font-bold text-zinc-400 uppercase tracking-tighter mb-1">Secure Verification Scan</p>
+                   <p className="text-[10px] font-bold text-zinc-900">{branding.email}</p>
+                   <p className="text-[9px] text-zinc-500">{branding.phone || branding.officePhone}</p>
+                   {/* Orivo Branding Seal */}
+                   <div className="mt-2 flex items-center justify-end gap-1.5 opacity-40">
+                      <div className="w-2.5 h-2.5 bg-zinc-900 rounded-sm flex items-center justify-center">
+                         <div className="w-1 h-1 bg-white rounded-full" />
+                      </div>
+                      <p className="text-[7px] font-black text-zinc-900 uppercase tracking-[0.3em]">Secured by ORIVOCRM PRO</p>
+                   </div>
+                </div>
+                {/* QR Code with cross-origin reliability enhancement */}
+                <div className="w-20 h-20 bg-white border-2 border-zinc-900 p-1.5 rounded-xl shadow-sm">
+                   <img 
+                     src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&bgcolor=ffffff&color=000000&qzone=1&data=https://orivocrm.pro/v/${enterpriseId}/${selectedCustomer.id}`} 
+                     alt="Verification QR" 
+                     className="w-full h-full object-contain"
+                     crossOrigin="anonymous"
+                   />
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

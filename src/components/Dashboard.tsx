@@ -355,7 +355,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
     // 4. Audit Logs
     const unsubLogs = onSnapshot(
-      query(collection(db, "audit_logs"), where("enterprise_id", "==", enterpriseId), limit(5)),
+      query(collection(db, "audit_logs"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(5)),
       (snap) => {
         const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         docs.sort((a: any, b: any) => {
@@ -588,7 +588,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
             <QuickAction icon={Plus} label="New Sale" onClick={() => dispatchAction("pos", "NEW_SALE")} disabled={!hasPermission("pos", "editor")} />
             <QuickAction icon={Users} label="Add Customer" onClick={() => dispatchAction("crm", "ADD_CUSTOMER")} disabled={!hasPermission("crm", "editor")} />
-            {hasPermission("finance") && <QuickAction icon={FileText} label="Invoice" onClick={() => dispatchAction("revenue", "CREATE_INVOICE")} />}
+            {hasPermission("finance") && <QuickAction icon={FileText} label="Invoice" onClick={() => dispatchAction("finance", "CREATE_INVOICE")} />}
             {hasPermission("inventory") && <QuickAction icon={Package} label="Add Product" onClick={() => dispatchAction("inventory", "ADD_PRODUCT")} />}
             {hasPermission("inventory") && <QuickAction icon={ArrowRightLeft} label="Transfer" onClick={() => dispatchAction("inventory", "TRANSFER_STOCK")} />}
             {hasPermission("ai") && <QuickAction icon={Sparkles} label="AI Report" onClick={() => dispatchAction("ai", "AI_REPORT")} />}
@@ -765,7 +765,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
         </div>
 
         {/* ── System Activity ──────────────────────────────────── */}
-        {hasPermission("audit") && (
+        {hasPermission("audit_logs") && (
           <Card className="card-modern">
             <CardHeader className="border-b border-zinc-100 p-6 md:p-8">
               <div className="flex items-center justify-between">
@@ -796,7 +796,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                     variant="ghost"
                     size="sm"
                     className="text-blue-600 font-bold text-[10px] uppercase tracking-widest hover:bg-blue-50 rounded-xl px-3 shrink-0"
-                    onClick={() => setActiveTab?.("audit")}
+                    onClick={() => setActiveTab?.("audit_logs")}
                   >
                     <span className="hidden sm:inline">Full Audit</span>
                     <span className="sm:hidden">Audit</span>
