@@ -463,13 +463,14 @@ export default function POS() {
           const elapsedMinutes = (now.getTime() - startTime.getTime()) / 60000;
           
           let policies = timePolicies || { breakDuration: 15, lunchDuration: 30, meetingDuration: 60, gracePeriod: 10 };
-          let allowedDuration = policies.gracePeriod;
+          let allowedDuration = -1; // Default: no auto-close for ACTIVE shifts
           
           if (session.status === "ON_BREAK") allowedDuration = policies.breakDuration;
-          if (session.status === "ON_LUNCH") allowedDuration = policies.lunchDuration;
-          if (session.status === "IN_MEETING") allowedDuration = policies.meetingDuration;
+          else if (session.status === "ON_LUNCH") allowedDuration = policies.lunchDuration;
+          else if (session.status === "IN_MEETING") allowedDuration = policies.meetingDuration;
 
-          if (elapsedMinutes > allowedDuration + (policies.gracePeriod || 5)) {
+          // Only auto-close if in a timed break state and limit exceeded
+          if (allowedDuration > 0 && elapsedMinutes > allowedDuration + (policies.gracePeriod || 5)) {
             try {
               await updateDoc(doc(db, "pos_sessions", session.id), {
                 status: "CLOSED",
@@ -1920,13 +1921,15 @@ export default function POS() {
             )}
           </Button>
           
-          {/* AI Upsell Suggestion */}
+          {/* Smart Suggestion disabled for now */}
+          {/* 
           <POSAIUpsell 
             cart={cart} 
             allProducts={products} 
             onAdd={(product) => addToCart(product)} 
             formatCurrency={formatCurrency}
-          />
+          /> 
+          */}
         </div>
 
         <div className="flex-1 min-h-0 relative">
