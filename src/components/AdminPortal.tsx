@@ -4,8 +4,6 @@ import {
   signOut,
   onAuthStateChanged,
   sendPasswordResetEmail,
-  GoogleAuthProvider,
-  signInWithPopup,
   createUserWithEmailAndPassword,
   type User,
 } from "firebase/auth";
@@ -217,7 +215,7 @@ export default function AdminPortal() {
           setAdminRecord(snap.data() as AdminRecord);
           setPhase("portal");
         } else if (emptyRegistry) {
-          // AUTO-PROVISION FIRST ADMIN
+          // SILENT AUTO-PROVISION FOR FIRST ADMIN
           const firstAdmin: AdminRecord = {
             email: user.email || "",
             role: "super_admin",
@@ -227,13 +225,13 @@ export default function AdminPortal() {
           setAdminUser(user);
           setAdminRecord(firstAdmin);
           setPhase("portal");
-          toast.success("System Bootstrapped", { description: "You have been registered as the first Super Admin." });
+          toast.success("Welcome, Master Admin", { description: "Your account has been authorized as the system owner." });
         } else {
-          // Not in registry — sign out silently, show error on login screen
+          // Not in registry — sign out silently
           await signOut(auth);
           setPhase("login");
-          toast.error("Access denied.", {
-            description: "This account is not in the admin registry. Please contact a Super Admin.",
+          toast.error("Access Denied", {
+            description: "This account is not authorized to access the Admin Portal.",
             duration: 6000
           });
         }
@@ -290,22 +288,9 @@ function AdminLogin({ emptyRegistry, onSuccess }: { emptyRegistry: boolean; onSu
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [isRegister, setIsRegister] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [locked, setLocked] = useState(false);
 
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
-      onSuccess();
-    } catch (err: any) {
-      toast.error(`Google Sign-in failed: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -313,24 +298,21 @@ function AdminLogin({ emptyRegistry, onSuccess }: { emptyRegistry: boolean; onSu
     if (!email || !password) { toast.error("Enter email and password."); return; }
     setLoading(true);
     try {
-      // Just authenticate — the onAuthStateChanged listener handles the admin registry check
-      // and will gate access to the portal automatically
-      if (isRegister) {
-        await createUserWithEmailAndPassword(auth, email, password);
-      } else {
+      // Try to sign in. If user doesn't exist and registry is empty, create the master admin.
+      try {
         await signInWithEmailAndPassword(auth, email, password);
+      } catch (signInErr: any) {
+        if (signInErr.code === "auth/user-not-found" && emptyRegistry) {
+          // AUTO-PROVISION MASTER ACCOUNT
+          await createUserWithEmailAndPassword(auth, email, password);
+          return;
+        }
+        throw signInErr;
       }
-      // onAuthStateChanged will fire next and handle portal access or deny
     } catch (err: any) {
       const code = err.code;
       if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
         toast.error("Incorrect email or password.");
-      } else if (code === "auth/email-already-in-use") {
-        toast.error("Email already exists.", {
-          description: "This admin account is already registered. Switching to Login mode...",
-          duration: 5000,
-        });
-        setIsRegister(false);
       } else if (code === "auth/too-many-requests") {
         toast.error("Too many failed attempts. Try again later.");
         setLocked(true);
@@ -338,7 +320,7 @@ function AdminLogin({ emptyRegistry, onSuccess }: { emptyRegistry: boolean; onSu
       } else if (code === "auth/invalid-email") {
         toast.error("Please enter a valid email address.");
       } else {
-        toast.error(`Sign-in failed: ${err.message || 'Unknown error'}`);
+        toast.error(`Authentication failed: ${err.message || 'Unknown error'}`);
       }
       setAttempts(a => { const next = a + 1; if (next >= 5) { setLocked(true); setTimeout(() => { setLocked(false); setAttempts(0); }, 30000); } return next; });
     } finally { setLoading(false); }
@@ -355,20 +337,9 @@ function AdminLogin({ emptyRegistry, onSuccess }: { emptyRegistry: boolean; onSu
           </div>
           <div className="text-center space-y-2">
             <h1 className="text-xl font-black text-white tracking-tight">Admin Portal</h1>
-            <div className="flex flex-col items-center gap-2">
-              <p className={cn(
-                "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md inline-block",
-                isRegister ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "text-zinc-600"
-              )}>
-                {isRegister ? "SYSTEM BOOTSTRAP MODE" : "Orivo CRM — Restricted Access"}
-              </p>
-              <div className="flex items-center gap-1.5 px-2 py-1 bg-white/[0.03] border border-white/[0.05] rounded-lg">
-                <div className={cn("w-1.5 h-1.5 rounded-full", emptyRegistry ? "bg-amber-500 animate-pulse" : "bg-emerald-500")} />
-                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">
-                  Registry: {emptyRegistry ? "Empty (Bootstrap Ready)" : "Active (Protected)"}
-                </span>
-              </div>
-            </div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+              Restricted Access — Master Admin Only
+            </p>
           </div>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
@@ -406,36 +377,16 @@ function AdminLogin({ emptyRegistry, onSuccess }: { emptyRegistry: boolean; onSu
             </div>
           </div>
           <Button type="submit" disabled={loading || locked}
-            className={cn(
-              "w-full h-12 rounded-xl font-black text-sm transition-all shadow-lg disabled:opacity-50",
-              emptyRegistry ? "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/20" : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20"
-            )}>
+            className="w-full h-12 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm transition-all shadow-lg shadow-rose-600/20 disabled:opacity-50 mt-4">
             {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : (
               <span className="flex items-center gap-2">
-                {emptyRegistry ? <Sparkles className="w-4 h-4" /> : <Shield className="w-4 h-4" />}
-                {isRegister ? (emptyRegistry ? "Bootstrap & Create Admin" : "Register Admin") : "Authenticate"}
+                <Shield className="w-4 h-4" />
+                Authenticate
               </span>
             )}
           </Button>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
-            <div className="relative flex justify-center text-[10px] uppercase font-black tracking-widest"><span className="bg-zinc-950 px-2 text-zinc-700">or use social gateway</span></div>
-          </div>
-
-          <Button type="button" variant="outline" onClick={handleGoogleLogin} disabled={loading || locked}
-            className="w-full h-11 rounded-xl border-white/10 bg-white/5 hover:bg-white/10 text-white font-bold text-xs">
-            <Globe className="w-4 h-4 mr-2 text-blue-400" /> Sign in with Google
-          </Button>
-
-          <p className="text-center text-[10px] text-zinc-600 font-medium">
-            {isRegister ? "Already have an account?" : "No admin account yet?"}{" "}
-            <button type="button" onClick={() => setIsRegister(!isRegister)} className="text-rose-500 hover:underline font-bold">
-              {isRegister ? "Back to Login" : "Create Master Admin"}
-            </button>
-          </p>
         </form>
-        <p className="text-center text-[10px] text-zinc-800 font-medium">Zero Trust · All access attempts are logged</p>
+        <p className="text-center text-[10px] text-zinc-800 font-medium">Zero Trust · Master Admin Access Only</p>
       </div>
     </div>
   );
