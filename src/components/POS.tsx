@@ -121,33 +121,41 @@ export default function POS() {
   const [showResolution, setShowResolution] = useState<{ type: "NO_SESSION" | "BRANCH_MISMATCH" | "NETWORK_OFFLINE" } | null>(null);
 
   // ── Cart Persistence ──────────────────────────────────────────
+  const [isCartHydrated, setIsCartHydrated] = useState(false);
   const cartKey = useMemo(() => 
     enterpriseId && selectedAdmin?.id ? `crm_pos_cart_${enterpriseId}_${selectedAdmin.id}` : null
   , [enterpriseId, selectedAdmin?.id]);
 
   useEffect(() => {
-    if (!cartKey) return;
+    setIsCartHydrated(false);
+    if (!cartKey) {
+      setCart([]);
+      return;
+    }
     const saved = localStorage.getItem(cartKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setCart(parsed);
         }
       } catch (e) {
         console.error("Cart restoration failed:", e);
       }
+    } else {
+      setCart([]);
     }
+    setIsCartHydrated(true);
   }, [cartKey]);
 
   useEffect(() => {
-    if (!cartKey) return;
+    if (!cartKey || !isCartHydrated) return;
     if (cart.length > 0) {
       localStorage.setItem(cartKey, JSON.stringify(cart));
     } else {
       localStorage.removeItem(cartKey);
     }
-  }, [cart, cartKey]);
+  }, [cart, cartKey, isCartHydrated]);
   // ─────────────────────────────────────────────────────────────
   
   useEffect(() => {
@@ -291,12 +299,27 @@ export default function POS() {
 
   // ── Sync with Global Session ────────────────────────────────────
   useEffect(() => {
-    if (posSession && !isAuthorized) {
+    if (posSession) {
       setIsAuthorized(true);
       setSelectedAdmin(posSession.staffData);
       setCurrentSessionId(posSession.sessionId);
+    } else {
+      setIsAuthorized(false);
+      // Don't clear selectedAdmin automatically to allow PIN entry persistence
     }
   }, [posSession]);
+
+  // FIX: Force opening float dialog if admin is selected but session isn't authorized yet
+  // This addresses the "stuck at Terminal locked" issue reported by users.
+  useEffect(() => {
+    if (selectedAdmin && !isAuthorized && !isOpeningFloatOpen && pinEntry.length === 4) {
+      // If PIN was correct but dialog didn't show, re-trigger
+      const validAdmin = staffList.find(s => s.id === selectedAdmin.id);
+      if (validAdmin && pinEntry === validAdmin.pin) {
+        setIsOpeningFloatOpen(true);
+      }
+    }
+  }, [selectedAdmin, isAuthorized, isOpeningFloatOpen, pinEntry, staffList]);
 
  // Sync with Global Session ────────────────────────────────────
 

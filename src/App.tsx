@@ -156,6 +156,16 @@ function AppContent() {
       return;
     }
 
+    // Proactive Persistence Hardening: Ensure session persists across browser restarts and monkey-patching interference
+    (async () => {
+      try {
+        const { setPersistence, browserLocalPersistence } = await import("firebase/auth");
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (e) {
+        console.warn("Auth persistence hardening failed:", e);
+      }
+    })();
+
     const unsub = onAuthStateChanged(auth, (fbUser) => {
       setUser(fbUser);
       if (!fbUser) {
@@ -169,6 +179,10 @@ function AppContent() {
           setEnterpriseLoading(false);
         }
       }
+    }, (err) => {
+       console.error("Auth state listener error:", err);
+       setAuthLoading(false);
+       // Avoid aggressive logout on transient network failures during token refresh
     });
     return () => unsub();
   }, []);

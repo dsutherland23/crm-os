@@ -193,12 +193,21 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     return () => { unsub(); unsubUsers(); unsubBranches(); };
   }, [enterpriseId]);
 
-  const [posSession, setPosSession] = useState<{ 
+  const [posSession, setPosSessionState] = useState<{ 
     staffId: string; staffName: string; payGrade: string; 
     sessionId: string; staffData: any;
     shiftStatus: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING";
     statusSince: string;
-  } | null>(null);
+  } | null>(() => {
+    const saved = localStorage.getItem("crm_pos_session_v2");
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const setPosSession = (session: any) => {
+    setPosSessionState(session);
+    if (session) localStorage.setItem("crm_pos_session_v2", JSON.stringify(session));
+    else localStorage.removeItem("crm_pos_session_v2");
+  };
   const [grantedOverrides, setGrantedOverrides] = useState<string[]>([]);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [rolePermissions, setRolePermissions] = useState<Record<string, string | boolean> | null>(null);
@@ -227,7 +236,9 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   }, [enterpriseId, userRole]);
 
   const updateShiftStatus = (status: "ACTIVE" | "ON_BREAK" | "ON_LUNCH" | "IN_MEETING") => {
-    setPosSession(prev => prev ? { ...prev, shiftStatus: status, statusSince: new Date().toISOString() } : null);
+    if (posSession) {
+      setPosSession({ ...posSession, shiftStatus: status, statusSince: new Date().toISOString() });
+    }
   };
 
   const setBranding = (update: Partial<BrandingConfig>) => {
@@ -353,6 +364,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   const logout = async () => {
     try {
       clearSession();
+      setPosSession(null); // Use the new function to clear state and localStorage
       const { auth } = await import("@/lib/firebase");
       const { signOut } = await import("firebase/auth");
       const { clearMockUser, getMockUser } = await import("@/lib/auth-mock");
