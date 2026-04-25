@@ -1341,9 +1341,9 @@ export default function POS() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-full overflow-hidden bg-zinc-50/50 relative touch-pan-y">
+    <div className="flex flex-col md:flex-row h-full md:overflow-hidden bg-zinc-50/50 relative touch-pan-y overscroll-y-contain">
       {/* Product Catalog */}
-      <div className="flex-1 flex flex-col min-w-0 h-full">
+      <div className="flex-1 flex flex-col min-w-0 md:h-full">
         <div className="p-6 lg:p-8 space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="space-y-1">
@@ -1553,7 +1553,12 @@ export default function POS() {
         </div>
 
         <div className="flex-1 min-h-0 relative">
-          <ScrollArea className="absolute inset-0 px-6 lg:px-8 pb-8">
+          <div className="absolute inset-0 overflow-y-auto scroll-smooth px-6 lg:px-8 pb-8 custom-scrollbar">
+            <style dangerouslySetInnerHTML={{ __html: `
+              @media (max-width: 768px) {
+                .custom-scrollbar { -webkit-overflow-scrolling: touch; }
+              }
+            `}} />
           {loading ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -1630,7 +1635,7 @@ export default function POS() {
             </AnimatePresence>
           </div>
           )}
-          </ScrollArea>
+          </div>
         </div>
       </div>
 
@@ -1721,7 +1726,7 @@ export default function POS() {
         </div>
 
         <div className="flex-1 min-h-0 relative">
-          <ScrollArea className="absolute inset-0 p-8">
+          <div className="absolute inset-0 overflow-y-auto p-8 custom-scrollbar">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-40">
               <div className="w-20 h-20 bg-zinc-100 rounded-full flex items-center justify-center">
@@ -1829,7 +1834,7 @@ export default function POS() {
               </AnimatePresence>
             </div>
           )}
-          </ScrollArea>
+          </div>
         </div>
 
         <div className="flex-none p-8 bg-zinc-50 border-t border-zinc-200 space-y-6">
