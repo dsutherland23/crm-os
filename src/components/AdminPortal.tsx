@@ -227,12 +227,15 @@ export default function AdminPortal() {
           setAdminUser(user);
           setAdminRecord(firstAdmin);
           setPhase("portal");
-          toast.success("Bootstrap complete: You are now the Super Admin.");
+          toast.success("System Bootstrapped", { description: "You have been registered as the first Super Admin." });
         } else {
           // Not in registry — sign out silently, show error on login screen
           await signOut(auth);
           setPhase("login");
-          toast.error("Access denied. This account is not in the admin registry.");
+          toast.error("Access denied.", {
+            description: "This account is not in the admin registry. Please contact a Super Admin.",
+            duration: 6000
+          });
         }
       } catch (err: any) {
         // Likely a Firestore permission error — sign out and show message
@@ -254,11 +257,11 @@ export default function AdminPortal() {
     <>
       <Toaster position="top-right" richColors />
       {phase === "checking" && <SplashScreen />}
-      {phase === "login" && <AdminLogin onSuccess={() => {}} />}
+      {phase === "login" && <AdminLogin emptyRegistry={emptyRegistry} onSuccess={() => {}} />}
       {phase === "portal" && adminUser && adminRecord && (
         <AdminShell user={adminUser} record={adminRecord} />
       )}
-      {phase === "portal" && (!adminUser || !adminRecord) && <AdminLogin onSuccess={() => {}} />}
+      {phase === "portal" && (!adminUser || !adminRecord) && <AdminLogin emptyRegistry={emptyRegistry} onSuccess={() => {}} />}
     </>
   );
 }
@@ -282,7 +285,7 @@ function SplashScreen() {
 // ══════════════════════════════════════════════════════════════════════
 // STANDALONE ADMIN LOGIN
 // ══════════════════════════════════════════════════════════════════════
-function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
+function AdminLogin({ emptyRegistry, onSuccess }: { emptyRegistry: boolean; onSuccess: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -350,14 +353,22 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
           <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
             <Shield className="w-8 h-8 text-rose-400" />
           </div>
-          <div className="text-center space-y-1">
+          <div className="text-center space-y-2">
             <h1 className="text-xl font-black text-white tracking-tight">Admin Portal</h1>
-            <p className={cn(
-              "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md inline-block",
-              isRegister ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "text-zinc-600"
-            )}>
-              {isRegister ? "SYSTEM BOOTSTRAP MODE" : "Orivo CRM — Restricted Access"}
-            </p>
+            <div className="flex flex-col items-center gap-2">
+              <p className={cn(
+                "text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md inline-block",
+                isRegister ? "bg-amber-500/10 text-amber-500 border border-amber-500/20" : "text-zinc-600"
+              )}>
+                {isRegister ? "SYSTEM BOOTSTRAP MODE" : "Orivo CRM — Restricted Access"}
+              </p>
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-white/[0.03] border border-white/[0.05] rounded-lg">
+                <div className={cn("w-1.5 h-1.5 rounded-full", emptyRegistry ? "bg-amber-500 animate-pulse" : "bg-emerald-500")} />
+                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">
+                  Registry: {emptyRegistry ? "Empty (Bootstrap Ready)" : "Active (Protected)"}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
         <form onSubmit={handleLogin} className="space-y-4">
@@ -395,9 +406,15 @@ function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
             </div>
           </div>
           <Button type="submit" disabled={loading || locked}
-            className="w-full h-12 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm transition-all shadow-lg shadow-rose-600/20 disabled:opacity-50">
+            className={cn(
+              "w-full h-12 rounded-xl font-black text-sm transition-all shadow-lg disabled:opacity-50",
+              emptyRegistry ? "bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/20" : "bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/20"
+            )}>
             {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : (
-              <span className="flex items-center gap-2"><Shield className="w-4 h-4" /> {isRegister ? "Register & Bootstrap" : "Authenticate"}</span>
+              <span className="flex items-center gap-2">
+                {emptyRegistry ? <Sparkles className="w-4 h-4" /> : <Shield className="w-4 h-4" />}
+                {isRegister ? (emptyRegistry ? "Bootstrap & Create Admin" : "Register Admin") : "Authenticate"}
+              </span>
             )}
           </Button>
 
