@@ -1,26 +1,23 @@
+import re
 
-import sys
-
-def check_balance(filename, tag_open, tag_close):
+def check_tags(filename):
     with open(filename, 'r') as f:
-        lines = f.readlines()
+        content = f.read()
     
-    balance = 0
-    for i, line in enumerate(lines):
-        opens = line.count(tag_open)
-        closes = line.count(tag_close)
-        
-        # Approximate: check for self-closing
-        self_closing = line.count(tag_open) and line.count('/>')
-        
-        balance += (opens - self_closing)
-        balance -= closes
-        
-        if balance < 0:
-            print(f"Balance for {tag_open} went negative at line {i+1}: {balance}")
-            # balance = 0 # reset to find next
-            
-    print(f"Final balance for {tag_open}: {balance}")
+    # Remove comments
+    content = re.sub(r'//.*', '', content)
+    content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+    
+    # Simple tag counting (very rough for JSX but can give a hint)
+    div_opens = len(re.findall(r'<div\b', content))
+    div_closes = len(re.findall(r'</div>', content))
+    
+    scroll_opens = len(re.findall(r'<ScrollArea\b', content))
+    scroll_closes = len(re.findall(r'</ScrollArea>', content))
+    
+    return {
+        'div': (div_opens, div_closes),
+        'ScrollArea': (scroll_opens, scroll_closes)
+    }
 
-if __name__ == "__main__":
-    check_balance(sys.argv[1], sys.argv[2], sys.argv[3])
+print(check_tags('/Volumes/Portable/Website/crm-os/src/components/POS.tsx'))
