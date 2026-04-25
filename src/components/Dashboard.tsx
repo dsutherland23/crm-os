@@ -251,6 +251,11 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     logs: null,
     stats: null,
   });
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const [dashboardStats, setDashboardStats] = useState<any>(null);
 
@@ -678,7 +683,8 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                   </div>
                 ) : (
                   <div className="h-[240px] sm:h-[320px] w-full">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 4 }}>
                         <defs>
                           <linearGradient id="colorSalesDash" x1="0" y1="0" x2="0" y2="1">
@@ -714,6 +720,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                         />
                       </AreaChart>
                     </ResponsiveContainer>
+                    )}
                   </div>
                 )}
               </CardContent>

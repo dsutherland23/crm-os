@@ -111,6 +111,11 @@ export default function Analytics() {
   const [staff, setStaff] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationParams, setSimulationParams] = useState({
     adSpend: 15, // percentage increase
@@ -505,7 +510,8 @@ export default function Analytics() {
               </CardHeader>
               <CardContent className="pt-10">
                 <div className="h-[400px] w-full">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                  {isMounted && (
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <AreaChart data={performanceData}>
                       <defs>
                         <linearGradient id="colorRev" x1="0" y1="0" x2="0" y2="1">
@@ -521,6 +527,7 @@ export default function Analytics() {
                       <Line type="monotone" dataKey="target" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" dot={false} />
                     </AreaChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -592,7 +599,8 @@ export default function Analytics() {
               </CardHeader>
               <CardContent className="pt-6">
                 <div className="h-[250px] w-full">
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                  {isMounted && (
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                     <PieChart>
                       <Pie
                         data={categoryDistribution}
@@ -610,6 +618,7 @@ export default function Analytics() {
                       <Tooltip />
                     </PieChart>
                   </ResponsiveContainer>
+                  )}
                 </div>
                 <div className="space-y-3 mt-6">
                   {categoryDistribution.map((cat) => (
@@ -753,7 +762,8 @@ export default function Analytics() {
                 </div>
                 
                 <div className="h-[250px] w-full bg-zinc-50 rounded-[2rem] border border-zinc-100 p-6">
-                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                   {isMounted && (
+                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <AreaChart data={performanceData.map((d, i) => {
                         const multiplier = 1 + ((simulationParams.adSpend * 0.01) * (i / performanceData.length)) + (simulationParams.newBranch ? 0.3 * (i/performanceData.length) : 0);
                         return { 
@@ -768,6 +778,7 @@ export default function Analytics() {
                         <Area type="monotone" dataKey="projected" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} strokeWidth={4} />
                       </AreaChart>
                    </ResponsiveContainer>
+                   )}
                 </div>
               </div>
             </div>

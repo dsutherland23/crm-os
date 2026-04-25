@@ -125,6 +125,9 @@ export default function POS() {
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT">("CARD");
   const [receiptType, setReceiptType] = useState<"INVOICE" | "POS">("POS");
+  const [smartCashTendered, setSmartCashTendered] = useState<number | null>(null);
+  const [numpadTarget, setNumpadTarget] = useState<string | null>(null); // product id for qty numpad
+  const [numpadValue, setNumpadValue] = useState("");
   const [products, setProducts] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
@@ -844,7 +847,7 @@ export default function POS() {
               product_id: productId,
               name: product.name,
               sku: product.sku,
-              quantity: suggestedQty,
+              qty: suggestedQty,
               cost: product.cost || 0,
               total: totalCost
             }],
@@ -1762,7 +1765,7 @@ export default function POS() {
                       </div>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-2 bg-zinc-100 rounded-lg p-1">
+                          <div className="flex items-center gap-2 bg-zinc-100 rounded-lg p-1 relative">
                             <Button 
                               variant="ghost" 
                               size="icon" 
@@ -1771,7 +1774,15 @@ export default function POS() {
                             >
                               <Minus className="w-3 h-3" />
                             </Button>
-                            <span className="text-xs font-bold w-4 text-center">{item.quantity}</span>
+                            <button
+                              className="text-xs font-black w-7 h-6 text-center rounded-md hover:bg-white transition-colors cursor-pointer"
+                              onClick={() => {
+                                setNumpadTarget(item.product.id);
+                                setNumpadValue(String(item.quantity));
+                              }}
+                            >
+                              {item.quantity}
+                            </button>
                             <Button 
                               variant="ghost" 
                               size="icon" 
@@ -1979,6 +1990,54 @@ export default function POS() {
             </Button>
           </div>
 
+          {/* Smart Cash Quick-Tender Buttons */}
+          {paymentMethod === "CASH" && (
+            <div className="space-y-3">
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Quick Tender</p>
+              <div className="grid grid-cols-4 gap-2">
+                {(() => {
+                  const suggestions: number[] = [];
+                  const t = Math.ceil(total);
+                  // Exact
+                  if (!suggestions.includes(t)) suggestions.push(t);
+                  // Round up to nearest 5
+                  const r5 = Math.ceil(t / 5) * 5;
+                  if (!suggestions.includes(r5)) suggestions.push(r5);
+                  // Round up to nearest 10
+                  const r10 = Math.ceil(t / 10) * 10;
+                  if (!suggestions.includes(r10)) suggestions.push(r10);
+                  // Round up to nearest 20
+                  const r20 = Math.ceil(t / 20) * 20;
+                  if (!suggestions.includes(r20)) suggestions.push(r20);
+                  return suggestions.slice(0, 4).map(amt => (
+                    <button
+                      key={amt}
+                      onClick={() => setSmartCashTendered(amt)}
+                      className={cn(
+                        "h-12 rounded-xl border-2 font-black text-xs transition-all active:scale-95",
+                        smartCashTendered === amt
+                          ? "bg-emerald-600 border-emerald-600 text-white shadow-lg shadow-emerald-600/30"
+                          : amt === t
+                          ? "bg-zinc-900 border-zinc-900 text-white"
+                          : "bg-white border-zinc-200 text-zinc-900 hover:border-emerald-400 hover:bg-emerald-50"
+                      )}
+                    >
+                      {amt === t ? "Exact" : formatCurrency(amt)}
+                    </button>
+                  ));
+                })()}
+              </div>
+              {smartCashTendered !== null && (
+                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
+                  <span className="text-xs font-bold text-emerald-700">Change Due</span>
+                  <span className="text-lg font-black text-emerald-700">
+                    {formatCurrency(Math.max(0, smartCashTendered - total))}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           <Button 
             className="w-full rounded-xl h-14 bg-blue-600 text-white hover:bg-blue-700 font-bold text-lg shadow-xl shadow-blue-600/20 disabled:opacity-50"
             onClick={handleCompleteTransaction}
@@ -1999,6 +2058,60 @@ export default function POS() {
         </div>
       </div>
 
+
+      {/* Quantity Numpad Overlay */}
+      <Dialog open={!!numpadTarget} onOpenChange={(open) => { if (!open) { setNumpadTarget(null); setNumpadValue(""); } }}>
+        <DialogContent className="sm:max-w-[320px] rounded-3xl border-zinc-100 p-0 overflow-hidden shadow-2xl">
+          <div className="bg-zinc-900 p-6 pb-4">
+            <DialogTitle className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3">Set Quantity</DialogTitle>
+            <div className="text-5xl font-black text-white text-center tracking-tight min-h-[56px] flex items-center justify-center">
+              {numpadValue || <span className="text-zinc-600">0</span>}
+            </div>
+          </div>
+          <div className="p-4 bg-zinc-900">
+            <div className="grid grid-cols-3 gap-2 mb-2">
+              {[1,2,3,4,5,6,7,8,9].map(n => (
+                <button
+                  key={n}
+                  onClick={() => setNumpadValue(prev => (prev === "0" ? String(n) : prev + String(n)).slice(0, 4))}
+                  className="h-14 rounded-2xl bg-zinc-800 border border-zinc-700 text-white font-bold text-xl hover:bg-zinc-700 active:scale-95 transition-all"
+                >
+                  {n}
+                </button>
+              ))}
+              <button
+                onClick={() => setNumpadValue(prev => prev.slice(0, -1))}
+                className="h-14 rounded-2xl bg-zinc-800 border border-zinc-700 text-zinc-400 font-bold hover:bg-zinc-700 active:scale-95 transition-all flex items-center justify-center"
+              >
+                ⌫
+              </button>
+              <button
+                onClick={() => setNumpadValue(prev => (prev === "0" ? "0" : prev + "0").slice(0, 4))}
+                className="h-14 rounded-2xl bg-zinc-800 border border-zinc-700 text-white font-bold text-xl hover:bg-zinc-700 active:scale-95 transition-all"
+              >
+                0
+              </button>
+              <button
+                onClick={() => {
+                  const qty = parseInt(numpadValue) || 0;
+                  if (numpadTarget && qty > 0) {
+                    setCart(prev => prev.map(i =>
+                      i.product.id === numpadTarget ? { ...i, quantity: qty } : i
+                    ));
+                  } else if (numpadTarget && qty === 0) {
+                    setCart(prev => prev.filter(i => i.product.id !== numpadTarget));
+                  }
+                  setNumpadTarget(null);
+                  setNumpadValue("");
+                }}
+                className="h-14 rounded-2xl bg-emerald-600 border border-emerald-500 text-white font-black text-sm hover:bg-emerald-500 active:scale-95 transition-all shadow-lg shadow-emerald-600/30"
+              >
+                Set
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
         <DialogContent className="max-w-[850px] w-full rounded-3xl p-0 overflow-hidden border-none shadow-2xl bg-zinc-100">

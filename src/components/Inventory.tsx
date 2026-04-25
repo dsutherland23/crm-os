@@ -154,6 +154,11 @@ export default function Inventory() {
   const [selectedSupplierForBatch, setSelectedSupplierForBatch] = useState('');
   const [isSavingSupplier, setIsSavingSupplier] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
   const [newSupplier, setNewSupplier] = useState({
     name: '',
     contact: '',
@@ -520,24 +525,28 @@ export default function Inventory() {
 
 
 
-  const handleSavePO = async () => {
+  const handleSavePO = async (statusOverride?: string) => {
     if (!poForm.supplier_id || poForm.items.length === 0) {
       toast.error('Mission violation: Incomplete PO data');
       return;
     }
     setIsSavingPO(true);
     try {
+      const total = poForm.items.reduce((sum: number, item: any) => sum + ((item.cost || 0) * (item.qty || 0)), 0);
+      const poData = {
+        ...poForm,
+        total_cost: total,
+        status: statusOverride || poForm.status || 'DRAFT',
+        updated_at: new Date().toISOString()
+      };
+
       if (selectedPO) {
-        await updateDoc(doc(db, 'purchase_orders', selectedPO.id), {
-          ...poForm,
-          updated_at: new Date().toISOString()
-        });
+        await updateDoc(doc(db, 'purchase_orders', selectedPO.id), poData);
       } else {
         await addDoc(collection(db, 'purchase_orders'), {
-          ...poForm,
+          ...poData,
           enterprise_id: enterpriseId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          created_at: new Date().toISOString()
         });
       }
       toast.success('Purchase Order synchronized');
@@ -1988,19 +1997,71 @@ export default function Inventory() {
                   </div>
                 </div>
 
-                <div className="md:col-span-3 bg-zinc-900 rounded-[2.5rem] p-8 md:p-10 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl relative overflow-hidden group border border-zinc-800">
+                <div className="md:col-span-3 bg-zinc-900 rounded-[2.5rem] p-8 md:p-10 flex flex-col gap-6 shadow-2xl relative overflow-hidden group border border-zinc-800">
                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 to-blue-500/10 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-                   <div className="space-y-1 min-w-0">
-                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500 truncate">Estimated Unit Profit</p>
-                      <p className="text-xl sm:text-2xl md:text-4xl font-black text-emerald-400 tracking-tight truncate leading-none">
-                        {currency === 'USD' ? '$' : `${currency} `}{Math.max(0, productForm.price - productForm.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </p>
+                   <div className="flex flex-col md:flex-row items-center justify-between gap-6 relative">
+                     <div className="space-y-1 min-w-0">
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500 truncate">Estimated Unit Profit</p>
+                        <p className="text-xl sm:text-2xl md:text-4xl font-black text-emerald-400 tracking-tight truncate leading-none">
+                          {currency === 'USD' ? '$' : `${currency} `}{Math.max(0, productForm.price - productForm.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                     </div>
+                     <div className="space-y-1 text-right min-w-0">
+                        <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500 truncate">Gross Margin</p>
+                        <p className={cn(
+                          "text-xl sm:text-2xl md:text-4xl font-black tracking-tight truncate leading-none transition-colors duration-500",
+                          (() => {
+                            const m = productForm.price > 0 ? ((productForm.price - productForm.cost) / productForm.price) * 100 : 0;
+                            if (m >= 40) return "text-emerald-400";
+                            if (m >= 20) return "text-amber-400";
+                            return "text-rose-400";
+                          })()
+                        )}>
+                          {productForm.price > 0 ? (((productForm.price - productForm.cost) / productForm.price) * 100).toFixed(1) : "0.0"}%
+                        </p>
+                     </div>
                    </div>
-                   <div className="space-y-1 text-right min-w-0">
-                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-500 truncate">Gross Margin</p>
-                      <p className="text-xl sm:text-2xl md:text-4xl font-black text-white tracking-tight truncate leading-none">
-                        {productForm.price > 0 ? (((productForm.price - productForm.cost) / productForm.price) * 100).toFixed(1) : "0.0"}%
-                      </p>
+                   {/* Animated Margin Health Bar */}
+                   <div className="relative space-y-2">
+                     <div className="flex items-center justify-between">
+                       <span className="text-[9px] font-black uppercase tracking-[0.2em] text-zinc-600">Margin Health</span>
+                       <span className={cn(
+                         "text-[9px] font-black uppercase tracking-[0.15em] px-2 py-0.5 rounded-full",
+                         (() => {
+                           const m = productForm.price > 0 ? ((productForm.price - productForm.cost) / productForm.price) * 100 : 0;
+                           if (m >= 40) return "bg-emerald-500/20 text-emerald-400";
+                           if (m >= 20) return "bg-amber-500/20 text-amber-400";
+                           return "bg-rose-500/20 text-rose-400";
+                         })()
+                       )}>
+                         {(() => {
+                           const m = productForm.price > 0 ? ((productForm.price - productForm.cost) / productForm.price) * 100 : 0;
+                           if (m >= 40) return "★ Excellent";
+                           if (m >= 20) return "⚡ Adequate";
+                           return "⚠ Low Margin";
+                         })()}
+                       </span>
+                     </div>
+                     <div className="w-full h-3 bg-zinc-800 rounded-full overflow-hidden">
+                       <div
+                         className={cn(
+                           "h-full rounded-full transition-all duration-700 ease-out",
+                           (() => {
+                             const m = productForm.price > 0 ? ((productForm.price - productForm.cost) / productForm.price) * 100 : 0;
+                             if (m >= 40) return "bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.5)]";
+                             if (m >= 20) return "bg-gradient-to-r from-amber-500 to-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.4)]";
+                             return "bg-gradient-to-r from-rose-600 to-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.4)]";
+                           })()
+                         )}
+                         style={{ width: `${Math.min(100, Math.max(2, productForm.price > 0 ? ((productForm.price - productForm.cost) / productForm.price) * 100 : 0))}%` }}
+                       />
+                     </div>
+                     <div className="flex items-center justify-between text-[8px] font-black text-zinc-700 uppercase tracking-wider">
+                       <span>0%</span>
+                       <span className="text-amber-600">20% Min</span>
+                       <span className="text-emerald-600">40% Target</span>
+                       <span>100%</span>
+                     </div>
                    </div>
                 </div>
               </div>
@@ -2048,8 +2109,23 @@ export default function Inventory() {
                           <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">AI Suggested PO</span>
                           <Sparkles className="w-4 h-4 text-blue-500 group-hover:rotate-12 transition-transform" />
                        </div>
-                       <div className="flex items-end gap-2">
-                           <p className="text-2xl font-black text-zinc-900 leading-none">{productInsights.optimumOrderQty} <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'}</span></p>
+                       <div className="flex items-end gap-3 relative">
+                         <p className="text-2xl font-black text-zinc-900 leading-none">{productInsights.optimumOrderQty} <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">{productForm.unit || 'units'}</span></p>
+                         {/* Explainable AI tooltip */}
+                         <div className="relative group/tooltip">
+                           <button className="w-5 h-5 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 hover:bg-blue-600 hover:text-white transition-all">
+                             <Sparkles className="w-2.5 h-2.5" />
+                           </button>
+                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-700 text-left opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-all duration-200 scale-95 group-hover/tooltip:scale-100 z-50">
+                             <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-1">
+                               <Sparkles className="w-2.5 h-2.5" /> AI Reasoning
+                             </p>
+                             <p className="text-[10px] text-zinc-300 leading-relaxed">
+                               Observed velocity: <b className="text-white">{productInsights.velocity} {productForm.unit || 'units'}/day</b> over 30 days. With a {productForm.leadTime}-day lead time and safety stock of {productForm.minStock}, system suggests <b className="text-emerald-400">{productInsights.optimumOrderQty} {productForm.unit || 'units'}</b>.
+                             </p>
+                             <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-900 border-r border-b border-zinc-700 rotate-45" />
+                           </div>
+                         </div>
                        </div>
                     </div>
                  </div>
@@ -3487,31 +3563,33 @@ export default function Inventory() {
                     <TrendingUp className="w-4 h-4 text-indigo-500" /> Performance History (14 Days)
                   </h3>
                   <div className="h-80 w-full">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                      <AreaChart data={productAnalytics}>
-                        <defs>
-                          <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                          </linearGradient>
-                          <linearGradient id="colorStock" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                        <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a', fontWeight: 'bold' }} dy={10} />
-                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
-                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
-                        <RechartsTooltip 
-                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                          labelStyle={{ fontWeight: 'black', color: '#18181b', marginBottom: '8px', fontSize: '12px' }}
-                        />
-                        <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', letterSpacing: '0.1em', textTransform: 'uppercase' }}/>
-                        <Area yAxisId="left" type="monotone" dataKey="sales" name="Observed Sales" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
-                        <Area yAxisId="right" type="monotone" dataKey="stock" name="Asset Levels" stroke="#0ea5e9" strokeWidth={3} fillOpacity={1} fill="url(#colorStock)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                        <AreaChart data={productAnalytics}>
+                          <defs>
+                            <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorStock" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#0ea5e9" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a', fontWeight: 'bold' }} dy={10} />
+                          <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
+                          <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
+                          <RechartsTooltip 
+                            contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                            labelStyle={{ fontWeight: 'black', color: '#18181b', marginBottom: '8px', fontSize: '12px' }}
+                          />
+                          <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', letterSpacing: '0.1em', textTransform: 'uppercase' }}/>
+                          <Area yAxisId="left" type="monotone" dataKey="sales" name="Observed Sales" stroke="#4f46e5" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
+                          <Area yAxisId="right" type="monotone" dataKey="stock" name="Asset Levels" stroke="#0ea5e9" strokeWidth={3} fillOpacity={1} fill="url(#colorStock)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </Card>
               </TabsContent>
@@ -3522,19 +3600,21 @@ export default function Inventory() {
                     <Truck className="w-4 h-4 text-emerald-500" /> Sourcing Reliability Index
                   </h3>
                   <div className="h-80 w-full">
-                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                      <BarChart data={supplierMetrics}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
-                        <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#3f3f46', fontWeight: 'black' }} dy={10} />
-                        <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
-                        <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
-                        <RechartsTooltip cursor={{fill: '#f4f4f5'}} contentStyle={{ borderRadius: '16px', border: 'none' }} />
-                        <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', letterSpacing: '0.1em', textTransform: 'uppercase' }}/>
-                        <Bar yAxisId="left" dataKey="qualityScore" name="Quality Rating" fill="#10b981" radius={[6, 6, 0, 0]} barSize={40} />
-                        <Bar yAxisId="left" dataKey="deliveryRate" name="Service SLA" fill="#f59e0b" radius={[6, 6, 0, 0]} barSize={40} />
-                        <Bar yAxisId="right" dataKey="leadTime" name="Cycle Time" fill="#8b5cf6" radius={[6, 6, 0, 0]} barSize={40} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                        <BarChart data={supplierMetrics}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
+                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#3f3f46', fontWeight: 'black' }} dy={10} />
+                          <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
+                          <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#71717a' }} />
+                          <RechartsTooltip cursor={{fill: '#f4f4f5'}} contentStyle={{ borderRadius: '16px', border: 'none' }} />
+                          <Legend verticalAlign="top" height={40} iconType="circle" wrapperStyle={{ fontSize: '10px', fontWeight: 'black', letterSpacing: '0.1em', textTransform: 'uppercase' }}/>
+                          <Bar yAxisId="left" dataKey="qualityScore" name="Quality Rating" fill="#10b981" radius={[6, 6, 0, 0]} barSize={40} />
+                          <Bar yAxisId="left" dataKey="deliveryRate" name="Service SLA" fill="#f59e0b" radius={[6, 6, 0, 0]} barSize={40} />
+                          <Bar yAxisId="right" dataKey="leadTime" name="Cycle Time" fill="#8b5cf6" radius={[6, 6, 0, 0]} barSize={40} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 </Card>
               </TabsContent>
@@ -4028,7 +4108,23 @@ export default function Inventory() {
                         />
                       </div>
                       <div className="flex-1 md:w-32">
-                        <div className="h-10 px-4 rounded-xl bg-white border border-zinc-100 flex items-center font-black text-xs text-zinc-900">
+                        <div className="relative group/cost">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-zinc-400 group-focus-within/cost:text-blue-500 transition-colors uppercase">{currency === 'USD' ? '$' : currency}</span>
+                          <Input 
+                            type="number"
+                            placeholder="Unit Cost"
+                            className="rounded-xl h-10 bg-white border-zinc-100 font-bold text-xs pl-10"
+                            value={item.cost}
+                            onChange={(e) => {
+                              const newItems = [...poForm.items];
+                              newItems[index] = { ...item, cost: parseFloat(e.target.value) || 0 };
+                              setPoForm({ ...poForm, items: newItems });
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex-1 md:w-40">
+                        <div className="h-10 px-4 rounded-xl bg-blue-50/30 border border-blue-100/50 flex items-center justify-end font-black text-xs text-blue-600">
                           {formatCurrency((item.cost || 0) * (item.qty || 0))}
                         </div>
                       </div>
@@ -4075,11 +4171,7 @@ export default function Inventory() {
             <Button 
               className="flex-1 md:flex-none rounded-2xl h-14 px-10 bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/20 hover:scale-[1.02] transition-all"
               disabled={isSavingPO}
-              onClick={() => {
-                const total = poForm.items.reduce((sum: number, item: any) => sum + (item.qty * item.cost), 0);
-                setPoForm({ ...poForm, total_cost: total, status: 'SENT' });
-                handleSavePO();
-              }}
+              onClick={() => handleSavePO('SENT')}
             >
               {isSavingPO ? "Deploying..." : "Initialize Order"}
             </Button>

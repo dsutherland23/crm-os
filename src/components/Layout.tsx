@@ -62,6 +62,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { CommandPalette } from "./CommandPalette";
 
 interface SidebarProps {
   activeTab: string;
@@ -510,6 +511,19 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
   const { activeBranch, setActiveBranch, hasActiveTransaction, currency, setCurrency, formatCurrency, enterpriseId, posSession, updateShiftStatus, clearSession, shiftTimePolicies, logout } = useModules();
   const [branches, setBranches] = useState<any[]>([]);
   const [pendingBranchTarget, setPendingBranchTarget] = useState<string | null>(null);
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
+
+  // Global Cmd+K / Ctrl+K keyboard shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCmdPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Auto-Currency Detection State
   const [detectedCurrency, setDetectedCurrency] = useState<string | null>(null);
@@ -736,17 +750,16 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
         </Button>
         
         {/* FIX: Search bar now visible on mobile — field staff on tablets need quick search access */}
-        <div className="flex items-center gap-2 px-3 py-2 bg-zinc-100 rounded-full border border-zinc-200/50 w-full max-w-[160px] sm:max-w-xs md:max-w-md group focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500/50 transition-all duration-300">
-          <Search className="w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors shrink-0" />
-          <input 
-            type="text" 
-            placeholder="Search..." 
-            className="bg-transparent border-none outline-none text-sm w-full placeholder:text-zinc-400 text-zinc-700 min-w-0"
-          />
+        <button
+          onClick={() => setCmdPaletteOpen(true)}
+          className="flex items-center gap-2 px-3 py-2 bg-zinc-100 rounded-full border border-zinc-200/50 w-full max-w-[160px] sm:max-w-xs md:max-w-md group hover:ring-2 hover:ring-blue-500/20 hover:border-blue-500/50 transition-all duration-300 text-left"
+        >
+          <Search className="w-4 h-4 text-zinc-400 group-hover:text-blue-500 transition-colors shrink-0" />
+          <span className="bg-transparent border-none outline-none text-sm w-full text-zinc-400 min-w-0 select-none">Search or jump to...</span>
           <kbd className="hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border bg-white px-1.5 font-mono text-[10px] font-medium text-zinc-400 opacity-100 shrink-0">
             <span className="text-xs">⌘</span>K
           </kbd>
-        </div>
+        </button>
       </div>
 
       <div className="flex items-center gap-4">
@@ -997,6 +1010,8 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
         </div>
       </div>
     </header>
+
+    <CommandPalette open={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} setActiveTab={(tab) => { setActiveTab?.(tab); }} />
 
     <Dialog open={!!pendingBranchTarget} onOpenChange={(open) => !open && setPendingBranchTarget(null)}>
       <DialogContent className="sm:max-w-[425px] rounded-3xl border-zinc-100 p-6">

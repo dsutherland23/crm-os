@@ -1162,6 +1162,12 @@ export default function Revenue() {
     })).sort((a, b) => b.value - a.value);
   }, [expenses]);
 
+  const [isMounted, setIsMounted] = useState(false);
+
+  React.useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
   if (loading) {
     return (
       <div className="flex h-[calc(100vh-80px)] flex-col items-center justify-center bg-zinc-50/50">
@@ -1351,7 +1357,8 @@ export default function Revenue() {
           </CardHeader>
           <CardContent className="pt-10">
             <div className="h-[350px] w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              {isMounted && (
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <AreaChart data={cashFlowData}>
                   <defs>
                     <linearGradient id="colorIn" x1="0" y1="0" x2="0" y2="1">
@@ -1371,6 +1378,7 @@ export default function Revenue() {
                   <Area type="monotone" dataKey="outflow" stroke="#f43f5e" strokeWidth={3} fillOpacity={1} fill="url(#colorOut)" />
                 </AreaChart>
               </ResponsiveContainer>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -1383,7 +1391,8 @@ export default function Revenue() {
           </CardHeader>
           <CardContent className="pt-6">
             <div className="h-[250px] w-full">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              {isMounted && (
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                 <PieChart>
                   <Pie
                     data={expenseCategories}
@@ -1401,6 +1410,7 @@ export default function Revenue() {
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
+              )}
             </div>
             <div className="space-y-3 mt-6">
               {expenseCategories.map((cat) => (
@@ -2026,7 +2036,8 @@ export default function Revenue() {
                    <CardDescription>Payroll expenses vs. net revenue generation.</CardDescription>
                 </CardHeader>
                 <CardContent className="h-[250px] pt-4">
-                   <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                   {isMounted && (
+                     <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                       <BarChart data={cashFlowData}>
                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                          <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
@@ -2037,6 +2048,7 @@ export default function Revenue() {
                          <Bar dataKey="payroll" name="Payroll Cost" fill="#f43f5e" radius={[4, 4, 0, 0]} />
                       </BarChart>
                    </ResponsiveContainer>
+                   )}
                 </CardContent>
              </Card>
              <Card className="card-modern">
