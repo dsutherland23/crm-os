@@ -37,6 +37,7 @@ import {
   Sparkles, Star, CreditCard, History, FileCheck, XCircle, Clock, AlertCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Dialog,
   DialogContent,
@@ -179,6 +180,7 @@ export default function AdminPortal() {
   const [adminUser, setAdminUser] = useState<User | null>(null);
   const [adminRecord, setAdminRecord] = useState<AdminRecord | null>(null);
   const [emptyRegistry, setEmptyRegistry] = useState(false);
+  const [showResolution, setShowResolution] = useState<{ type: "NOT_REGISTERED" | "PERMISSION_DENIED" | "BOOTSTRAP_LOCKED" } | null>(null);
 
   useEffect(() => {
     // Check if registry is empty (bootstrap mode)
@@ -234,10 +236,7 @@ export default function AdminPortal() {
           console.warn(`[Admin] Access Denied for ${user.email}. User not in registry and registry is not empty.`);
           await signOut(auth);
           setPhase("login");
-          toast.error("Access Denied", {
-            description: "Your account is not in the authorized admin registry.",
-            duration: 8000
-          });
+          setShowResolution({ type: "NOT_REGISTERED" });
         }
       } catch (err: any) {
         // Likely a Firestore permission error — sign out and show message
@@ -246,7 +245,7 @@ export default function AdminPortal() {
         setPhase("login");
         // Show a friendlier message for permission errors
         if (err.code === 'permission-denied') {
-          toast.error("Access denied. Your account is not registered as an admin.");
+          setShowResolution({ type: "PERMISSION_DENIED" });
         } else {
           toast.error(`Verification failed: ${err.message || 'Unknown error'}`);
         }
@@ -264,6 +263,63 @@ export default function AdminPortal() {
         <AdminShell user={adminUser} record={adminRecord} />
       )}
       {phase === "portal" && (!adminUser || !adminRecord) && <AdminLogin emptyRegistry={emptyRegistry} onSuccess={() => {}} />}
+
+      {/* ADMIN RESOLUTION GUIDE */}
+      <AnimatePresence>
+        {showResolution && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/80 backdrop-blur-md">
+            <div className="w-full max-w-md bg-zinc-900 border border-white/[0.08] rounded-[2.5rem] shadow-2xl overflow-hidden relative">
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(239,68,68,0.1)_0%,_transparent_60%)] pointer-events-none" />
+              
+              <div className="p-8 space-y-6 relative">
+                <div className="flex flex-col items-center text-center gap-4">
+                  <div className="w-20 h-20 bg-rose-500/10 rounded-3xl flex items-center justify-center border border-rose-500/20">
+                    <ShieldAlert className="w-10 h-10 text-rose-500" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-black text-white tracking-tight">Access Denied</h2>
+                    <p className="text-zinc-500 text-sm font-medium leading-relaxed">
+                      {showResolution.type === "NOT_REGISTERED" 
+                        ? "Your account was authenticated, but it is not listed in the authorized Admin Registry." 
+                        : "Security clearance failed. Your account does not have the necessary permissions to access this portal."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-white/[0.03] rounded-2xl p-5 space-y-3 border border-white/[0.05]">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-600">How to Fix This</p>
+                  <div className="flex gap-3">
+                    <div className="w-5 h-5 rounded-full bg-rose-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">1</div>
+                    <div className="space-y-1">
+                       <p className="text-xs text-white font-bold">Use Master Admin Email</p>
+                       <p className="text-[10px] text-zinc-500 font-medium">Log in with the email defined in the system's VITE_MASTER_ADMIN_EMAIL override.</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-5 h-5 rounded-full bg-zinc-800 text-white text-[10px] font-black flex items-center justify-center shrink-0">2</div>
+                    <div className="space-y-1">
+                       <p className="text-xs text-white font-bold">Registry Entry Required</p>
+                       <p className="text-[10px] text-zinc-500 font-medium">An existing Super Admin must add your email to the 'Admins' module to grant access.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 pt-2">
+                  <Button 
+                    className="w-full h-14 rounded-2xl bg-white text-black hover:bg-zinc-200 font-black text-sm transition-all active:scale-95"
+                    onClick={() => setShowResolution(null)}
+                  >
+                    Got it, I'll check my credentials
+                  </Button>
+                  <p className="text-center text-[10px] text-zinc-700 font-bold uppercase tracking-widest">
+                    Zero Trust Protocol · Secure Audit Logged
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

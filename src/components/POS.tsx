@@ -182,6 +182,7 @@ export default function POS() {
   const [isClosePromptOpen, setIsClosePromptOpen] = useState(false);
   const [isStockSynced, setIsStockSynced] = useState(false);
   const [isOpeningFloatOpen, setIsOpeningFloatOpen] = useState(false);
+  const [showResolution, setShowResolution] = useState<{ type: "NO_SESSION" | "BRANCH_MISMATCH" | "NETWORK_OFFLINE" } | null>(null);
 
   // Reset sync state when opening close dialog
   useEffect(() => {
@@ -739,11 +740,9 @@ export default function POS() {
 
     // FIX: Guard against null session — a null sessionId makes this transaction invisible
     // to the cash reconciliation report, causing impossible drawer discrepancies.
+    // TRIGGER RESOLUTION GUIDE: Instead of a simple toast, show the actionable resolution overlay
     if (!currentSessionId) {
-      toast.error("Session Error: No active register session detected.", {
-        description: "Please close this terminal and re-authenticate to open a new session before processing sales.",
-        duration: 8000
-      });
+      setShowResolution({ type: "NO_SESSION" });
       return;
     }
 
@@ -1340,6 +1339,69 @@ export default function POS() {
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden bg-zinc-50/50 relative touch-pan-y overscroll-y-contain">
+      {/* Resolution Center Overlay */}
+      <AnimatePresence>
+        {showResolution && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-zinc-950/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl overflow-hidden border border-zinc-200"
+            >
+              <div className="p-8 space-y-6">
+                <div className="flex flex-col items-center text-center gap-4">
+                  <div className="w-20 h-20 bg-rose-50 rounded-3xl flex items-center justify-center shadow-inner">
+                    <AlertCircle className="w-10 h-10 text-rose-500" />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-black text-zinc-900 tracking-tight">Shift Setup Required</h2>
+                    <p className="text-zinc-500 text-sm font-medium leading-relaxed">
+                      To process sales and maintain audit accuracy, this terminal must be linked to an active cash drawer session.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-zinc-50 rounded-2xl p-5 space-y-3 border border-zinc-100">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Resolution Steps</p>
+                  <div className="flex gap-3">
+                    <div className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">1</div>
+                    <p className="text-xs text-zinc-700 font-bold">Initialize your opening float balance.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">2</div>
+                    <p className="text-xs text-zinc-700 font-bold">The system will then link all sales to your current shift.</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 pt-2">
+                  <Button 
+                    className="w-full h-14 rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 font-black text-sm shadow-xl shadow-zinc-950/10 transition-all active:scale-95"
+                    onClick={() => {
+                      setShowResolution(null);
+                      setIsOpeningFloatOpen(true);
+                    }}
+                  >
+                    Initialize Shift Now
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    className="w-full h-10 rounded-xl text-zinc-400 hover:text-zinc-600 font-bold text-xs"
+                    onClick={() => {
+                      setShowResolution(null);
+                      setIsAuthorized(false);
+                      setSelectedAdmin(null);
+                    }}
+                  >
+                    Return to Login
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Product Catalog */}
       <div className="flex-1 flex flex-col min-w-0 h-full">
         <div className="p-6 lg:p-8 space-y-6">
