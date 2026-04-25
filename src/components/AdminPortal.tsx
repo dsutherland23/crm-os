@@ -184,11 +184,13 @@ export default function AdminPortal() {
     // Check if registry is empty (bootstrap mode)
     const checkRegistry = async () => {
       try {
-        const { getDocs, query, collection, limit } = await import("firebase/firestore");
+        const { getDocs, collection, query, limit } = await import("firebase/firestore");
         const snap = await getDocs(query(collection(db, "admin_users"), limit(1)));
-        setEmptyRegistry(snap.empty);
+        const isEmpty = snap.empty;
+        setEmptyRegistry(isEmpty);
+        console.log(`[Admin] Registry Status: ${isEmpty ? "Empty (Bootstrap Active)" : "Active (Protected)"}`);
       } catch (e) {
-        console.warn("Registry check failed:", e);
+        console.warn("[Admin] Registry check failed:", e);
       }
     };
     checkRegistry();
@@ -228,11 +230,12 @@ export default function AdminPortal() {
           toast.success("Welcome, Master Admin", { description: "Your account has been authorized as the system owner." });
         } else {
           // Not in registry — sign out silently
+          console.warn(`[Admin] Access Denied for ${user.email}. User not in registry and registry is not empty.`);
           await signOut(auth);
           setPhase("login");
           toast.error("Access Denied", {
-            description: "This account is not authorized to access the Admin Portal.",
-            duration: 6000
+            description: "Your account is not in the authorized admin registry.",
+            duration: 8000
           });
         }
       } catch (err: any) {
