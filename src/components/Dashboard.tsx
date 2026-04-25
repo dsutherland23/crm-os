@@ -263,6 +263,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
   const [transactions, setTransactions] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   // Prevent duplicate subscription triggers
@@ -378,7 +379,16 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
       }
     );
 
-    subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs, unsubStats];
+    // 3b. Products - needed to cross-reference prices for Inventory Value
+    const unsubProducts = onSnapshot(
+      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(200)),
+      (snap) => {
+        setProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      },
+      (err) => console.error("Products listener:", err)
+    );
+
+    subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs, unsubStats, unsubProducts];
   }, [activeBranch, enterpriseId]);
 
   useEffect(() => {
@@ -393,12 +403,16 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     const revenue = transactions.reduce((acc, tx) => acc + (Number(tx.total) || 0), 0);
     const orders = transactions.length;
     const customerCount = customers.filter((c) => c.status !== "Archived").length;
-    const inventoryValue = inventory.reduce(
-      (acc, item) => acc + (Number(item.quantity || item.stock) || 0) * (Number(item.retail_price || item.price || item.cost) || 0),
-      0
-    );
+    // Cross-reference inventory stock records with product prices
+    const inventoryValue = inventory.reduce((acc, item) => {
+      const qty = Number(item.quantity ?? item.stock) || 0;
+      // Look up the product to get the price
+      const product = products.find((p) => p.id === item.product_id);
+      const price = Number(product?.cost || product?.retail_price || product?.price || item.retail_price || item.price || item.cost) || 0;
+      return acc + qty * price;
+    }, 0);
     return { revenue, orders, customers: customerCount, inventory: inventoryValue };
-  }, [dashboardStats, transactions, customers, inventory]);
+  }, [dashboardStats, transactions, customers, inventory, products]);
 
   // ── Chart Data ─────────────────────────────────────────────
   const chartData = useMemo(() => {
