@@ -1043,8 +1043,6 @@ export default function POS() {
                  setActiveBranch(primaryBranch);
                }
 
-               // Instead of immediate creation, trigger the Opening Float Prompt
-               setIsAuthorized(true);
                setIsOpeningFloatOpen(true);
                toast.info(`Welcome, ${selectedAdmin.name}. Please set opening float.`);
              }
@@ -1090,7 +1088,7 @@ export default function POS() {
 
       setCurrentSessionId(docRef.id);
       setIsOpeningFloatOpen(false);
-      setIsAuthorized(true);
+      setIsAuthorized(true); // Now authorized AFTER session is created
       setPosSession({
         staffId: selectedAdmin.id,
         staffName: selectedAdmin.name,
@@ -2518,8 +2516,16 @@ export default function POS() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isOpeningFloatOpen} onOpenChange={setIsOpeningFloatOpen}>
-        <DialogContent className="sm:max-w-xl rounded-[2.5rem] p-10 border-none shadow-2xl bg-white overflow-hidden max-h-[90vh] overflow-y-auto">
+      <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
+        if (!open) {
+          // If they close without setting float, reset everything to the login screen
+          setIsOpeningFloatOpen(false);
+          setSelectedAdmin(null);
+          setPinEntry("");
+          setIsAuthorized(false);
+        }
+      }}>
+        <DialogContent className="sm:max-w-xl rounded-[2.5rem] p-10 border-none shadow-2xl bg-white overflow-hidden max-h-[90vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()}>
           <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-indigo-500/5 pointer-events-none" />
           <DialogHeader className="relative space-y-4">
             <div className="flex justify-between items-start">
