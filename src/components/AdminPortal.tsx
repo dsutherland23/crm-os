@@ -216,8 +216,9 @@ export default function AdminPortal() {
           setAdminUser(user);
           setAdminRecord(snap.data() as AdminRecord);
           setPhase("portal");
-        } else if (emptyRegistry) {
-          // SILENT AUTO-PROVISION FOR FIRST ADMIN
+        } else if (emptyRegistry || (import.meta.env.VITE_MASTER_ADMIN_EMAIL && user.email === import.meta.env.VITE_MASTER_ADMIN_EMAIL)) {
+          // SILENT AUTO-PROVISION FOR FIRST ADMIN OR MASTER OVERRIDE
+          console.log(`[Admin] Auto-provisioning ${user.email} (Empty: ${emptyRegistry}, Master: ${user.email === import.meta.env.VITE_MASTER_ADMIN_EMAIL})`);
           const firstAdmin: AdminRecord = {
             email: user.email || "",
             role: "super_admin",
@@ -227,7 +228,7 @@ export default function AdminPortal() {
           setAdminUser(user);
           setAdminRecord(firstAdmin);
           setPhase("portal");
-          toast.success("Welcome, Master Admin", { description: "Your account has been authorized as the system owner." });
+          toast.success("Welcome, Master Admin", { description: "Your account has been authorized via Master Override." });
         } else {
           // Not in registry — sign out silently
           console.warn(`[Admin] Access Denied for ${user.email}. User not in registry and registry is not empty.`);
