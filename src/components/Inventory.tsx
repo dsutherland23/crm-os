@@ -296,7 +296,7 @@ export default function Inventory() {
   const inTransit = movements.filter(m => m.status === 'IN_TRANSIT').length;
   const inventoryValue = products.reduce((sum, p) => {
     const total = getProductStock(p.id, 'all');
-    return sum + (total * (p.cost || 0));
+    return sum + (total * (p.cost || p.retail_price || p.price || 0));
   }, 0);
 
   const generateSKU = (category: string) => {
@@ -712,7 +712,8 @@ export default function Inventory() {
           });
 
           // Accumulate financial impact
-          const cost = products.find(p => p.id === item.product_id)?.cost || 0;
+          const p = products.find(prod => prod.id === item.product_id);
+          const cost = p?.cost || p?.retail_price || p?.price || 0;
           if (item.variance < 0) {
             totalShrinkageValue += (Math.abs(item.variance) * cost);
           } else {
@@ -823,7 +824,7 @@ export default function Inventory() {
       });
 
       const product = products.find(p => p.id === batchItem.product_id);
-      const cost = product?.cost || 0;
+      const cost = product?.cost || product?.retail_price || product?.price || 0;
       const totalShrinkageValue = cost * batchItem.quantity;
       if (totalShrinkageValue > 0) {
         await recordFinancialEvent({
@@ -853,7 +854,7 @@ export default function Inventory() {
         name: product.name || '',
         sku: product.sku || '',
         price: product.retail_price || product.price || 0,
-        cost: product.cost || 0,
+        cost: product.cost || product.retail_price || product.price || 0,
         markup: product.markup || 20,
         category: product.category || '',
         barcode: product.barcode || '',
@@ -2626,9 +2627,9 @@ export default function Inventory() {
                                         const reorderQty = (p.max_stock_level || 100) - stock;
                                         setPoForm({
                                           supplier_id: p.supplier_id || '',
-                                          items: [{ product_id: p.id, qty: reorderQty, cost: p.cost || 0 }],
+                                          items: [{ product_id: p.id, qty: reorderQty, cost: p.cost || p.retail_price || p.price || 0 }],
                                           status: 'DRAFT',
-                                          total_cost: reorderQty * (p.cost || 0),
+                                          total_cost: reorderQty * (p.cost || p.retail_price || p.price || 0),
                                           notes: `Auto-generated replenishment for ${p.name}`
                                         });
                                         setSelectedPO(null);
@@ -3372,7 +3373,9 @@ export default function Inventory() {
                 onValueChange={(val) => setTransferData({...transferData, product_id: val})}
               >
                 <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
-                  <SelectValue placeholder="Select Asset" />
+                  <SelectValue placeholder="Select Asset">
+                    {products.find(p => p.id === transferData.product_id)?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent className="rounded-2xl bg-white">
                   {products.map(p => (
@@ -3390,7 +3393,9 @@ export default function Inventory() {
                   onValueChange={(val) => setTransferData({...transferData, from_branch_id: val})}
                 >
                   <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
-                    <SelectValue placeholder="From" />
+                    <SelectValue placeholder="From">
+                      {branches.find(b => b.id === transferData.from_branch_id)?.name}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent className="rounded-2xl bg-white">
                     {branches.map(b => (
@@ -3406,7 +3411,9 @@ export default function Inventory() {
                   onValueChange={(val) => setTransferData({...transferData, to_branch_id: val})}
                 >
                   <SelectTrigger className="h-14 rounded-2xl border-zinc-200 focus:ring-4 focus:ring-blue-500/10 transition-all font-bold">
-                    <SelectValue placeholder="To" />
+                    <SelectValue placeholder="To">
+                      {branches.find(b => b.id === transferData.to_branch_id)?.name}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent className="rounded-2xl bg-white">
                     {branches.map(b => (
@@ -3977,7 +3984,9 @@ export default function Inventory() {
               onValueChange={setSelectedSupplierForBatch}
             >
               <SelectTrigger className="rounded-2xl h-14 bg-zinc-50 border-zinc-100 font-bold">
-                <SelectValue placeholder="Select Supplier..." />
+                <SelectValue placeholder="Select Supplier...">
+                  {suppliers.find(s => s.id === selectedSupplierForBatch)?.name}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent className="rounded-2xl bg-white border-zinc-200">
                 {suppliers.map(s => (
@@ -4028,7 +4037,9 @@ export default function Inventory() {
                   onValueChange={(val) => setPoForm({...poForm, supplier_id: val})}
                 >
                   <SelectTrigger className="rounded-2xl h-12 sm:h-14 bg-zinc-50 border-zinc-100 font-bold">
-                    <SelectValue placeholder="Select Partner" />
+                    <SelectValue placeholder="Select Partner">
+                      {suppliers.find(s => s.id === poForm.supplier_id)?.name}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent className="rounded-2xl bg-white border-zinc-200">
                     {suppliers.map(s => (
@@ -4061,7 +4072,11 @@ export default function Inventory() {
                     if (firstProd) {
                       setPoForm({
                         ...poForm,
-                        items: [...poForm.items, { product_id: firstProd.id, qty: 1, cost: firstProd.cost || 0 }]
+                        items: [...poForm.items, { 
+                          product_id: firstProd.id, 
+                          qty: 1, 
+                          cost: firstProd.cost || firstProd.retail_price || firstProd.price || 0 
+                        }]
                       });
                     }
                   }}
@@ -4079,12 +4094,18 @@ export default function Inventory() {
                         onValueChange={(val) => {
                           const p = products.find(prod => prod.id === val);
                           const newItems = [...poForm.items];
-                          newItems[index] = { ...item, product_id: val, cost: p?.cost || 0 };
+                          newItems[index] = { 
+                            ...item, 
+                            product_id: val, 
+                            cost: p?.cost || p?.retail_price || p?.price || 0 
+                          };
                           setPoForm({ ...poForm, items: newItems });
                         }}
                       >
                         <SelectTrigger className="rounded-xl h-10 bg-white border-zinc-100 font-bold text-xs">
-                          <SelectValue placeholder="Select Asset" />
+                          <SelectValue placeholder="Select Asset">
+                            {products.find(p => p.id === item.product_id)?.name}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent className="rounded-xl bg-white border-zinc-200">
                           {products.map(p => (
