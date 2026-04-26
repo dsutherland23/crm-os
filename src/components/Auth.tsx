@@ -291,92 +291,100 @@ export default function Auth() {
     if (!validateStep(1)) return;
     setLoading(true);
     const cleanEmail = email.trim().toLowerCase();
+    const inviteId = cleanEmail.replace(/[^a-z0-9]/g, '_');
+
     try {
-      // 1. Try signing in directly (works for returning staff who already activated)
-      try {
-        await signInWithEmailAndPassword(auth, cleanEmail, password);
-        toast.success("Welcome back!");
-        return;
-      } catch (signInErr: any) {
-        // Only continue to activation if it's a "not found" error
-        if (signInErr.code !== "auth/user-not-found" && signInErr.code !== "auth/invalid-credential") {
-          // Wrong password, too many attempts, etc.
-          toast.error(signInErr.message || "Login failed.");
+      // 1. Check for a pending staff invite first (this is the "Provisioned Identity")
+      const inviteSnap = await fs.getDoc(fs.doc(db, "staff_invites", inviteId));
+      let user: any = null;
+
+      if (inviteSnap.exists()) {
+        const inviteData = inviteSnap.data();
+        if (inviteData.status === "PENDING_ACTIVATION") {
+          // A: User is trying to activate their provisioned identity
+          try {
+            // Try to sign in first (if they already had an account for another enterprise)
+            const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
+            user = cred.user;
+          } catch (signInErr: any) {
+            // If they don't have an account, create it
+            if (signInErr.code === "auth/user-not-found" || signInErr.code === "auth/invalid-credential") {
+              const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+              user = cred.user;
+            } else {
+              throw signInErr;
+            }
+          }
+
+          // Write/Update the final user profile (for Web Portal access)
+          await fs.setDoc(fs.doc(db, "users", user.uid), {
+            fullName: inviteData.fullName,
+            email: cleanEmail,
+            role: inviteData.role,
+            enterprise_id: inviteData.enterprise_id,
+            enterpriseName: inviteData.enterpriseName,
+            status: "ACTIVE",
+            activatedAt: new Date().toISOString(),
+          }, { merge: true });
+
+          // Link/Create the Staff record (for POS Terminal access)
+          const staffQuery = fs.query(
+            fs.collection(db, "staff"), 
+            fs.where("email", "==", cleanEmail),
+            fs.where("enterprise_id", "==", inviteData.enterprise_id)
+          );
+          const staffSnap = await fs.getDocs(staffQuery);
+
+          if (!staffSnap.empty) {
+            await fs.updateDoc(fs.doc(db, "staff", staffSnap.docs[0].id), {
+              id: user.uid,
+              status: "ACTIVE",
+              updatedAt: new Date().toISOString()
+            });
+          } else {
+            await fs.addDoc(fs.collection(db, "staff"), {
+              id: user.uid,
+              name: inviteData.fullName,
+              email: cleanEmail,
+              role: inviteData.role,
+              status: "ACTIVE",
+              enterprise_id: inviteData.enterprise_id,
+              createdAt: new Date().toISOString(),
+              pin: "0000"
+            });
+          }
+
+          // Clean up the one-time invite
+          await fs.deleteDoc(fs.doc(db, "staff_invites", inviteId));
+
+          // Trigger verification transmission (security hardening)
+          try {
+            await sendEmailVerification(user, {
+              url: window.location.origin,
+              handleCodeInApp: true,
+            });
+          } catch (verifErr) {
+            console.warn("Non-fatal: Staff verification email failed to send", verifErr);
+          }
+
+          toast.success(`Welcome, ${inviteData.fullName}! Identity activated for ${inviteData.enterpriseName}. Check email for verification.`);
+          window.location.reload();
           return;
         }
       }
 
-      // 2. No Firebase account yet — check for a pending staff invite
-      const inviteId = cleanEmail.replace(/[^a-z0-9]/g, '_');
-      const inviteSnap = await fs.getDoc(fs.doc(db, "staff_invites", inviteId));
-
-      if (!inviteSnap.exists()) {
-        toast.error("Access Denied", { 
-          description: "No invitation found for this email. Please ask your administrator to 'Provision Portal Identity' in the Staff Manager." 
-        });
-        return;
-      }
-
-      const inviteData = inviteSnap.data();
-      if (inviteData.status !== "PENDING_ACTIVATION") {
-        toast.error("Invite already used or expired.");
-        return;
-      }
-
-      // 3. Create the Firebase Auth account
-      const { user } = await createUserWithEmailAndPassword(auth, cleanEmail, password);
-
-      // 4. Write the final user profile (for Web Portal access)
-      await fs.setDoc(fs.doc(db, "users", user.uid), {
-        fullName: inviteData.fullName,
-        email: cleanEmail,
-        role: inviteData.role,
-        enterprise_id: inviteData.enterprise_id,
-        enterpriseName: inviteData.enterpriseName,
-        status: "ACTIVE",
-        activatedAt: new Date().toISOString(),
-      });
-
-      // 5. Link/Create the Staff record (for POS Terminal access)
-      // Check if a staff record already exists for this email
-      const staffQuery = fs.query(
-        fs.collection(db, "staff"), 
-        fs.where("email", "==", cleanEmail),
-        fs.where("enterprise_id", "==", inviteData.enterprise_id)
-      );
-      const staffSnap = await fs.getDocs(staffQuery);
-
-      if (!staffSnap.empty) {
-        // Update existing record with the new UID
-        await fs.updateDoc(fs.doc(db, "staff", staffSnap.docs[0].id), {
-          id: user.uid,
-          status: "ACTIVE",
-          updatedAt: new Date().toISOString()
-        });
-      } else {
-        // Create new staff record
-        await fs.addDoc(fs.collection(db, "staff"), {
-          id: user.uid,
-          name: inviteData.fullName,
-          email: cleanEmail,
-          role: inviteData.role,
-          status: "ACTIVE",
-          enterprise_id: inviteData.enterprise_id,
-          createdAt: new Date().toISOString(),
-          pin: "0000" // Default PIN, staff should change this in settings
-        });
-      }
-
-      // 6. Clean up the one-time invite
-      await fs.deleteDoc(fs.doc(db, "staff_invites", inviteId));
-
-      toast.success(`Welcome, ${inviteData.fullName}! Your account is now active.`);
+      // 2. If no invite found, treat as a normal returning staff login
+      await signInWithEmailAndPassword(auth, cleanEmail, password);
+      toast.success("Welcome back!");
       window.location.reload();
+
     } catch (error: any) {
       if (error.code === "auth/email-already-in-use") {
         toast.error("Account exists. Please check your password and try again.");
       } else if (error.code === "auth/weak-password") {
         toast.error("Password must be at least 6 characters.");
+      } else if (error.code === "auth/user-not-found" || error.code === "auth/invalid-credential") {
+        triggerError({ auth: "Invalid email or password. If this is your first time, ensure your admin has 'Provisioned' your identity." });
       } else {
         toast.error(error.message || "Staff login failed.");
       }
@@ -442,7 +450,17 @@ export default function Auth() {
             // Delete the one-time invite record
             await deleteDoc(doc(db, "staff_invites", inviteId));
 
-            toast.success(`Welcome, ${data.fullName}! Access granted to ${data.enterpriseName}.`);
+            // Trigger verification transmission
+            try {
+              await sendEmailVerification(user, {
+                url: window.location.origin,
+                handleCodeInApp: true,
+              });
+            } catch (verifErr) {
+              console.warn("Non-fatal: Staff verification email failed to send", verifErr);
+            }
+
+            toast.success(`Welcome, ${data.fullName}! Check your email to verify and activate your workspace.`);
             return;
           } catch (authErr: any) {
             if (authErr.code === "auth/email-already-in-use") {
