@@ -1227,16 +1227,18 @@ export default function Revenue() {
       </div>
 
       {/* Main Module Navigation */}
-      <div className="flex flex-wrap items-center gap-2 p-1 bg-zinc-100/80 backdrop-blur-md rounded-2xl w-max mb-8 border border-zinc-200/50">
-        <button onClick={() => setMainTab("overview")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2", mainTab === "overview" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
-          <TrendingUp className="w-4 h-4" /> Treasury & Overview
-        </button>
-        <button onClick={() => setMainTab("documents")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2", mainTab === "documents" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
-          <FileText className="w-4 h-4" /> Documents & Ledgers
-        </button>
-        <button onClick={() => setMainTab("advanced")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2", mainTab === "advanced" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
-          <PieChartIcon className="w-4 h-4" /> Advanced Reports
-        </button>
+      <div className="w-full overflow-x-auto scrollbar-none mb-8 -mx-4 px-4">
+        <div className="flex items-center gap-2 p-1 bg-zinc-100/80 backdrop-blur-md rounded-2xl w-max border border-zinc-200/50">
+          <button onClick={() => setMainTab("overview")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap", mainTab === "overview" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
+            <TrendingUp className="w-4 h-4" /> Treasury & Overview
+          </button>
+          <button onClick={() => setMainTab("documents")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap", mainTab === "documents" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
+            <FileText className="w-4 h-4" /> Documents & Ledgers
+          </button>
+          <button onClick={() => setMainTab("advanced")} className={cn("px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap", mainTab === "advanced" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200/50")}>
+            <PieChartIcon className="w-4 h-4" /> Advanced Reports
+          </button>
+        </div>
       </div>
 
       {mainTab === "overview" && (

@@ -970,6 +970,15 @@ export default function POS() {
         });
       }
 
+      // 3.5. Update Session Stats for real-time Staff Manager metrics
+      if (currentSessionId) {
+        await updateDoc(doc(db, "pos_sessions", currentSessionId), {
+          totalSales: increment(isReturnMode ? -total : total),
+          transactionCount: increment(isReturnMode ? 0 : 1), // returns don't count towards positive transaction volume
+          lastActivity: new Date().toISOString()
+        });
+      }
+
       // 4. Audit log
       await addDoc(collection(db, "audit_logs"), {
         action: isReturnMode ? "Return Completed" : "Sale Completed",

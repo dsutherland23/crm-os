@@ -254,9 +254,9 @@ export default function Suppliers() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#FAFAFA] overflow-hidden">
+    <div className="flex flex-col lg:h-full bg-[#FAFAFA] lg:overflow-hidden">
       {/* Header */}
-      <div className="px-8 py-8 shrink-0">
+      <div className="px-4 md:px-8 py-8 shrink-0">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div>
             <h1 className="text-3xl font-black text-zinc-900 tracking-tight mb-2">Supply Chain Hub</h1>
@@ -304,9 +304,9 @@ export default function Suppliers() {
         </div>
       </div>
 
-      <div className="flex-1 flex gap-8 px-8 pb-8 overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row gap-8 px-4 md:px-8 pb-8 lg:overflow-hidden">
         {/* Main List */}
-        <Card className={cn("card-modern flex-1 bg-white border-zinc-100 shadow-xl flex flex-col transition-all duration-500", selectedSupplier && "flex-[0.4]")}>
+        <Card className={cn("card-modern flex-1 bg-white border-zinc-100 shadow-xl flex flex-col transition-all duration-500 min-h-[400px] lg:min-h-0", selectedSupplier && "lg:flex-[0.4]")}>
           <div className="p-6 border-b border-zinc-50 flex items-center justify-between gap-4">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
@@ -433,7 +433,7 @@ export default function Suppliers() {
               exit={{ x: 50, opacity: 0 }}
               className="flex-1 min-w-0"
             >
-              <Card className="card-modern h-full bg-white border-zinc-100 shadow-2xl flex flex-col overflow-hidden">
+              <Card className="card-modern lg:h-full bg-white border-zinc-100 shadow-2xl flex flex-col lg:overflow-hidden">
                 <CardHeader className="border-b border-zinc-50 p-8 shrink-0">
                   <div className="flex items-start justify-between mb-8">
                     <div className="flex items-center gap-6">
@@ -498,10 +498,10 @@ export default function Suppliers() {
                   </div>
                 </CardHeader>
 
-                <div className="flex-1 overflow-hidden">
-                  <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab} className="h-full flex flex-col">
-                    <div className="px-8 pt-6 border-b border-zinc-50 shrink-0">
-                      <TabsList className="bg-transparent gap-8 h-auto p-0 border-none">
+                <div className="flex-1 lg:overflow-hidden">
+                  <Tabs value={activeDetailTab} onValueChange={setActiveDetailTab} className="lg:h-full flex flex-col">
+                    <div className="px-8 pt-6 border-b border-zinc-50 shrink-0 overflow-x-auto scrollbar-none">
+                      <TabsList className="bg-transparent gap-8 h-auto p-0 border-none flex w-max">
                         <TabsTrigger value="procurement" className="tab-modern">Acquisitions</TabsTrigger>
                         <TabsTrigger value="financials" className="tab-modern">Ledger</TabsTrigger>
                         <TabsTrigger value="compliance" className="tab-modern">Compliance</TabsTrigger>

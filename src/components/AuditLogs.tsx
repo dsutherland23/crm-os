@@ -33,6 +33,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -45,7 +51,7 @@ import {
 } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
-import { motion } from "motion/react";
+import { motion, AnimatePresence } from "motion/react";
 
 /* ─────────────────────────────────────────
    Types
@@ -60,6 +66,100 @@ interface LogEntry {
   user?: string;
   time?: string;
   timestamp?: any;
+  metadata?: any;
+}
+
+/* ─────────────────────────────────────────
+   Log Detail Viewer
+ ───────────────────────────────────────── */
+function LogDetailDialog({ log, open, onOpenChange }: { log: LogEntry | null, open: boolean, onOpenChange: (open: boolean) => void }) {
+  if (!log) return null;
+  const date = getLogDate(log.timestamp);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="rounded-[2.5rem] border-zinc-100 p-0 overflow-hidden sm:max-w-xl shadow-2xl">
+        <div className={cn(
+          "p-8 pt-10 pb-12 space-y-8",
+          log.severity === "CRITICAL" ? "bg-rose-50/30" : "bg-white"
+        )}>
+          {/* Header */}
+          <div className="flex items-start justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 mb-2">
+                <Badge className={cn(
+                  "text-[9px] font-black uppercase tracking-widest px-2 py-0.5",
+                  log.severity === "CRITICAL" ? "bg-rose-500 text-white" : "bg-zinc-100 text-zinc-500"
+                )}>
+                  {log.severity} EVENT
+                </Badge>
+                <Badge variant="outline" className="text-[9px] font-black uppercase tracking-widest border-zinc-200 text-zinc-400">
+                  {log.type}
+                </Badge>
+              </div>
+              <DialogTitle className="text-2xl font-black tracking-tight text-zinc-900">{log.action}</DialogTitle>
+              <p className="text-xs text-zinc-500 font-medium">Neural verification hash: <span className="text-zinc-400 font-mono">{log.id.substring(0, 16)}...</span></p>
+            </div>
+            <div className={cn(
+              "w-14 h-14 rounded-2xl flex items-center justify-center shadow-lg",
+              log.severity === "CRITICAL" ? "bg-rose-500 text-white" : "bg-zinc-900 text-white"
+            )}>
+              <LogIcon type={log.type} />
+            </div>
+          </div>
+
+          {/* Details Section */}
+          <div className="space-y-4">
+             <div className="flex items-center gap-2 text-zinc-400">
+               <Activity className="w-3.5 h-3.5" />
+               <span className="text-[10px] font-black uppercase tracking-widest">Entry Deep Dive</span>
+             </div>
+             <div className="bg-white border border-zinc-100 rounded-3xl p-6 shadow-sm">
+                <p className="text-sm font-medium text-zinc-600 leading-relaxed">
+                  {log.details || "No technical description provided for this event sequence."}
+                </p>
+             </div>
+          </div>
+
+          {/* Metadata Grid */}
+          <div className="grid grid-cols-2 gap-3">
+             <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Authenticated User</p>
+                <div className="flex items-center gap-2">
+                   <User className="w-3.5 h-3.5 text-zinc-900" />
+                   <p className="text-xs font-bold text-zinc-900">{log.user || 'System'}</p>
+                </div>
+             </div>
+             <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Origin Node</p>
+                <div className="flex items-center gap-2">
+                   <Building2 className="w-3.5 h-3.5 text-zinc-900" />
+                   <p className="text-xs font-bold text-zinc-900">{log.branch || 'Main HQ'}</p>
+                </div>
+             </div>
+             <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Vector Timestamp</p>
+                <div className="flex items-center gap-2">
+                   <Clock className="w-3.5 h-3.5 text-zinc-900" />
+                   <p className="text-xs font-bold text-zinc-900">{date?.toLocaleString() || 'N/A'}</p>
+                </div>
+             </div>
+             <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">Persistence</p>
+                <div className="flex items-center gap-2">
+                   <Database className="w-3.5 h-3.5 text-emerald-500" />
+                   <p className="text-xs font-bold text-emerald-600">Encrypted Ledger</p>
+                </div>
+             </div>
+          </div>
+
+          <Button className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest hover:bg-zinc-800" onClick={() => onOpenChange(false)}>
+            Close Inspection
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /* ─────────────────────────────────────────
@@ -166,6 +266,7 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
   const [exporting, setExporting] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [inspectingLog, setInspectingLog] = useState<LogEntry | null>(null);
   const [isLive, setIsLive] = useState(true);
   const [riskScore, setRiskScore] = useState(0);
 
@@ -524,7 +625,7 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
                 <div
                   key={log.id}
                   className="p-4 sm:p-8 flex flex-col sm:flex-row sm:items-start justify-between gap-4 hover:bg-zinc-50/50 transition-colors group cursor-pointer relative"
-                  onClick={() => setExpandedId((prev) => prev === log.id ? null : log.id)}
+                  onClick={() => setInspectingLog(log)}
                 >
                   {/* Visual Connector Line */}
                   {index < filtered.length - 1 && (
@@ -562,7 +663,7 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
                       {/* Details – collapse on mobile */}
                       <p className={cn(
                         "text-xs text-zinc-500 leading-relaxed",
-                        expandedId === log.id ? "" : "line-clamp-2"
+                        inspectingLog?.id === log.id ? "" : "line-clamp-2"
                       )}>
                         {log.details || "No details available."}
                       </p>
@@ -595,7 +696,7 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 rounded-xl hover:bg-zinc-100 opacity-60 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => { e.stopPropagation(); toast.info("Full log detail viewer coming soon."); }}
+                      onClick={(e) => { e.stopPropagation(); setInspectingLog(log); }}
                     >
                       <MoreHorizontal className="w-4 h-4" />
                     </Button>
@@ -609,7 +710,7 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
           {!loading && !fetchError && (
             <div className="p-4 sm:p-6 bg-zinc-50/50 border-t border-zinc-100 flex flex-col sm:flex-row items-center justify-between gap-3">
               <p className="text-xs text-zinc-500 font-medium">
-                Showing {filtered.length} of {logs.length} events · Click any row to expand details
+                Showing {filtered.length} of {logs.length} events · Click any row to inspect technical details
               </p>
               <p className="text-[10px] text-zinc-400 font-medium">
                 Audit logs are retained for 90 days per compliance policy.
@@ -617,6 +718,12 @@ export default function AuditLogs({ variant = "full" }: { variant?: "full" | "mi
             </div>
           )}
         </Card>
+        
+        <LogDetailDialog 
+          log={inspectingLog} 
+          open={!!inspectingLog} 
+          onOpenChange={(open) => !open && setInspectingLog(null)} 
+        />
       </div>
     </ScrollArea>
   );
