@@ -375,7 +375,11 @@ function AppContent() {
               />
 
               <div className="lg:pl-72 flex flex-col h-screen">
-                <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} />
+                <Header 
+                  onMenuClick={() => setIsMobileOpen(true)} 
+                  setActiveTab={setActiveTab} 
+                  activeTab={activeTab}
+                />
 
                 <TrialBanner onUpgrade={() => { 
                   setSettingsTab("billing");

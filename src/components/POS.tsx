@@ -1767,7 +1767,7 @@ export default function POS() {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-            {["All Items", ...Array.from(new Set(products.map(p => p.category || "Other").filter(Boolean)))].map((cat) => (
+            {["All Items", "General", ...Array.from(new Set(products.map(p => p.category).filter(c => c && c !== "General")))].map((cat) => (
               <Badge
                 key={cat}
                 variant="secondary"
@@ -1807,7 +1807,7 @@ export default function POS() {
                 const category = (p.category || "").toLowerCase();
                 const term = searchTerm.toLowerCase();
                 const matchesSearch = !term || name.includes(term) || category.includes(term);
-                const matchesCategory = selectedCategory === "All Items" || (p.category || "Other") === selectedCategory;
+                const matchesCategory = selectedCategory === "All Items" || (p.category || "General") === selectedCategory;
                 return matchesSearch && matchesCategory;
               }).map((product) => {
                 const stock = getProductStock(product.id);
@@ -1847,7 +1847,7 @@ export default function POS() {
                           </div>
                         </div>
                         <div className="flex items-center justify-between">
-                          <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{product.category}</p>
+                          <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">{product.category || "General"}</p>
                           <Badge variant="outline" className={cn(
                             "text-[9px] font-bold uppercase",
                             stock < 10 ? "text-rose-500 border-rose-100 bg-rose-50" : "text-emerald-500 border-emerald-100 bg-emerald-50"

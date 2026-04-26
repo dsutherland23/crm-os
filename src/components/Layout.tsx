@@ -455,7 +455,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
           </Dialog>
 
           {/* Active POS Session Indicator */}
-          {posSession && (
+          {posSession && activeTab !== "pos" && (
             <div className="mx-4 mb-2 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3">
               <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
               <div className="min-w-0 flex-1">
@@ -507,7 +507,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
   );
 }
 
-export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void, setActiveTab?: (tab: string) => void }) {
+export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: () => void, setActiveTab?: (tab: string) => void, activeTab?: string }) {
   const { activeBranch, setActiveBranch, hasActiveTransaction, currency, setCurrency, formatCurrency, enterpriseId, posSession, updateShiftStatus, clearSession, shiftTimePolicies, logout } = useModules();
   const [branches, setBranches] = useState<any[]>([]);
   const [pendingBranchTarget, setPendingBranchTarget] = useState<string | null>(null);
@@ -845,7 +845,7 @@ export function Header({ onMenuClick, setActiveTab }: { onMenuClick: () => void,
         </DropdownMenu>
 
         {/* POS Operator Session Chip */}
-        {posSession && (
+        {posSession && activeTab !== "pos" && (
           <DropdownMenu>
             <DropdownMenuTrigger 
               render={
