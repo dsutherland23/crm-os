@@ -31,7 +31,8 @@ import {
   Utensils,
   AlertCircle,
   Users,
-  Clock
+  Clock,
+  Share2
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -2370,23 +2371,45 @@ export default function POS() {
                <div className="flex gap-2">
                    <Button 
                     variant="outline" 
-                    className="rounded-xl h-10 px-4 font-bold border-zinc-200"
+                    className="rounded-xl h-10 px-4 font-bold border-zinc-200 hover:bg-zinc-100 transition-all active:scale-95"
                     onClick={() => {
-                       const elementId = receiptType === "POS" ? "pos-receipt" : "printable-invoice";
-                       const printContents = document.getElementById(elementId)?.innerHTML;
-                       if (printContents) {
-                         const originalContents = document.body.innerHTML;
-                         document.body.innerHTML = printContents;
-                         window.print();
-                         document.body.innerHTML = originalContents;
-                         window.location.reload(); 
-                       } else {
-                         window.print();
-                       }
+                      // Use a non-destructive print method that doesn't break React state
+                      window.print();
                     }}
                   >
                     <Printer className="w-4 h-4 mr-2" />
                     Print
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="rounded-xl h-10 px-4 font-bold border-zinc-200 hover:bg-zinc-100 transition-all active:scale-95"
+                    onClick={async () => {
+                      if (!lastTransaction) return;
+                      const shareData = {
+                        title: `Receipt from ${branding.name}`,
+                        text: `Receipt for Order #${lastTransaction.id.substring(0,8).toUpperCase()} - Total: ${formatCurrency(lastTransaction.total)}`,
+                        url: window.location.origin + `/receipt/${lastTransaction.id}` // Future: Link to a public receipt page
+                      };
+                      
+                      if (navigator.share) {
+                        try {
+                          await navigator.share(shareData);
+                          toast.success("Receipt shared successfully");
+                        } catch (err) {
+                          if ((err as Error).name !== 'AbortError') {
+                            toast.error("Could not share receipt");
+                          }
+                        }
+                      } else {
+                        // Fallback: Copy summary to clipboard
+                        const summary = `Order #${lastTransaction.id.substring(0,8).toUpperCase()}\nTotal: ${formatCurrency(lastTransaction.total)}\nThank you for shopping at ${branding.name}!`;
+                        await navigator.clipboard.writeText(summary);
+                        toast.success("Receipt summary copied to clipboard");
+                      }
+                    }}
+                  >
+                    <Share2 className="w-4 h-4 mr-2" />
+                    Share
                   </Button>
                   <div className="flex bg-zinc-200 p-1 rounded-xl gap-1">
                     <Button 

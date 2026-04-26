@@ -123,6 +123,7 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
         @media print {
           body * {
             visibility: hidden;
+            -webkit-print-color-adjust: exact;
           }
           #pos-receipt, #pos-receipt * {
             visibility: visible;
@@ -135,6 +136,10 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
             padding: 4mm;
             margin: 0;
             border: none;
+            background: white;
+          }
+          .no-print {
+            display: none !important;
           }
         }
       `}} />

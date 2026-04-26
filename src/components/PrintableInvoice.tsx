@@ -204,6 +204,33 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, en
            <p className="text-[8px] font-black uppercase tracking-[0.3em] text-zinc-400">Done by Orivocrm.pro System v2026</p>
         </div>
       </div>
+
+      <style dangerouslySetInnerHTML={{ __html: `
+        @media print {
+          body * {
+            visibility: hidden;
+            -webkit-print-color-adjust: exact;
+          }
+          #printable-invoice, #printable-invoice * {
+            visibility: visible;
+          }
+          #printable-invoice {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 210mm;
+            min-height: 297mm;
+            padding: 0;
+            margin: 0;
+            border: none;
+            box-shadow: none;
+            background: white;
+          }
+          .no-print {
+            display: none !important;
+          }
+        }
+      `}} />
     </div>
   );
 };
