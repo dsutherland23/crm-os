@@ -96,6 +96,7 @@ import { db, auth, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { recordFinancialEvent } from "@/lib/ledger";
 import { recordAuditLog } from "@/lib/audit";
 import { useModules } from "@/context/ModuleContext";
+import { usePendingAction } from "@/context/PendingActionContext";
 import { 
   Sheet,
   SheetContent,
@@ -124,6 +125,7 @@ import {
 import { PrintableInvoice } from "./PrintableInvoice";
 
 export default function Revenue() {
+  const { setPendingAction, consumeAction } = usePendingAction();
   const { activeBranch, formatCurrency, enterpriseId, branding, currency, taxRate: globalTaxRate, setTaxRate: setGlobalTaxRate } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -655,14 +657,11 @@ export default function Revenue() {
   }, [enterpriseId]);
 
   useEffect(() => {
-    const handleAction = (e: any) => {
-      if (e.detail === "CREATE_INVOICE") {
-        setIsInvoiceDialogOpen(true);
-      }
-    };
-    window.addEventListener("app:action", handleAction);
-    return () => window.removeEventListener("app:action", handleAction);
-  }, []);
+    const action = consumeAction("finance");
+    if (action?.action === "CREATE_INVOICE") {
+      setIsInvoiceDialogOpen(true);
+    }
+  }, [consumeAction]);
 
   const addLineItem = () => {
     setInvoiceItems([...invoiceItems, { id: Date.now() + Math.random(), product_id: "", quantity: 1, unit_price: 0, tax: 0, description: "" }]);

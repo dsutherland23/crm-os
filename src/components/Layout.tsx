@@ -51,6 +51,7 @@ import { collection, onSnapshot, query, where, doc, updateDoc, addDoc } from "@/
 import { toast } from "sonner";
 import { OrbitalClock } from "@/components/ui/orbital-clock";
 import NotificationsMenu from "./NotificationsMenu";
+import { usePendingAction } from "@/context/PendingActionContext";
 import { clearMockUser, getMockUser } from "@/lib/auth-mock";
 import {
   DropdownMenu,
@@ -73,6 +74,7 @@ interface SidebarProps {
 
 export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen }: SidebarProps) {
   const { isModuleEnabled, branding, posSession, enterpriseId, grantedOverrides, addOverride, logout, userRole, hasPermission } = useModules();
+  const { setPendingAction } = usePendingAction();
   const [supportOpen, setSupportOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [lastInteraction, setLastInteraction] = useState(Date.now());
@@ -152,9 +154,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
           description: "You must close your register and end your shift on the POS page before signing out."
         });
         setActiveTab("pos");
-        setTimeout(() => {
-          window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
-        }, 300);
+        setPendingAction({ module: "pos", action: "CLOSE_REGISTER" });
         setIsMobileOpen(false);
         return;
       }
@@ -509,6 +509,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
 
 export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: () => void, setActiveTab?: (tab: string) => void, activeTab?: string }) {
   const { activeBranch, setActiveBranch, hasActiveTransaction, currency, setCurrency, formatCurrency, enterpriseId, posSession, updateShiftStatus, clearSession, shiftTimePolicies, logout } = useModules();
+  const { setPendingAction } = usePendingAction();
   const [branches, setBranches] = useState<any[]>([]);
   const [pendingBranchTarget, setPendingBranchTarget] = useState<string | null>(null);
   const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
@@ -632,9 +633,7 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
         description: "Standard accounts must close their register before signing out. Opening settlement..."
       });
       setActiveTab?.("pos");
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
-      }, 300);
+      setPendingAction({ module: "pos", action: "CLOSE_REGISTER" });
       return;
     }
     await logout();
@@ -711,9 +710,7 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
                   onClick={() => {
                     setActiveTab?.("pos");
                     updateShiftStatus("ACTIVE");
-                    setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
-                    }, 150);
+                    setPendingAction({ module: "pos", action: "CLOSE_REGISTER" });
                   }}
                 >
                   <ClipboardCheck className="w-4 h-4 mr-2" />
@@ -942,9 +939,7 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
                   className="rounded-xl p-2 cursor-pointer"
                   onClick={() => {
                     setActiveTab?.("pos");
-                    setTimeout(() => {
-                      window.dispatchEvent(new CustomEvent("app:action", { detail: "CLOSE_REGISTER" }));
-                    }, 100);
+                    setPendingAction({ module: "pos", action: "CLOSE_REGISTER" });
                   }}
                 >
                   <div className="flex items-center gap-3">

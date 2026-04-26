@@ -71,6 +71,7 @@ export default function AIInsights() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const { setPendingAction, consumeAction } = usePendingAction();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -210,15 +211,11 @@ export default function AIInsights() {
   };
 
   useEffect(() => {
-    const handleAction = (e: any) => {
-      if (e.detail === "AI_REPORT") {
-        handleSend("Generate a full enterprise intelligence report based on current data.");
-      }
-    };
-    window.addEventListener("app:action", handleAction);
-    return () => window.removeEventListener("app:action", handleAction);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const action = consumeAction("ai");
+    if (action?.action === "AI_REPORT") {
+      handleSend("Generate a full enterprise intelligence report based on current data.");
+    }
+  }, [consumeAction]);
 
   return (
     <div className="flex h-[100dvh] bg-zinc-50/50 overflow-hidden">
