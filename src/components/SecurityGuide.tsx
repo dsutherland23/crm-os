@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+// Strategic Module Refresh
 import { 
   ShieldCheck, ShieldAlert, Lock, Key, Eye, Fingerprint, 
   AlertTriangle, Shield, Search, ChevronRight,

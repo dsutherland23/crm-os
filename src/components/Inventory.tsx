@@ -1658,7 +1658,7 @@ export default function Inventory() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <h2 className="text-2xl sm:text-3xl font-black text-zinc-900 tracking-tight truncate">
+                  <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-zinc-900 tracking-tight break-words line-clamp-2">
                     {productForm.name || "Unnamed Product"}
                   </h2>
                   <Badge variant="outline" className={cn(
@@ -2117,7 +2117,7 @@ export default function Inventory() {
                            <button className="w-5 h-5 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 hover:bg-blue-600 hover:text-white transition-all">
                              <Sparkles className="w-2.5 h-2.5" />
                            </button>
-                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-zinc-900 rounded-2xl shadow-2xl border border-zinc-700 text-left opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-all duration-200 scale-95 group-hover/tooltip:scale-100 z-50">
+                           <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-[calc(100vw-4rem)] sm:w-80 p-4 bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-700 text-left opacity-0 group-hover/tooltip:opacity-100 pointer-events-none transition-all duration-200 scale-95 group-hover/tooltip:scale-100 z-50">
                              <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-1">
                                <Sparkles className="w-2.5 h-2.5" /> AI Reasoning
                              </p>
@@ -2158,22 +2158,22 @@ export default function Inventory() {
                       <ArrowRightLeft className="w-4 h-4 group-hover:scale-110 transition-transform" /> Transfer
                   </Button>
                   <Button variant="outline" className="rounded-2xl font-black text-[10px] uppercase tracking-widest border-zinc-200 h-12 px-6 bg-zinc-50/50 hover:bg-zinc-900 hover:text-white transition-all gap-2 group flex-none" onClick={() => setIsPurchaseOrderOpen(true)}>
-                      <Truck className="w-4 h-4 group-hover:translate-x-1 transition-transform" /> Purchase Order
+                      <Truck className="w-4 h-4 group-hover:translate-x-1 transition-transform" /> <span className="hidden sm:inline">Purchase Order</span><span className="sm:hidden">P.O.</span>
                   </Button>
                 </div>
               )}
               
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
                 <Button 
                    variant="ghost" 
-                   className="rounded-2xl font-black text-[10px] uppercase tracking-widest text-zinc-400 hover:text-rose-500 px-8 h-14 transition-colors"
+                   className="rounded-2xl font-black text-[10px] uppercase tracking-widest text-zinc-400 hover:text-rose-500 px-8 h-14 transition-colors w-full sm:w-auto"
                    onClick={() => setIsProductSheetOpen(false)}
                 >
                   Cancel Changes
                 </Button>
                 <div className="flex items-center gap-3">
                    <Button 
-                    className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 transition-all font-black text-[10px] uppercase tracking-widest px-10 h-14 shadow-xl shadow-zinc-900/20 disabled:opacity-50 min-w-[200px]"
+                    className="rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 transition-all font-black text-[10px] uppercase tracking-widest px-6 sm:px-10 h-14 shadow-xl shadow-zinc-900/20 disabled:opacity-50 flex-1 sm:min-w-[200px]"
                     onClick={handleSaveProduct}
                     disabled={isSavingProduct}
                    >
@@ -2533,13 +2533,11 @@ export default function Inventory() {
                                 </TableCell>
                                 <TableCell className="text-right py-5 pr-6">
                                   <DropdownMenu>
-                                  <DropdownMenuTrigger 
-                                    render={
-                                      <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all")}>
-                                        <MoreHorizontal className="w-5 h-5" />
-                                      </button>
-                                    }
-                                  />
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
+                                      <MoreHorizontal className="w-5 h-5" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
                                       <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs" onClick={() => openProductSheet(item)}>
                                         <Box className="w-4 h-4 text-zinc-400" /> Edit Product Profile
@@ -2979,13 +2977,11 @@ export default function Inventory() {
                             </TableCell>
                             <TableCell className="py-6 pr-6 text-right">
                               <DropdownMenu>
-                                <DropdownMenuTrigger 
-                                  render={
-                                    <button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all")}>
-                                      <MoreHorizontal className="w-5 h-5" />
-                                    </button>
-                                  }
-                                />
+                           <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
+                                  <MoreHorizontal className="w-5 h-5" />
+                                </Button>
+                           </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
                                   <DropdownMenuItem 
                                     className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs uppercase"
@@ -3197,12 +3193,12 @@ export default function Inventory() {
             </TabsContent>
 
             <TabsContent value="stocktakes" className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="flex items-center justify-between px-2">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6 px-2">
                  <div className="space-y-1">
-                    <h3 className="font-black text-zinc-900 tracking-tight text-xl">Inventory Audits</h3>
-                    <p className="text-xs font-black text-zinc-500 uppercase tracking-[0.2em]">Reconciliation & Shrinkage Control</p>
+                    <h3 className="font-black text-zinc-900 tracking-tight text-xl md:text-2xl">Inventory Audits</h3>
+                    <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em]">Reconciliation & Shrinkage Control</p>
                  </div>
-                 <Button className="rounded-2xl bg-zinc-900 text-white h-12 px-8 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all" onClick={() => {
+                 <Button className="w-full sm:w-auto rounded-2xl bg-zinc-900 text-white h-12 sm:h-14 px-8 font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all" onClick={() => {
                     setStocktakeForm({ branch_id: activeBranch === 'all' ? (branches[0]?.id || '') : activeBranch, items: [], status: 'IN_PROGRESS', notes: '' });
                     setIsStocktakeDialogOpen(true);
                  }}>
@@ -3210,15 +3206,15 @@ export default function Inventory() {
                  </Button>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
                 <Card className="card-modern border-zinc-100 bg-white shadow-sm">
-                  <CardContent className="p-6 flex items-center gap-4">
-                    <div className="p-3 bg-zinc-50 rounded-2xl text-zinc-900 border border-zinc-100">
+                  <CardContent className="p-5 sm:p-6 flex items-center gap-4">
+                    <div className="p-3 bg-zinc-50 rounded-2xl text-zinc-900 border border-zinc-100 shrink-0">
                       <RefreshCw className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Accuracy Rate</p>
-                      <p className="text-2xl text-zinc-900 font-black">
+                      <p className="text-[9px] sm:text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-0.5">Accuracy Rate</p>
+                      <p className="text-xl sm:text-2xl text-zinc-900 font-black">
                         {stocktakes.length > 0 
                           ? `${Math.round((stocktakes.filter(st => st.status === 'COMPLETED' && st.items.every((i: any) => i.variance === 0)).length / stocktakes.length) * 100)}%`
                           : '100%'}
@@ -3227,13 +3223,13 @@ export default function Inventory() {
                   </CardContent>
                 </Card>
                 <Card className="card-modern border-zinc-100 bg-white shadow-sm">
-                  <CardContent className="p-6 flex items-center gap-4">
-                    <div className="p-3 bg-rose-50 rounded-2xl text-rose-600 border border-rose-100">
+                  <CardContent className="p-5 sm:p-6 flex items-center gap-4">
+                    <div className="p-3 bg-rose-50 rounded-2xl text-rose-600 border border-rose-100 shrink-0">
                       <AlertTriangle className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-rose-600 uppercase tracking-widest mb-0.5">Capital Leakage</p>
-                      <p className="text-2xl text-zinc-900 font-black">
+                      <p className="text-[9px] sm:text-[10px] font-bold text-rose-600 uppercase tracking-widest mb-0.5">Capital Leakage</p>
+                      <p className="text-xl sm:text-2xl text-zinc-900 font-black">
                         {formatCurrency(stocktakes.reduce((sum, st) => {
                           const leakage = st.items?.filter((i: any) => i.variance < 0).reduce((s: number, i: any) => {
                             const prod = products.find(p => p.id === i.product_id);
@@ -3245,14 +3241,14 @@ export default function Inventory() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="card-modern border-zinc-100 bg-white shadow-sm">
-                  <CardContent className="p-6 flex items-center gap-4">
-                    <div className="p-3 bg-blue-50 rounded-2xl text-blue-600 border border-blue-100">
+                <Card className="card-modern border-zinc-100 bg-white shadow-sm sm:col-span-2 lg:col-span-1">
+                  <CardContent className="p-5 sm:p-6 flex items-center gap-4">
+                    <div className="p-3 bg-blue-50 rounded-2xl text-blue-600 border border-blue-100 shrink-0">
                       <Clock className="w-5 h-5" />
                     </div>
                     <div>
-                      <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Operational Pulse</p>
-                      <p className="text-2xl text-zinc-900 font-black">
+                      <p className="text-[9px] sm:text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-0.5">Operational Pulse</p>
+                      <p className="text-xl sm:text-2xl text-zinc-900 font-black">
                         {stocktakes.length > 0 
                           ? `${Math.floor((new Date().getTime() - new Date(stocktakes[0].created_at).getTime()) / (1000 * 60 * 60 * 24))} Days`
                           : 'N/A'}
@@ -3263,17 +3259,18 @@ export default function Inventory() {
               </div>
 
                <Card className="card-modern overflow-hidden border-zinc-200/60 shadow-xl bg-white ring-1 ring-zinc-50">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Audit signature</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Branch Node</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Temporal Stamp</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Asset Scope</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Lifecycle Status</TableHead>
-                      <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6 text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                <div className="overflow-x-auto no-scrollbar">
+                  <Table className="min-w-[800px] lg:min-w-0">
+                    <TableHeader>
+                      <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pl-6">Audit signature</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Branch Node</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Temporal Stamp</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Asset Scope</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Lifecycle Status</TableHead>
+                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
                   <TableBody>
                     {stocktakes.length === 0 ? (
                       <TableRow>
@@ -3347,7 +3344,7 @@ export default function Inventory() {
                       ))
                     )}
                   </TableBody>
-                </Table>
+                </Table></div>
               </Card>
             </TabsContent>
           </Tabs>
@@ -4421,10 +4418,10 @@ export default function Inventory() {
 
     <Dialog open={isStocktakeDialogOpen} onOpenChange={setIsStocktakeDialogOpen}>
       <DialogContent className="w-[95vw] sm:max-w-4xl rounded-[1.5rem] sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
-        <div className="bg-blue-600 p-6 sm:p-8 text-white">
+        <div className="bg-blue-600 p-6 sm:p-10 text-white">
           <DialogHeader>
-            <DialogTitle className="text-2xl sm:text-3xl font-black tracking-tight font-display">Operational Audit</DialogTitle>
-            <DialogDescription className="text-blue-100 font-medium text-xs sm:text-sm">
+            <DialogTitle className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight font-display text-white">Operational Audit</DialogTitle>
+            <DialogDescription className="text-blue-100 font-medium text-xs sm:text-sm md:text-base mt-2">
               Verifying physical asset presence against digital state.
             </DialogDescription>
           </DialogHeader>
@@ -4432,7 +4429,7 @@ export default function Inventory() {
 
         <ScrollArea className="max-h-[80vh] sm:max-h-[70vh]">
           <div className="p-4 sm:p-8 space-y-6 sm:space-y-8">
-            <div className="flex flex-col sm:flex-row items-center gap-4">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
               <div className="space-y-2 flex-1 w-full">
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Branch Node</label>
                 <Select 
@@ -4459,7 +4456,7 @@ export default function Inventory() {
                 </Select>
               </div>
               <Button 
-                className="w-full sm:w-auto mt-2 sm:mt-6 h-12 sm:h-14 rounded-2xl bg-white border border-zinc-100 text-zinc-900 font-black text-[10px] uppercase tracking-widest shadow-sm"
+                className="w-full sm:w-auto sm:mt-6 h-12 sm:h-14 rounded-2xl bg-white border border-zinc-100 text-zinc-900 font-black text-[10px] uppercase tracking-widest shadow-sm"
                 variant="outline"
                 onClick={() => {
                   const branchProducts = products.map(p => ({
@@ -4486,16 +4483,16 @@ export default function Inventory() {
 
               <div className="space-y-3">
                 {stocktakeForm.items.map((item: any, index: number) => (
-                  <div key={item.product_id} className="flex flex-col sm:grid sm:grid-cols-12 items-start sm:items-center gap-4 p-4 bg-zinc-50 rounded-2xl border border-zinc-100 group/audit">
-                    <div className="w-full sm:col-span-6 flex items-center gap-3">
+                  <div key={item.product_id} className="flex flex-col lg:grid lg:grid-cols-12 items-start lg:items-center gap-4 p-4 sm:p-6 bg-zinc-50 rounded-[1.5rem] sm:rounded-2xl border border-zinc-100 group/audit">
+                    <div className="w-full lg:col-span-6 flex items-center gap-3">
                       <div className="shrink-0 w-8 h-8 rounded-lg bg-white border border-zinc-100 flex items-center justify-center font-black text-xs text-zinc-400">
                         {index + 1}
                       </div>
-                      <span className="font-black text-zinc-900 text-sm uppercase truncate">{item.name}</span>
+                      <span className="font-black text-zinc-900 text-sm uppercase break-words line-clamp-2">{item.name}</span>
                     </div>
                     
-                    <div className="w-full sm:col-span-6 grid grid-cols-3 sm:grid-cols-6 items-center gap-4">
-                      <div className="sm:col-span-2 text-center">
+                    <div className="w-full lg:col-span-6 grid grid-cols-3 sm:grid-cols-6 items-center gap-4">
+                      <div className="sm:col-span-2 text-center sm:text-left">
                         <span className="block sm:hidden text-[8px] font-black text-zinc-400 uppercase mb-1">System</span>
                         <span className="font-mono font-bold text-zinc-400">{item.expected}</span>
                       </div>
