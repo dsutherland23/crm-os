@@ -45,6 +45,12 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
 import { auth, db, addDoc, collection, serverTimestamp, onSnapshot, query, where, orderBy, doc, updateDoc } from "@/lib/firebase";
+import Documentation from "./Documentation";
+import QuickStart from "./QuickStart";
+import SecurityGuide from "./SecurityGuide";
+
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -55,6 +61,9 @@ type SupportSection =
   | "privacy"
   | "terms"
   | "help"
+  | "documentation"
+  | "quick_start"
+  | "security_guide"
   | "status"
   | "contact"
   | "my_tickets"
@@ -449,10 +458,10 @@ function HelpSection() {
   );
 
   const resources = [
-    { icon: BookOpen, label: "Documentation", desc: "Full platform guides", href: "#" },
-    { icon: Video, label: "Video Tutorials", desc: "Step-by-step walkthroughs", href: "#" },
-    { icon: Zap, label: "Quick Start", desc: "Get up and running in 5 min", href: "#" },
-    { icon: Shield, label: "Security Guide", desc: "Best practices for your team", href: "#" },
+    { icon: BookOpen, label: "Documentation", desc: "Full platform guides", id: "documentation" },
+    { icon: Video, label: "Video Tutorials", desc: "Step-by-step walkthroughs", id: "#" },
+    { icon: Zap, label: "Quick Start", desc: "Get up and running in 5 min", id: "quick_start" },
+    { icon: Shield, label: "Security Guide", desc: "Best practices for your team", id: "security_guide" },
   ];
 
   return (
@@ -469,10 +478,10 @@ function HelpSection() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {resources.map((r) => (
-          <a
+          <button
             key={r.label}
-            href={r.href}
-            className="group flex flex-col gap-3 p-4 bg-white border border-zinc-200 rounded-2xl hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-md transition-all duration-200 hover:-translate-y-0.5"
+            onClick={() => r.id !== "#" && window.dispatchEvent(new CustomEvent('switchSupportTab', { detail: r.id }))}
+            className="group flex flex-col gap-3 p-4 bg-white border border-zinc-200 rounded-2xl hover:border-blue-200 hover:bg-blue-50/50 hover:shadow-md transition-all duration-200 hover:-translate-y-0.5 text-left"
           >
             <div className="w-9 h-9 rounded-xl bg-zinc-100 group-hover:bg-blue-100 flex items-center justify-center text-zinc-500 group-hover:text-blue-600 transition-colors">
               <r.icon className="w-4 h-4" />
@@ -482,7 +491,7 @@ function HelpSection() {
               <p className="text-[10px] text-zinc-500">{r.desc}</p>
             </div>
             <ExternalLink className="w-3 h-3 text-zinc-300 group-hover:text-blue-400 transition-colors mt-auto" />
-          </a>
+          </button>
         ))}
       </div>
 
@@ -1169,14 +1178,17 @@ const SECTIONS: {
   icon: React.ElementType;
   accent?: boolean;
 }[] = [
-  { id: "share",    label: "Share with Friends",    icon: Share2,            accent: true },
-  { id: "feedback", label: "Suggestions & Feedback", icon: MessageSquarePlus, accent: true },
-  { id: "privacy",  label: "Privacy Policy",         icon: FileText },
-  { id: "terms",    label: "Terms & Conditions",     icon: ScrollText },
-  { id: "help",     label: "Help Center",            icon: LifeBuoy },
-  { id: "status",   label: "System Status",          icon: Activity },
-  { id: "contact",  label: "Contact Support",        icon: Headphones },
-  { id: "my_tickets", label: "My Tickets",           icon: Ticket, accent: true },
+  { id: "share",         label: "Share with Friends",    icon: Share2,            accent: true },
+  { id: "feedback",      label: "Suggestions & Feedback", icon: MessageSquarePlus, accent: true },
+  { id: "documentation", label: "Documentation",          icon: BookOpen,          accent: true },
+  { id: "quick_start",   label: "Quick Start",            icon: Zap,               accent: true },
+  { id: "security_guide",label: "Security Guide",         icon: Shield,            accent: true },
+  { id: "privacy",       label: "Privacy Policy",         icon: FileText },
+  { id: "terms",         label: "Terms & Conditions",     icon: ScrollText },
+  { id: "help",          label: "Help Center",            icon: LifeBuoy },
+  { id: "status",        label: "System Status",          icon: Activity },
+  { id: "contact",       label: "Contact Support",        icon: Headphones },
+  { id: "my_tickets",    label: "My Tickets",             icon: Ticket, accent: true },
 ];
 
 export default function Support({ section = "help" }: Props) {
@@ -1196,16 +1208,19 @@ export default function Support({ section = "help" }: Props) {
 
   const renderContent = () => {
     switch (active) {
-      case "share":    return <ShareSection />;
-      case "feedback": return <FeedbackSection />;
-      case "privacy":  return <PolicySection title="Privacy Policy" icon={FileText} content={PRIVACY_CONTENT} />;
-      case "terms":    return <PolicySection title="Terms & Conditions" icon={ScrollText} content={TERMS_CONTENT} />;
-      case "help":     return <HelpSection />;
-      case "status":   return <StatusSection />;
-      case "contact":  return <ContactSection />;
-      case "my_tickets": return <TicketCenter />;
-      case "delete":   return <DeleteSection />;
-      default:         return <HelpSection />;
+      case "share":         return <ShareSection />;
+      case "feedback":      return <FeedbackSection />;
+      case "privacy":       return <PolicySection title="Privacy Policy" icon={FileText} content={PRIVACY_CONTENT} />;
+      case "terms":         return <PolicySection title="Terms & Conditions" icon={ScrollText} content={TERMS_CONTENT} />;
+      case "help":          return <HelpSection />;
+      case "documentation": return <Documentation />;
+      case "quick_start":   return <QuickStart />;
+      case "security_guide":return <SecurityGuide />;
+      case "status":        return <StatusSection />;
+      case "contact":       return <ContactSection />;
+      case "my_tickets":    return <TicketCenter />;
+      case "delete":        return <DeleteSection />;
+      default:              return <HelpSection />;
     }
   };
 
