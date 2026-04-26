@@ -176,6 +176,11 @@ export default function POS() {
   const [lastTransaction, setLastTransaction] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT">("CARD");
+  const [isSplitPaymentDialogOpen, setIsSplitPaymentDialogOpen] = useState(false);
+  const [splitCashAmount, setSplitCashAmount] = useState("");
+  const [splitCardAmount, setSplitCardAmount] = useState("");
+  const [isSuspendedOrdersOpen, setIsSuspendedOrdersOpen] = useState(false);
+  const [suspendedOrders, setSuspendedOrders] = useState<any[]>([]);
   const [receiptType, setReceiptType] = useState<"INVOICE" | "POS">("POS");
   const [smartCashTendered, setSmartCashTendered] = useState<number | null>(null);
   const [numpadTarget, setNumpadTarget] = useState<string | null>(null); // product id for qty numpad
@@ -415,6 +420,19 @@ export default function POS() {
   }, [currentSessionId]);
 
   useEffect(() => {
+    if (!enterpriseId) return;
+    const q = query(
+      collection(db, "suspended_orders"),
+      where("enterprise_id", "==", enterpriseId),
+      where("status", "==", "SUSPENDED")
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      setSuspendedOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsub();
+  }, [enterpriseId]);
+
+  useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
@@ -432,13 +450,22 @@ export default function POS() {
         const stats = snapshot.docs.reduce((acc, docSnap) => {
           const d = docSnap.data();
           const amt = d.total || 0;
-          acc.sales += amt;
-          acc.tax += (d.tax || 0);
-          acc.discounts += (d.discountAmount || 0);
+          const isReturn = d.type === "RETURN";
+          const multiplier = isReturn ? -1 : 1;
           
-          if (d.paymentMethod === "CASH") acc.cash += amt;
-          else if (d.paymentMethod === "CARD") acc.card += amt;
-          else if (d.paymentMethod === "SPLIT") acc.split += amt;
+          acc.sales += (amt * multiplier);
+          acc.tax += ((d.tax || 0) * multiplier);
+          acc.discounts += ((d.discount_amount || 0) * multiplier);
+          
+          const pm = d.payment_method;
+          if (pm === "CASH") acc.cash += (amt * multiplier);
+          else if (pm === "CARD") acc.card += (amt * multiplier);
+          else if (pm === "SPLIT") {
+            acc.split += (amt * multiplier);
+            // Include actual cash portion of split if available
+            acc.cash += ((d.split_cash_amount || 0) * multiplier);
+            acc.card += ((d.split_card_amount || 0) * multiplier);
+          }
           
           return acc;
         }, { sales: 0, tax: 0, discounts: 0, cash: 0, card: 0, split: 0 });
@@ -766,7 +793,9 @@ export default function POS() {
         sessionId: currentSessionId || null,
         timestamp: serverTimestamp(),
         enterprise_id: enterpriseId,
-        type: isReturnMode ? "RETURN" : "SALE"
+        type: isReturnMode ? "RETURN" : "SALE",
+        split_cash_amount: paymentMethod === "SPLIT" ? parseFloat(splitCashAmount) || 0 : 0,
+        split_card_amount: paymentMethod === "SPLIT" ? parseFloat(splitCardAmount) || 0 : 0
       });
 
       await recordFinancialEvent({
@@ -1100,6 +1129,37 @@ export default function POS() {
     else if (session.status === "ON_LUNCH") { styles = "bg-blue-50 text-blue-600 border-blue-100"; label = "On Lunch"; }
     else if (session.status === "IN_MEETING") { styles = "bg-purple-50 text-purple-600 border-purple-100"; label = "In Meeting"; }
     return { label, formattedTimer, styles };
+  };
+
+  const handleParkOrder = async () => {
+    if (cart.length === 0) return;
+    try {
+      await addDoc(collection(db, "suspended_orders"), {
+        enterprise_id: enterpriseId,
+        cart,
+        customer: selectedCustomer,
+        discount: cartDiscount,
+        timestamp: new Date().toISOString(),
+        staff_name: selectedAdmin?.name || "Unknown",
+        status: "SUSPENDED",
+        total
+      });
+      setCart([]);
+      setSelectedCustomer(null);
+      setCartDiscount(null);
+      toast.success("Order parked successfully");
+    } catch (err: any) {
+      toast.error("Failed to park order: " + err.message);
+    }
+  };
+
+  const handleRetrieveOrder = async (order: any) => {
+    setCart(order.cart);
+    setSelectedCustomer(order.customer);
+    setCartDiscount(order.discount);
+    await updateDoc(doc(db, "suspended_orders", order.id), { status: "RETRIEVED" });
+    setIsSuspendedOrdersOpen(false);
+    toast.success("Order retrieved");
   };
 
   const handleCloseRegister = async () => {
@@ -1535,15 +1595,50 @@ Notes: ${closeRegisterNotes || 'None'}
           <div className={cn("fixed inset-y-0 right-0 w-full sm:w-[420px] border-l border-zinc-200 bg-white flex flex-col shadow-2xl z-40 transition-all duration-500 ease-in-out md:relative md:shadow-xl md:z-auto", isCartOpenOnMobile ? "translate-x-0" : "translate-x-full md:translate-x-0", isCartCollapsed ? "md:w-0 md:opacity-0 md:pointer-events-none -mr-4" : "md:w-[400px] md:opacity-100")}>
             <div className="flex-none p-6 lg:p-8 border-b border-zinc-100 space-y-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-5 h-5 text-zinc-900" />
-                  <h2 className="text-xl font-bold tracking-tight font-display">Current Order</h2>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2">
+                    <ShoppingCart className="w-5 h-5 text-zinc-900" />
+                    <h2 className="text-xl font-bold tracking-tight font-display">Current Order</h2>
+                  </div>
+                  {suspendedOrders.length > 0 && (
+                    <button 
+                      className="text-[9px] font-black uppercase tracking-widest text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-1 transition-colors"
+                      onClick={() => setIsSuspendedOrdersOpen(true)}
+                    >
+                      <PauseCircle className="w-2.5 h-2.5" /> {suspendedOrders.length} Parked Orders →
+                    </button>
+                  )}
                 </div>
-                <Button variant="outline" size="sm" className="rounded-xl border-zinc-200 h-9 font-bold text-[10px] uppercase tracking-wider" onClick={() => setIsCustomItemDialogOpen(true)}><Plus className="w-3 h-3 mr-1.5" />Custom</Button>
                 <div className="flex items-center gap-2">
-                  <Badge className="bg-blue-600 text-white border-none px-2 py-0.5 rounded-lg">{cart.length} items</Badge>
-                  <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setIsCartOpenOnMobile(false)}><X className="w-5 h-5" /></Button>
-                  <Button variant="ghost" size="icon" className="hidden md:flex text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-xl" onClick={() => setIsCartCollapsed(true)}><X className="w-4 h-4" /></Button>
+                   <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-9 w-9 rounded-xl text-zinc-400 hover:text-blue-600 hover:bg-blue-50"
+                    onClick={() => setIsCustomItemDialogOpen(true)}
+                    title="Add Custom Item"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                   <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-9 w-9 rounded-xl text-zinc-400 hover:text-amber-600 hover:bg-amber-50"
+                    onClick={handleParkOrder}
+                    disabled={cart.length === 0}
+                    title="Park Order"
+                  >
+                    <PauseCircle className="w-4 h-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-9 w-9 rounded-xl text-zinc-400 hover:text-rose-600 hover:bg-rose-50"
+                    onClick={() => setCart([])}
+                    disabled={cart.length === 0}
+                    title="Clear Cart"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
               <Button variant="outline" className="w-full justify-start rounded-2xl border-zinc-200 h-14 text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 group transition-all hover:bg-white hover:border-blue-500/30" onClick={() => setIsCustomerSearchOpen(true)}>
@@ -1684,13 +1779,104 @@ Notes: ${closeRegisterNotes || 'None'}
                   )}
                 </div>
               )}
-              <Button className="w-full rounded-xl h-14 bg-blue-600 text-white hover:bg-blue-700 font-bold text-lg shadow-xl shadow-blue-600/20 disabled:opacity-50" onClick={handleCompleteTransaction} disabled={isProcessing || cart.length === 0}>
+              <Button 
+                className="w-full rounded-xl h-14 bg-blue-600 text-white hover:bg-blue-700 font-bold text-lg shadow-xl shadow-blue-600/20 disabled:opacity-50" 
+                onClick={() => {
+                  if (paymentMethod === "SPLIT") {
+                    setSplitCashAmount("");
+                    setSplitCardAmount("");
+                    setIsSplitPaymentDialogOpen(true);
+                  } else {
+                    handleCompleteTransaction();
+                  }
+                }} 
+                disabled={isProcessing || cart.length === 0}
+              >
                 {isProcessing ? "Processing..." : "Complete Transaction"}
               </Button>
             </div>
           </div>
         </>
       )}
+
+      {/* Split Payment Dialog */}
+      <Dialog open={isSplitPaymentDialogOpen} onOpenChange={setIsSplitPaymentDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-[2.5rem] p-8 border-none shadow-2xl bg-white overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-black text-zinc-900">Split Tendering</DialogTitle>
+            <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
+              Total to collect: {formatCurrency(total)}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6 py-6">
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Cash Amount</Label>
+                {splitCashAmount && <span className="text-[10px] font-bold text-emerald-600">Remaining: {formatCurrency(Math.max(0, total - parseFloat(splitCashAmount)))}</span>}
+              </div>
+              <div className="relative">
+                <Banknote className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+                <Input 
+                  type="number" 
+                  placeholder="0.00" 
+                  className="h-16 pl-12 rounded-2xl border-none bg-zinc-50 font-black text-2xl"
+                  value={splitCashAmount}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSplitCashAmount(val);
+                    const num = parseFloat(val) || 0;
+                    setSplitCardAmount((total - num).toFixed(2));
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Card Amount</Label>
+              <div className="relative">
+                <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
+                <Input 
+                  type="number" 
+                  placeholder="0.00" 
+                  className="h-16 pl-12 rounded-2xl border-none bg-zinc-50 font-black text-2xl"
+                  value={splitCardAmount}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSplitCardAmount(val);
+                    const num = parseFloat(val) || 0;
+                    setSplitCashAmount((total - num).toFixed(2));
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className={cn(
+              "p-4 rounded-2xl border-2 flex items-center justify-between font-black text-sm transition-all",
+              Math.abs((parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0) - total) < 0.01
+                ? "bg-emerald-50 border-emerald-100 text-emerald-600"
+                : "bg-rose-50 border-rose-100 text-rose-600 animate-pulse"
+            )}>
+              <span>Validated Total:</span>
+              <span>{formatCurrency((parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0))} / {formatCurrency(total)}</span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-3">
+            <Button variant="ghost" className="flex-1 rounded-2xl h-14 font-bold" onClick={() => setIsSplitPaymentDialogOpen(false)}>Cancel</Button>
+            <Button 
+              className="flex-1 rounded-2xl h-14 font-black bg-zinc-900 text-white shadow-xl shadow-zinc-900/20"
+              disabled={Math.abs((parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0) - total) > 0.01}
+              onClick={() => {
+                setIsSplitPaymentDialogOpen(false);
+                handleCompleteTransaction();
+              }}
+            >
+              Finalize Split
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!numpadTarget} onOpenChange={(open) => { if (!open) { setNumpadTarget(null); setNumpadValue(""); } }}>
         <DialogContent className="sm:max-w-[320px] rounded-3xl border-zinc-100 p-0 overflow-hidden shadow-2xl">
@@ -2352,6 +2538,59 @@ Date: ${lastTransaction?.timestamp}
               Apply Discount
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Suspended Orders Dialog */}
+      <Dialog open={isSuspendedOrdersOpen} onOpenChange={setIsSuspendedOrdersOpen}>
+        <DialogContent className="sm:max-w-2xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+          <div className="p-8 pb-4 border-b border-zinc-100 bg-zinc-50/50">
+            <DialogHeader>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-amber-500 rounded-2xl flex items-center justify-center text-white shadow-lg">
+                  <PauseCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <DialogTitle className="text-2xl font-black text-zinc-900">Parked Orders</DialogTitle>
+                  <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Suspended carts awaiting retrieval</DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+          </div>
+          
+          <ScrollArea className="h-[450px]">
+            <div className="p-6 space-y-4">
+              {suspendedOrders.length === 0 ? (
+                <div className="text-center py-20 opacity-20">
+                  <PauseCircle className="w-16 h-16 mx-auto mb-4" />
+                  <p className="font-bold uppercase tracking-widest">No parked orders</p>
+                </div>
+              ) : (
+                suspendedOrders.map((order) => (
+                  <div 
+                    key={order.id} 
+                    className="p-5 rounded-3xl bg-zinc-50 border border-zinc-100 flex items-center justify-between group hover:border-amber-500/50 hover:bg-white transition-all cursor-pointer shadow-sm hover:shadow-md"
+                    onClick={() => handleRetrieveOrder(order)}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center font-black text-zinc-400 group-hover:text-amber-500 shadow-inner">
+                        {order.cart.length}
+                      </div>
+                      <div>
+                        <p className="font-black text-zinc-900">{order.customer?.name || "Walk-in Customer"}</p>
+                        <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">
+                          Parked {new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} by {order.staff_name}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-black text-zinc-900">{formatCurrency(order.total)}</p>
+                      <Button variant="ghost" className="h-8 rounded-xl text-[10px] font-black uppercase tracking-widest text-amber-600 group-hover:bg-amber-50 pr-0">Retrieve Order →</Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
         </DialogContent>
       </Dialog>
     </>
