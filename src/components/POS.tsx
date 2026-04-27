@@ -32,7 +32,9 @@ import {
   AlertCircle,
   Users,
   Clock,
-  Share2
+  Share2,
+  PauseCircle,
+  RefreshCw
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -922,14 +924,21 @@ export default function POS() {
 
       setLastTransaction({
         id: txRef.id,
-        items: [...cart],
+        items: cart.map(item => ({
+          id: item.product.id,
+          name: item.product.name,
+          price: item.product.retail_price || item.product.price || 0,
+          qty: item.quantity,
+          discount: item.discount
+        })),
         total,
         tax,
         discountAmount,
         subtotal,
-        timestamp: new Date().toLocaleString(),
         paymentMethod,
-        customer: selectedCustomer
+        change: paymentMethod === "CASH" && smartCashTendered ? Math.max(0, smartCashTendered - total) : 0,
+        customerName: selectedCustomer?.name || "Guest Customer",
+        date: new Date().toLocaleString()
       });
       setShowReceipt(true);
       setCart([]);
@@ -1796,8 +1805,7 @@ Notes: ${closeRegisterNotes || 'None'}
               </Button>
             </div>
           </div>
-        </>
-      )}
+        
 
       {/* Split Payment Dialog */}
       <Dialog open={isSplitPaymentDialogOpen} onOpenChange={setIsSplitPaymentDialogOpen}>
@@ -1933,13 +1941,7 @@ Notes: ${closeRegisterNotes || 'None'}
                 variant="outline" 
                 className="rounded-2xl h-14 border-zinc-200 font-bold hover:bg-zinc-50"
                 onClick={() => {
-                  const receiptHtml = document.getElementById("pos-receipt")?.innerHTML;
-                  if (receiptHtml) {
-                    const printWindow = window.open('', '', 'width=600,height=600');
-                    printWindow?.document.write(`<html><head><style>@media print { body { margin: 0; } }</style></head><body>${receiptHtml}</body></html>`);
-                    printWindow?.document.close();
-                    printWindow?.print();
-                  }
+                  window.print();
                 }}
               >
                 <Printer className="w-4 h-4 mr-2" />
@@ -1955,11 +1957,21 @@ ID: #${lastTransaction?.id.substring(0,8).toUpperCase()}
 Total: ${formatCurrency(lastTransaction?.total || 0)}
 Date: ${lastTransaction?.timestamp}
                   `.trim();
+                  
                   if (navigator.share) {
-                    await navigator.share({ title: 'Receipt', text });
+                    try {
+                      await navigator.share({ title: 'Receipt', text });
+                    } catch (e) {
+                      // Fallback if share is cancelled or fails
+                    }
                   } else {
-                    navigator.clipboard.writeText(text);
-                    toast.success("Receipt copied to clipboard");
+                    // Modern Fallback: Offer WhatsApp or Email
+                    const choice = confirm("Share via:\nOK - WhatsApp\nCancel - Email");
+                    if (choice) {
+                      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                    } else {
+                      window.location.href = `mailto:?subject=Receipt from ${branding.name}&body=${encodeURIComponent(text)}`;
+                    }
                   }
                 }}
               >
