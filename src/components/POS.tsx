@@ -321,14 +321,6 @@ export default function POS() {
     }
   }, [posSession]);
 
-  useEffect(() => {
-    if (selectedAdmin && !isAuthorized && !isOpeningFloatOpen && pinEntry.length === 4) {
-      const validAdmin = staffList.find(s => s.id === selectedAdmin.id);
-      if (validAdmin && pinEntry === validAdmin.pin) {
-        setIsOpeningFloatOpen(true);
-      }
-    }
-  }, [selectedAdmin, isAuthorized, isOpeningFloatOpen, pinEntry, staffList]);
 
   useEffect(() => {
     if (!enterpriseId) return;
@@ -568,6 +560,9 @@ export default function POS() {
         );
       }
       toast.success(`${product.name} added to cart`, { duration: 1000, position: "bottom-right" });
+      // On mobile, keep the cart closed but maybe give a haptic-style hint? 
+      // Or if the user just added the first item, maybe open it? 
+      // For now, let's just add it.
       return [...prev, { product, quantity: 1 }];
     });
   }, [getProductStock]);
@@ -641,7 +636,9 @@ export default function POS() {
       isLoyaltyReward: (campaign as any).isLoyaltyReward || false
     });
     setIsDiscountDialogOpen(false);
-    toast.success(`Applied ${campaign.name} discount!`);
+    toast.success(`Applied ${campaign.name} discount!`, {
+      icon: campaign.isLoyaltyReward ? '🎁' : '🏷️'
+    });
   };
 
   const handleApplyManualDiscount = () => {
@@ -941,17 +938,31 @@ export default function POS() {
         date: new Date().toLocaleString()
       });
       setShowReceipt(true);
-      setCart([]);
-      if (cartKey) localStorage.removeItem(cartKey);
+      // Automatically trigger print after a short delay
+      setTimeout(() => {
+        window.print();
+      }, 500);
+      
+      // Cleanup of current transaction state
       setCartDiscount(null);
       setSelectedCustomer(null);
-      toast.success("Transaction completed!");
+      // We do NOT clear the cart or lastTransaction here anymore to ensure the receipt stays valid
     } catch (error: any) {
       console.error("Transaction error:", error);
       toast.error("Transaction failed: " + (error.message || "Unknown error"));
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleNewTransaction = () => {
+    setShowReceipt(false);
+    setCart([]);
+    setCartDiscount(null);
+    setSelectedCustomer(null);
+    setSmartCashTendered(null);
+    if (cartKey) localStorage.removeItem(cartKey);
+    toast.success("Ready for new transaction");
   };
 
   const handlePinInput = async (num: string) => {
@@ -1447,6 +1458,13 @@ Notes: ${closeRegisterNotes || 'None'}
                           <span className="text-[10px] font-black uppercase tracking-widest">Show Order ({cart.length})</span>
                         </Button>
                       )}
+                      <Button 
+                        onClick={() => setIsCartOpenOnMobile(true)} 
+                        className="md:hidden flex items-center gap-2 rounded-xl h-10 bg-blue-600 text-white shadow-lg shadow-blue-600/20 active:scale-95 transition-all"
+                      >
+                        <ShoppingCart className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">Cart ({cart.length})</span>
+                      </Button>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className={cn("flex items-center rounded-xl border p-1 transition-all", isReturnMode ? "bg-rose-50 border-rose-200" : "bg-zinc-100 border-zinc-200")}>
@@ -1509,6 +1527,10 @@ Notes: ${closeRegisterNotes || 'None'}
                               <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-indigo-50 cursor-pointer group" onClick={() => handleTimeClock('IN_MEETING')}>
                                 <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Users className="w-4 h-4 text-indigo-600" /></div>
                                 <span className="font-bold text-zinc-700 text-sm">In Meeting</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => handleTimeClock('LOCKED')}>
+                                <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Lock className="w-4 h-4 text-zinc-600" /></div>
+                                <span className="font-bold text-zinc-700 text-sm">Lock Terminal</span>
                               </DropdownMenuItem>
                               <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => setIsShiftHistoryOpen(true)}>
                                 <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><History className="w-4 h-4 text-zinc-600" /></div>
@@ -1603,23 +1625,31 @@ Notes: ${closeRegisterNotes || 'None'}
 
           <div className={cn("fixed inset-y-0 right-0 w-full sm:w-[420px] border-l border-zinc-200 bg-white flex flex-col shadow-2xl z-40 transition-all duration-500 ease-in-out md:relative md:shadow-xl md:z-auto", isCartOpenOnMobile ? "translate-x-0" : "translate-x-full md:translate-x-0", isCartCollapsed ? "md:w-0 md:opacity-0 md:pointer-events-none -mr-4" : "md:w-[400px] md:opacity-100")}>
             <div className="flex-none p-6 lg:p-8 border-b border-zinc-100 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                  <div className="flex items-center gap-2">
-                    <ShoppingCart className="w-5 h-5 text-zinc-900" />
-                    <h2 className="text-xl font-bold tracking-tight font-display">Current Order</h2>
+                <div className="flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <div className="flex items-center gap-2">
+                      <ShoppingCart className="w-5 h-5 text-zinc-900" />
+                      <h2 className="text-xl font-bold tracking-tight font-display">Current Order</h2>
+                    </div>
+                    {suspendedOrders.length > 0 && (
+                      <button 
+                        className="text-[9px] font-black uppercase tracking-widest text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-1 transition-colors"
+                        onClick={() => setIsSuspendedOrdersOpen(true)}
+                      >
+                        <PauseCircle className="w-2.5 h-2.5" /> {suspendedOrders.length} Parked Orders →
+                      </button>
+                    )}
                   </div>
-                  {suspendedOrders.length > 0 && (
-                    <button 
-                      className="text-[9px] font-black uppercase tracking-widest text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-1 transition-colors"
-                      onClick={() => setIsSuspendedOrdersOpen(true)}
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="md:hidden h-9 w-9 rounded-xl text-zinc-400"
+                      onClick={() => setIsCartOpenOnMobile(false)}
                     >
-                      <PauseCircle className="w-2.5 h-2.5" /> {suspendedOrders.length} Parked Orders →
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                   <Button 
+                      <ChevronRight className="w-5 h-5" />
+                    </Button>
+                     <Button 
                     variant="ghost" 
                     size="icon" 
                     className="h-9 w-9 rounded-xl text-zinc-400 hover:text-blue-600 hover:bg-blue-50"
@@ -1642,7 +1672,12 @@ Notes: ${closeRegisterNotes || 'None'}
                     variant="ghost" 
                     size="icon" 
                     className="h-9 w-9 rounded-xl text-zinc-400 hover:text-rose-600 hover:bg-rose-50"
-                    onClick={() => setCart([])}
+                    onClick={() => {
+                      if (cart.length > 0) {
+                        const confirm = window.confirm("Are you sure you want to clear the current order?");
+                        if (confirm) setCart([]);
+                      }
+                    }}
                     disabled={cart.length === 0}
                     title="Clear Cart"
                   >
@@ -1765,7 +1800,7 @@ Notes: ${closeRegisterNotes || 'None'}
                   </div>
                   <span className="font-medium text-zinc-900">{formatCurrency(tax)}</span>
                 </div>
-                <div className="flex justify-between text-2xl font-bold pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
+                <div className="flex justify-between text-2xl font-black pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => setPaymentMethod("CARD")}><CreditCard className="w-4 h-4 mr-2" />Card</Button>
@@ -1806,6 +1841,18 @@ Notes: ${closeRegisterNotes || 'None'}
             </div>
           </div>
         
+          {/* Mobile Cart Overlay */}
+          <AnimatePresence>
+            {isCartOpenOnMobile && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsCartOpenOnMobile(false)}
+                className="fixed inset-0 bg-black/40 backdrop-blur-sm z-30 md:hidden"
+              />
+            )}
+          </AnimatePresence>
 
       {/* Split Payment Dialog */}
       <Dialog open={isSplitPaymentDialogOpen} onOpenChange={setIsSplitPaymentDialogOpen}>
@@ -1903,7 +1950,9 @@ Notes: ${closeRegisterNotes || 'None'}
         </DialogContent>
       </Dialog>
       {/* Transaction Success / Receipt Dialog */}
-      <Dialog open={showReceipt} onOpenChange={setShowReceipt}>
+      <Dialog open={showReceipt} onOpenChange={(open) => {
+        if (!open) handleNewTransaction();
+      }}>
         <DialogContent className="sm:max-w-md rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
           <div className="p-10 flex flex-col items-center text-center space-y-6">
             <motion.div 
@@ -1982,16 +2031,12 @@ Date: ${lastTransaction?.timestamp}
 
             <Button 
               className="w-full rounded-2xl h-16 bg-zinc-900 text-white hover:bg-zinc-800 font-black text-lg shadow-xl shadow-zinc-900/20 transition-all active:scale-95"
-              onClick={() => { setShowReceipt(false); setSmartCashTendered(null); }}
+              onClick={handleNewTransaction}
             >
               New Transaction
             </Button>
           </div>
 
-          {/* Hidden components for printing */}
-          <div className="hidden">
-            <POSReceipt branding={branding} order={lastTransaction} formatCurrency={formatCurrency} />
-          </div>
         </DialogContent>
       </Dialog>
 
@@ -2607,6 +2652,10 @@ Date: ${lastTransaction?.timestamp}
       </Dialog>
     </>
   )}
+  {/* Dedicated printing container - visible only to the printer */}
+  <div className="md:fixed md:top-0 md:left-0 md:opacity-0 md:pointer-events-none z-[-1]">
+    <POSReceipt branding={branding} order={lastTransaction} formatCurrency={formatCurrency} />
+  </div>
 </div>
 );
 }

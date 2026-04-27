@@ -24,6 +24,7 @@ interface POSReceiptProps {
 }
 
 export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatCurrency }) => {
+  if (!order) return null;
   return (
     <div className="w-[300px] bg-white p-4 font-mono text-[12px] text-black leading-tight border border-zinc-100" id="pos-receipt">
       {/* Header */}
