@@ -99,7 +99,7 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
       <div className="text-center space-y-1 mb-4">
         <p className="uppercase">Paid via {order.paymentMethod}</p>
         <p className="text-[10px]">Tendered: {formatCurrency(order.total)}</p>
-        <p className="text-[10px]">Change: {formatCurrency(0)}</p>
+        <p className="text-[10px]">Change: {formatCurrency(order.change || 0)}</p>
       </div>
 
       <div className="border-b border-dashed border-black my-4" />

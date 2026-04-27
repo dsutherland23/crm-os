@@ -56,6 +56,7 @@ import { GoogleGenAI } from "@google/genai";
 import { collection, getDocs, query, orderBy, limit } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { useModules } from "@/context/ModuleContext";
+import { usePendingAction } from "@/context/PendingActionContext";
 
 export default function AIInsights() {
   const { activeBranch } = useModules();
