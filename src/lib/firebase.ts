@@ -109,6 +109,7 @@ export const writeBatch = (db: any) => {
   return fs.writeBatch(db);
 };
 
+export const runTransaction = (db: any, fn: any) => fs.runTransaction(db, fn);
 export const arrayUnion = fs.arrayUnion;
 export const arrayRemove = fs.arrayRemove;
 export const getDocFromCache = fs.getDocFromCache;

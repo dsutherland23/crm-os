@@ -2,12 +2,19 @@ rules_version = '2';
 
 // ════════════════════════════════════════════════════════════════════════
 // ORIVO CRM — ZERO TRUST FIRESTORE SECURITY RULES
-// 2026 Production Standard
+// 2026 Production Standard — Hardened
+//
+// FIX: Replaced wildcard allow-delete with explicit per-collection rules.
+// The previous wildcard `match /{collection}/{docId}` allowed any enterprise
+// member (including cashiers) to delete any document by calling deleteDoc()
+// directly from the browser console. This version requires isAdmin() for all
+// destructive operations and isEditor() for write operations on sensitive data.
 // ════════════════════════════════════════════════════════════════════════
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Core auth helpers ────────────────────────────────────────────
     function isSignedIn() {
       return request.auth != null;
     }
@@ -34,11 +41,23 @@ service cloud.firestore {
         : '';
     }
 
+    // Admin: can perform any operation including delete
     function isAdmin() {
       return request.auth != null && (
         isDeveloper() ||
         userRole() in ['Admin', 'Owner', 'Executive', 'Manager', 'Business Admin', 'Supervisor',
                        'admin', 'owner', 'executive', 'manager', 'supervisor']
+      );
+    }
+
+    // Editor: can create and update, but NOT delete (unless also admin)
+    // FIX: Cashiers are editors — they can create transactions but cannot delete records.
+    function isEditor() {
+      return request.auth != null && (
+        isDeveloper() ||
+        isAdmin() ||
+        userRole() in ['Editor', 'Cashier', 'Staff', 'Sales', 'Accountant',
+                       'editor', 'cashier', 'staff', 'sales', 'accountant']
       );
     }
 
@@ -49,6 +68,15 @@ service cloud.firestore {
         isAdmin() ||
         userEnterpriseId() == entId
       );
+    }
+
+    // Helpers to avoid repetitive resource.data access
+    function sameEnterprise() {
+      return resource != null && belongsToEnterprise(resource.data.get('enterprise_id', ''));
+    }
+
+    function newDocSameEnterprise() {
+      return belongsToEnterprise(request.resource.data.get('enterprise_id', ''));
     }
 
     // ── PUBLIC ──────────────────────────────────────────────────────
@@ -63,9 +91,7 @@ service cloud.firestore {
 
     // ── ADMIN PORTAL ────────────────────────────────────────────────
     match /admin_users/{uid} {
-      // Allow any signed-in user to read — needed to check their own admin status on login
       allow read: if isSignedIn();
-      // Allow write if: you are a super_admin, OR if you are writing your own doc and the registry is empty (bootstrap)
       allow write: if isSignedIn() && (
         (exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/admin_users/$(request.auth.uid)).data.role == 'super_admin') ||
@@ -76,6 +102,8 @@ service cloud.firestore {
     match /admin_audit_logs/{logId} {
       allow read: if isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid));
       allow create: if isSignedIn();
+      // Audit logs are append-only — no updates or deletes ever
+      allow update, delete: if false;
     }
 
     match /admin_meta/{docId} {
@@ -84,7 +112,6 @@ service cloud.firestore {
     }
 
     // ── USER PROFILES ────────────────────────────────────────────────
-    // Users can always read/write their own profile.
     match /users/{userId} {
       allow read: if isSignedIn() && (isOwner(userId) || belongsToEnterprise(resource.data.enterprise_id) || isAdmin());
       allow create: if isSignedIn();
@@ -106,7 +133,157 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // ── TENANT-SCOPED COLLECTIONS ────────────────────────────────────
+    match /financial_summaries/{entId} {
+      allow read: if belongsToEnterprise(entId);
+      allow write: if isAdmin() || isDeveloper();
+    }
+
+    // ── FINANCIAL LEDGER ─────────────────────────────────────────────
+    // FIX: Ledger entries are immutable financial records.
+    // Editors can create entries (e.g., from a sale). Only admins can correct them.
+    match /ledger/{entryId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update, delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── CRM — Customers ──────────────────────────────────────────────
+    // FIX: Any enterprise member could previously delete customers. Now requires isAdmin().
+    match /customers/{customerId} {
+      allow read: if sameEnterprise() || isDeveloper();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── CRM — Customer Groups + Member Subcollection ─────────────────
+    // FIX: Subcollection members are explicitly secured. Previously unprotected.
+    match /customer_groups/{groupId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+
+      match /members/{memberId} {
+        allow read: if isEditor() && belongsToEnterprise(
+          get(/databases/$(database)/documents/customer_groups/$(groupId)).data.enterprise_id
+        );
+        allow write: if isEditor() && belongsToEnterprise(
+          get(/databases/$(database)/documents/customer_groups/$(groupId)).data.enterprise_id
+        );
+      }
+    }
+
+    // ── INVENTORY & PRODUCTS ─────────────────────────────────────────
+    // FIX: Cashiers (editors) can adjust stock, only admins can delete products.
+    match /products/{productId} {
+      allow read: if sameEnterprise() || isDeveloper();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── SUPPLIERS ────────────────────────────────────────────────────
+    match /suppliers/{supplierId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    match /purchase_orders/{poId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── INVOICES ────────────────────────────────────────────────────
+    // FIX: Editors can raise invoices. Only admins can void them.
+    match /invoices/{invoiceId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    match /credit_notes/{cnId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── TRANSACTIONS ─────────────────────────────────────────────────
+    // FIX: Transactions are write-once financial records. Post-creation edits
+    // require admin (prevents cashiers from altering sales history).
+    match /transactions/{txId} {
+      allow read: if sameEnterprise() || isDeveloper();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isAdmin() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── STAFF ──────────────────────────────────────────────────────
+    // FIX: Only admins can manage staff records (create/update/delete).
+    match /staff/{staffId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isAdmin() && newDocSameEnterprise();
+      allow update: if isAdmin() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── LOYALTY & CAMPAIGNS ─────────────────────────────────────────
+    match /loyalty_programs/{progId} {
+      allow read: if sameEnterprise() || isDeveloper();
+      allow create: if isSignedIn() && isAdmin() && newDocSameEnterprise();
+      allow update: if isAdmin() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    match /campaigns/{campId} {
+      allow read: if sameEnterprise() || isDeveloper();
+      allow create: if isSignedIn() && isAdmin() && newDocSameEnterprise();
+      allow update: if isAdmin() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── BRANCHES ─────────────────────────────────────────────────────
+    match /branches/{branchId} {
+      allow read: if sameEnterprise() || isDeveloper();
+      allow create: if isSignedIn() && isAdmin() && newDocSameEnterprise();
+      allow update: if isAdmin() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── AUDIT LOGS ───────────────────────────────────────────────────
+    // FIX: Audit logs are append-only — no mutations ever allowed.
+    match /audit_logs/{logId} {
+      allow read: if isAdmin() && sameEnterprise();
+      allow create: if isSignedIn() && newDocSameEnterprise();
+      allow update, delete: if false;
+    }
+
+    // ── DOCUMENTS (Customer file uploads) ────────────────────────────
+    match /documents/{docId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isEditor() && newDocSameEnterprise();
+      allow update: if isEditor() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── WORKFLOW / AUTOMATIONS ───────────────────────────────────────
+    match /workflows/{wfId} {
+      allow read: if sameEnterprise();
+      allow create: if isSignedIn() && isAdmin() && newDocSameEnterprise();
+      allow update: if isAdmin() && sameEnterprise();
+      allow delete: if isAdmin() && sameEnterprise();
+    }
+
+    // ── FALLBACK: Tenant-scoped catch-all (defense in depth) ─────────
+    // FIX: This catch-all now requires isAdmin() for delete — previously ANY
+    // enterprise member could delete any document not covered by specific rules.
+    // This wildcard only applies to collections not explicitly defined above.
     match /{collection}/{docId} {
       allow read: if isAdmin() || isDeveloper() ||
                      (resource != null && belongsToEnterprise(resource.data.get('enterprise_id', ''))) ||
@@ -117,9 +294,14 @@ service cloud.firestore {
         belongsToEnterprise(request.resource.data.get('enterprise_id', ''))
       );
 
-      allow update, delete: if isAdmin() || isDeveloper() || (
-        resource != null && belongsToEnterprise(resource.data.get('enterprise_id', ''))
+      allow update: if isSignedIn() && (isEditor() || isDeveloper()) && (
+        isAdmin() || isDeveloper() ||
+        (resource != null && belongsToEnterprise(resource.data.get('enterprise_id', '')))
       );
+
+      // FIX: DELETE now requires admin — the previous wildcard let any enterprise
+      // member call deleteDoc() from the browser console on any collection.
+      allow delete: if isAdmin() || isDeveloper();
     }
   }
 }

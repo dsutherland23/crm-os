@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
-  db, collection, query, where, onSnapshot, doc, 
+  db, collection, query, where, onSnapshot, doc, limit,
   addDoc, updateDoc, deleteDoc, serverTimestamp 
 } from '@/lib/firebase';
 import { useModules } from "@/context/ModuleContext";
@@ -34,7 +34,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { recordAuditLog } from "@/lib/audit";
 
 export default function Suppliers() {
-  const { enterpriseId, formatCurrency, activeBranch } = useModules();
+  const { enterpriseId, formatCurrency, activeBranch, hasPermission } = useModules();
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -44,6 +44,10 @@ export default function Suppliers() {
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  // Filter / export state
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
 
   const [supplierForm, setSupplierForm] = useState({
     name: '',
@@ -58,36 +62,52 @@ export default function Suppliers() {
     status: 'ACTIVE'
   });
 
-  // FIX: Purchase Order creation state — was a dead-end (read-only list)
-  const [isPODialogOpen, setIsPODialogOpen] = useState(false);
-  const [poForm, setPoForm] = useState({
+  // PO line items — supports multiple lines per order
+  const emptyPoForm = () => ({
     description: '',
     quantity: 1,
     unit_cost: '',
     expected_date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-    notes: ''
+    notes: '',
+    product_id: ''
   });
+  const [isPODialogOpen, setIsPODialogOpen] = useState(false);
+  const [poForm, setPoForm] = useState(emptyPoForm());
   const [isCreatingPO, setIsCreatingPO] = useState(false);
 
   const handleCreatePO = async () => {
-    if (!selectedSupplier || !poForm.description || !poForm.unit_cost) {
-      toast.error('Description and unit cost are required');
+    if (!hasPermission('suppliers', 'editor')) {
+      toast.error('You do not have permission to raise purchase orders.');
+      return;
+    }
+    if (!selectedSupplier || !poForm.description.trim()) {
+      toast.error('Item description is required.');
+      return;
+    }
+    const cost = parseFloat(poForm.unit_cost);
+    if (isNaN(cost) || cost <= 0) {
+      toast.error('Unit cost must be a positive number.');
+      return;
+    }
+    if (!poForm.expected_date) {
+      toast.error('Expected delivery date is required.');
       return;
     }
     setIsCreatingPO(true);
     try {
-      const qty = Number(poForm.quantity) || 1;
-      const cost = parseFloat(poForm.unit_cost) || 0;
+      const qty = Math.max(1, Number(poForm.quantity) || 1);
+      const linkedProduct = products.find(p => p.id === poForm.product_id);
       await addDoc(collection(db, 'purchase_orders'), {
         supplier_id: selectedSupplier.id,
         supplier_name: selectedSupplier.name,
         enterprise_id: enterpriseId,
         branch_id: activeBranch === 'all' ? 'main' : activeBranch,
-        items: [{ description: poForm.description, quantity: qty, unit_cost: cost }],
+        items: [{ description: poForm.description, quantity: qty, unit_cost: cost, product_id: poForm.product_id || null }],
         total_cost: qty * cost,
         status: 'PENDING',
         expected_date: poForm.expected_date,
         notes: poForm.notes,
+        expense_created: false, // guard flag — prevents duplicate ledger entry
         created_at: serverTimestamp()
       });
       await recordAuditLog({
@@ -100,7 +120,7 @@ export default function Suppliers() {
       });
       toast.success('Purchase Order raised successfully');
       setIsPODialogOpen(false);
-      setPoForm({ description: '', quantity: 1, unit_cost: '', expected_date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0], notes: '' });
+      setPoForm(emptyPoForm());
     } catch (error) {
       console.error(error);
       toast.error('Failed to create Purchase Order');
@@ -110,6 +130,15 @@ export default function Suppliers() {
   };
 
   const handleUpdatePOStatus = async (poId: string, newStatus: string) => {
+    if (!hasPermission('suppliers', 'editor')) {
+      toast.error('You do not have permission to update order status.');
+      return;
+    }
+    const destructive = newStatus === 'CANCELLED' || newStatus === 'RECEIVED';
+    if (destructive) {
+      const label = newStatus === 'RECEIVED' ? 'Mark this order as RECEIVED? This will create a financial liability.' : 'Cancel this purchase order?';
+      if (!window.confirm(label)) return;
+    }
     try {
       const po = purchaseOrders.find(p => p.id === poId);
       if (!po) return;
@@ -119,8 +148,8 @@ export default function Suppliers() {
         updated_at: serverTimestamp()
       });
 
-      // If received, create a corresponding expense/liability automatically
-      if (newStatus === 'RECEIVED') {
+      // Guard: only create an expense if one has NOT already been created for this PO
+      if (newStatus === 'RECEIVED' && !po.expense_created) {
         await addDoc(collection(db, 'expenses'), {
           enterprise_id: enterpriseId,
           branch_id: po.branch_id || 'main',
@@ -135,11 +164,26 @@ export default function Suppliers() {
           po_id: poId,
           created_at: serverTimestamp()
         });
+        // Mark PO so future status changes never re-generate the expense
+        await updateDoc(doc(db, 'purchase_orders', poId), { expense_created: true });
+
+        // Update inventory stock for linked product if present
+        const item = po.items?.[0];
+        if (item?.product_id) {
+          const productRef = doc(db, 'products', item.product_id);
+          const linkedProd = products.find(p => p.id === item.product_id);
+          if (linkedProd) {
+            await updateDoc(productRef, {
+              stock: (linkedProd.stock || 0) + (item.quantity || 1),
+              updated_at: serverTimestamp()
+            });
+          }
+        }
 
         await recordAuditLog({
           enterpriseId,
           action: 'PO_RECEIVED_LEDGER_UPDATED',
-          details: `Purchase Order ${poId.slice(0, 8).toUpperCase()} marked as RECEIVED. Financial liability of ${formatCurrency(po.total_cost)} created.`,
+          details: `PO ${poId.slice(0, 8).toUpperCase()} marked RECEIVED. Liability of ${formatCurrency(po.total_cost)} created.`,
           severity: 'INFO',
           type: 'FINANCE'
         });
@@ -157,23 +201,24 @@ export default function Suppliers() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    const qSuppliers = query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId));
+    // FIX: Added limit() to all listeners — previously unbounded
+    const qSuppliers = query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId), limit(200));
     const unsubSuppliers = onSnapshot(qSuppliers, (snapshot) => {
       setSuppliers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setLoading(false);
     });
 
-    const qPOs = query(collection(db, 'purchase_orders'), where('enterprise_id', '==', enterpriseId));
+    const qPOs = query(collection(db, 'purchase_orders'), where('enterprise_id', '==', enterpriseId), limit(300));
     const unsubPOs = onSnapshot(qPOs, (snapshot) => {
       setPurchaseOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    const qExp = query(collection(db, 'expenses'), where('enterprise_id', '==', enterpriseId));
+    const qExp = query(collection(db, 'expenses'), where('enterprise_id', '==', enterpriseId), limit(200));
     const unsubExp = onSnapshot(qExp, (snapshot) => {
       setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    const qProd = query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId));
+    const qProd = query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId), limit(500));
     const unsubProd = onSnapshot(qProd, (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
@@ -187,8 +232,16 @@ export default function Suppliers() {
   }, [enterpriseId]);
 
   const handleSaveSupplier = async () => {
-    if (!supplierForm.name) {
-      toast.error('Partner identity required');
+    if (!hasPermission('suppliers', 'editor')) {
+      toast.error('You do not have permission to manage suppliers.');
+      return;
+    }
+    if (!supplierForm.name.trim()) {
+      toast.error('Entity name is required.');
+      return;
+    }
+    if (supplierForm.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supplierForm.email)) {
+      toast.error('Please enter a valid email address.');
       return;
     }
     setIsSaving(true);
@@ -217,9 +270,25 @@ export default function Suppliers() {
   };
 
   const handleDeleteSupplier = async (id: string) => {
+    if (!hasPermission('suppliers', 'admin')) {
+      toast.error('Only admins can decommission suppliers.');
+      return;
+    }
+    // Referential integrity: block delete if supplier has outstanding POs or unpaid expenses
+    const hasPending = purchaseOrders.some(po => po.supplier_id === id && po.status !== 'RECEIVED' && po.status !== 'CANCELLED');
+    const hasUnpaid = expenses.some(e => e.supplier_id === id && e.status === 'PENDING');
+    if (hasPending) {
+      toast.error('Cannot decommission: this partner has active Purchase Orders. Cancel them first.');
+      return;
+    }
+    if (hasUnpaid) {
+      toast.error('Cannot decommission: this partner has unpaid financial obligations.');
+      return;
+    }
     if (!window.confirm('Decommission this partner? This action is irreversible.')) return;
     try {
       await deleteDoc(doc(db, 'suppliers', id));
+      await recordAuditLog({ enterpriseId, action: 'SUPPLIER_DELETED', details: `Supplier ${id} decommissioned`, severity: 'WARNING', type: 'SYSTEM' });
       toast.success('Partner decommissioned');
       if (selectedSupplier?.id === id) setSelectedSupplier(null);
     } catch (error) {
@@ -227,25 +296,53 @@ export default function Suppliers() {
     }
   };
 
-  const getSupplierStats = (supplierId: string) => {
-    const sPOs = purchaseOrders.filter(po => po.supplier_id === supplierId);
-    const totalSpend = sPOs.reduce((sum, po) => sum + (po.total_cost || 0), 0);
-    const pendingOrders = sPOs.filter(po => po.status !== 'RECEIVED' && po.status !== 'CANCELLED').length;
-    const lastOrder = sPOs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-    
-    // Accounts Payable (Total from Expenses with PENDING status or logic)
-    const apBalance = expenses
-      .filter(e => e.supplier_id === supplierId && e.status === 'PENDING')
-      .reduce((sum, e) => sum + (e.amount || 0), 0);
+  // Memoize per-supplier stats to avoid O(N*M) re-computation on every render
+  const supplierStatsMap = React.useMemo(() => {
+    const map: Record<string, { totalSpend: number; pendingOrders: number; apBalance: number; receivedCount: number; avgDeliveryDays: number }> = {};
+    for (const s of suppliers) {
+      const sPOs = purchaseOrders.filter(po => po.supplier_id === s.id);
+      const totalSpend = sPOs.reduce((sum, po) => sum + (po.total_cost || 0), 0);
+      const pendingOrders = sPOs.filter(po => po.status !== 'RECEIVED' && po.status !== 'CANCELLED').length;
+      const received = sPOs.filter(po => po.status === 'RECEIVED');
+      const avgDeliveryDays = received.length === 0 ? -1 : received.reduce((sum, po) => {
+        const start = po.created_at?.toDate?.()?.getTime() || 0;
+        const end = po.updated_at?.toDate?.()?.getTime() || start;
+        return sum + (end - start) / (1000 * 3600 * 24);
+      }, 0) / received.length;
+      const apBalance = expenses
+        .filter(e => e.supplier_id === s.id && e.status === 'PENDING')
+        .reduce((sum, e) => sum + (e.amount || 0), 0);
+      map[s.id] = { totalSpend, pendingOrders, apBalance, receivedCount: received.length, avgDeliveryDays };
+    }
+    return map;
+  }, [suppliers, purchaseOrders, expenses]);
 
-    return { totalSpend, pendingOrders, lastOrder, apBalance };
+  const getSupplierStats = (supplierId: string) => supplierStatsMap[supplierId] || { totalSpend: 0, pendingOrders: 0, apBalance: 0, receivedCount: 0, avgDeliveryDays: -1 };
+
+  const filteredSuppliers = suppliers.filter(s => {
+    const matchSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.contactPerson?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      s.category?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchCategory = categoryFilter === 'all' || s.category === categoryFilter;
+    const matchStatus = statusFilter === 'all' || s.status === statusFilter;
+    return matchSearch && matchCategory && matchStatus;
+  });
+
+  const supplierCategories = React.useMemo(() => ['all', ...Array.from(new Set(suppliers.map(s => s.category).filter(Boolean)))], [suppliers]);
+
+  const handleExportCSV = () => {
+    const rows = [['Name', 'Contact', 'Email', 'Phone', 'Category', 'Status', 'Total Spend', 'Accounts Payable']];
+    filteredSuppliers.forEach(s => {
+      const st = getSupplierStats(s.id);
+      rows.push([s.name, s.contactPerson || '', s.email || '', s.phone || '', s.category || '', s.status, String(st.totalSpend), String(st.apBalance)]);
+    });
+    const csv = rows.map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'suppliers.csv'; a.click();
+    URL.revokeObjectURL(url);
+    toast.success('Supplier list exported');
   };
-
-  const filteredSuppliers = suppliers.filter(s => 
-    s.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    s.contactPerson?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.category?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
 
   const stats = {
     totalActiveSpend: purchaseOrders.filter(po => po.status === 'SENT').reduce((sum, po) => sum + (po.total_cost || 0), 0),
@@ -307,24 +404,61 @@ export default function Suppliers() {
       <div className="flex-1 flex flex-col lg:flex-row gap-8 px-4 md:px-8 pb-8 lg:overflow-hidden">
         {/* Main List */}
         <Card className={cn("card-modern flex-1 bg-white border-zinc-100 shadow-xl flex flex-col transition-all duration-500 min-h-[400px] lg:min-h-0", selectedSupplier && "lg:flex-[0.4]")}>
-          <div className="p-6 border-b border-zinc-50 flex items-center justify-between gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-              <Input 
-                placeholder="Search partner directory..." 
-                className="pl-12 h-12 rounded-2xl bg-zinc-50 border-none font-bold text-xs"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+          <div className="p-6 border-b border-zinc-50 flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                <Input
+                  placeholder="Search partner directory..."
+                  className="pl-12 h-12 rounded-2xl bg-zinc-50 border-none font-bold text-xs"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  className={cn("h-12 w-12 rounded-2xl bg-zinc-50 hover:bg-zinc-100", isFilterOpen && "bg-zinc-200")}
+                  onClick={() => setIsFilterOpen(v => !v)}
+                  title="Filter suppliers"
+                >
+                  <Filter className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="h-12 w-12 rounded-2xl bg-zinc-50 hover:bg-zinc-100"
+                  onClick={handleExportCSV}
+                  title="Export to CSV"
+                >
+                  <Download className="w-4 h-4" />
+                </Button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" className="h-12 w-12 rounded-2xl bg-zinc-50 hover:bg-zinc-100">
-                <Filter className="w-4 h-4" />
-              </Button>
-              <Button variant="ghost" className="h-12 w-12 rounded-2xl bg-zinc-50 hover:bg-zinc-100">
-                <Download className="w-4 h-4" />
-              </Button>
-            </div>
+            {isFilterOpen && (
+              <div className="flex items-center gap-3 flex-wrap pt-1">
+                <select
+                  className="h-9 rounded-xl bg-zinc-50 border border-zinc-200 text-xs font-bold px-3 text-zinc-700"
+                  value={categoryFilter}
+                  onChange={e => setCategoryFilter(e.target.value)}
+                >
+                  {supplierCategories.map(c => (
+                    <option key={c} value={c}>{c === 'all' ? 'All Categories' : c}</option>
+                  ))}
+                </select>
+                <select
+                  className="h-9 rounded-xl bg-zinc-50 border border-zinc-200 text-xs font-bold px-3 text-zinc-700"
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value)}
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
+                {(categoryFilter !== 'all' || statusFilter !== 'all') && (
+                  <button className="text-[10px] font-black text-rose-500 uppercase tracking-widest" onClick={() => { setCategoryFilter('all'); setStatusFilter('all'); }}>Clear</button>
+                )}
+              </div>
+            )}
           </div>
 
           <ScrollArea className="flex-1">
@@ -479,21 +613,17 @@ export default function Suppliers() {
                     </div>
                     <div className="p-5 rounded-2xl bg-zinc-50 border border-zinc-100/50">
                       <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1.5">Reliability Score</p>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <Star className={cn("w-4 h-4", purchaseOrders.filter(po => po.supplier_id === selectedSupplier.id && po.status === 'RECEIVED').length > 0 ? "text-amber-500 fill-amber-500" : "text-zinc-300")} />
-                        <span className="text-lg font-black text-zinc-900">
-                          {(() => {
-                            const received = purchaseOrders.filter(po => po.supplier_id === selectedSupplier.id && po.status === 'RECEIVED');
-                            if (received.length === 0) return "NEW";
-                            const avgDays = received.reduce((sum, po) => {
-                              const start = po.created_at?.toDate?.()?.getTime() || 0;
-                              const end = po.updated_at?.toDate?.()?.getTime() || start;
-                              return sum + (end - start) / (1000 * 3600 * 24);
-                            }, 0) / received.length;
-                            return avgDays < 3 ? "5.0" : avgDays < 7 ? "4.5" : avgDays < 10 ? "4.0" : "3.5";
-                          })()}
-                        </span>
-                      </div>
+                      {(() => {
+                        const st = getSupplierStats(selectedSupplier.id);
+                        const hasData = st.receivedCount > 0;
+                        const score = !hasData ? null : st.avgDeliveryDays < 3 ? '5.0' : st.avgDeliveryDays < 7 ? '4.5' : st.avgDeliveryDays < 10 ? '4.0' : '3.5';
+                        return (
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <Star className={cn('w-4 h-4', hasData ? 'text-amber-500 fill-amber-500' : 'text-zinc-300')} />
+                            <span className="text-lg font-black text-zinc-900">{score ?? 'NEW'}</span>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </CardHeader>
@@ -527,6 +657,7 @@ export default function Suppliers() {
                                   <Package className="w-10 h-10 mx-auto mb-3 opacity-30" />
                                   <p className="text-xs font-bold uppercase tracking-widest">No purchase orders yet</p>
                                   <p className="text-[10px] mt-1">Raise your first PO to track procurement</p>
+                                   <Button onClick={() => setIsPODialogOpen(true)} className="h-9 px-5 rounded-xl bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest"><Plus className="w-3.5 h-3.5 mr-2" /> Raise First PO</Button>
                                 </div>
                               ) : purchaseOrders.filter(po => po.supplier_id === selectedSupplier.id).map((po, i) => (
                                 <div key={i} className="p-5 rounded-[1.5rem] border border-zinc-100 flex items-center justify-between group hover:border-zinc-200 transition-all bg-zinc-50/20">
@@ -568,18 +699,10 @@ export default function Suppliers() {
                         <TabsContent value="financials" className="m-0 space-y-6">
                            <div className="p-8 rounded-[2rem] bg-zinc-900 text-white relative overflow-hidden mb-6">
                               <div className="relative z-10">
-                                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] mb-2">Current Credit Limit Usage</p>
-                                <h3 className="text-4xl font-black tracking-tighter mb-8">{formatCurrency(getSupplierStats(selectedSupplier.id).apBalance)}</h3>
-                                <div className="space-y-2">
-                                   <div className="flex justify-between text-[10px] font-black uppercase tracking-widest">
-                                      <span>Outstanding Balance</span>
-                                      <span>Limit: {formatCurrency(50000)}</span>
-                                   </div>
-                                   <div className="h-2 w-full bg-zinc-800 rounded-full overflow-hidden">
-                                      <div className="h-full bg-blue-500" style={{ width: `${Math.min((getSupplierStats(selectedSupplier.id).apBalance / 50000) * 100, 100)}%` }} />
-                                   </div>
+                                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em] mb-2">Outstanding Payables</p>
+                                <h3 className="text-4xl font-black tracking-tighter mb-4">{formatCurrency(getSupplierStats(selectedSupplier.id).apBalance)}</h3>
+                                 <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{getSupplierStats(selectedSupplier.id).apBalance === 0 ? 'No outstanding obligations' : 'Pending settlement with supplier'}</p>
                                 </div>
-                              </div>
                               <DollarSign className="absolute -right-8 -bottom-8 w-48 h-48 text-white/[0.05] rotate-12" />
                            </div>
 
@@ -609,29 +732,25 @@ export default function Suppliers() {
                            </div>
                         </TabsContent>
                          
-                        <TabsContent value="compliance" className="m-0 space-y-6">
-                           <div className="grid grid-cols-2 gap-4">
-                              {[
-                                { title: 'TRN Registration', status: 'Verified', date: selectedSupplier.trn ? `TRN: ${selectedSupplier.trn}` : 'Requires Update', icon: ShieldCheck, color: 'text-emerald-500' },
-                                { title: 'Strategic Contract', status: 'Active', date: 'Exp: 2026', icon: FileText, color: 'text-blue-500' },
-                                { title: 'Tax Compliance (TCC)', status: 'Pending', date: 'Requires Update', icon: AlertCircle, color: 'text-rose-500' },
-                                { title: 'Quality Cert (ISO)', status: 'Verified', date: 'Lifetime', icon: CheckCircle2, color: 'text-emerald-500' }
-                              ].map((doc, i) => (
-                                <div key={i} className="p-5 rounded-2xl border border-zinc-100 flex items-center justify-between group hover:shadow-lg transition-all bg-zinc-50/10">
-                                   <div className="flex items-center gap-4">
-                                      <div className={cn("w-10 h-10 rounded-xl bg-white shadow-sm border border-zinc-100 flex items-center justify-center", doc.color)}>
-                                         <doc.icon className="w-5 h-5" />
-                                      </div>
-                                      <div>
-                                         <p className="font-black text-xs text-zinc-900 uppercase">{doc.title}</p>
-                                         <p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">{doc.date}</p>
-                                      </div>
-                                   </div>
-                                   <Button variant="ghost" size="icon" className="rounded-xl opacity-0 group-hover:opacity-100"><Download className="w-4 h-4 text-zinc-400" /></Button>
-                                </div>
-                              ))}
-                           </div>
-                        </TabsContent>
+                         <TabsContent value="compliance" className="m-0 space-y-4">
+                            <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-700 text-xs font-bold">Compliance statuses reflect this supplier's profile. Keep it updated for accuracy.</div>
+                            <div className="grid grid-cols-2 gap-4">
+                               {[
+                                 { title: "TRN", status: selectedSupplier.trn ? "Verified" : "Missing", detail: selectedSupplier.trn ? "TRN: " + selectedSupplier.trn : "No TRN on file", Icon: ShieldCheck, bc: selectedSupplier.trn ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600" },
+                                 { title: "Payment Terms", status: selectedSupplier.paymentTerms || "Not Set", detail: selectedSupplier.paymentTerms || "Update profile", Icon: FileText, bc: selectedSupplier.paymentTerms ? "bg-blue-50 text-blue-600" : "bg-amber-50 text-amber-600" },
+                                 { title: "Contact Info", status: (selectedSupplier.email && selectedSupplier.phone) ? "Complete" : "Incomplete", detail: (!selectedSupplier.email || !selectedSupplier.phone) ? "Email or phone missing" : "Email & phone on file", Icon: (selectedSupplier.email && selectedSupplier.phone) ? CheckCircle2 : AlertCircle, bc: (selectedSupplier.email && selectedSupplier.phone) ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600" },
+                                 { title: "Status", status: selectedSupplier.status || "UNKNOWN", detail: selectedSupplier.status === "ACTIVE" ? "Actively trading" : "Inactive", Icon: selectedSupplier.status === "ACTIVE" ? CheckCircle2 : Clock, bc: selectedSupplier.status === "ACTIVE" ? "bg-emerald-50 text-emerald-600" : "bg-zinc-100 text-zinc-500" }
+                               ].map(({ title, status, detail, Icon: ItemIcon, bc }, i) => (
+                                 <div key={i} className="p-5 rounded-2xl border border-zinc-100 flex items-center justify-between bg-zinc-50/10 hover:shadow-md transition-all">
+                                    <div className="flex items-center gap-4">
+                                       <div className={cn("w-10 h-10 rounded-xl bg-white shadow-sm border border-zinc-100 flex items-center justify-center", bc.includes("emerald") ? "text-emerald-500" : bc.includes("rose") ? "text-rose-500" : bc.includes("blue") ? "text-blue-500" : "text-zinc-400")}><ItemIcon className="w-5 h-5" /></div>
+                                       <div><p className="font-black text-xs text-zinc-900 uppercase">{title}</p><p className="text-[9px] font-bold text-zinc-400 uppercase tracking-widest">{detail}</p></div>
+                                    </div>
+                                    <Badge className={cn("text-[8px] font-black px-2 border-0", bc)}>{status}</Badge>
+                                 </div>
+                               ))}
+                            </div>
+                         </TabsContent>
  
                         <TabsContent value="catalog" className="m-0 space-y-6">
                            <div className="flex items-center justify-between">
@@ -729,8 +848,34 @@ export default function Suppliers() {
                   onChange={(e) => setSupplierForm({...supplierForm, phone: e.target.value})}
                 />
               </div>
+              <div className="col-span-2 space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Address</label>
+                <Input className="h-12 rounded-2xl bg-zinc-50 border-none font-bold text-sm" placeholder="Street, City, Country" value={supplierForm.address} onChange={(e) => setSupplierForm({...supplierForm, address: e.target.value})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Website</label>
+                <Input className="h-12 rounded-2xl bg-zinc-50 border-none font-bold text-sm" placeholder="https://example.com" value={supplierForm.website} onChange={(e) => setSupplierForm({...supplierForm, website: e.target.value})} />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Payment Terms</label>
+                <select className="h-12 w-full rounded-2xl bg-zinc-50 border-none font-bold text-sm px-4 text-zinc-900" value={supplierForm.paymentTerms} onChange={(e) => setSupplierForm({...supplierForm, paymentTerms: e.target.value})}>
+                  <option value="Net 7">Net 7</option>
+                  <option value="Net 14">Net 14</option>
+                  <option value="Net 30">Net 30</option>
+                  <option value="Net 60">Net 60</option>
+                  <option value="COD">Cash on Delivery</option>
+                  <option value="Prepaid">Prepaid</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Status</label>
+                <select className="h-12 w-full rounded-2xl bg-zinc-50 border-none font-bold text-sm px-4 text-zinc-900" value={supplierForm.status} onChange={(e) => setSupplierForm({...supplierForm, status: e.target.value})}>
+                  <option value="ACTIVE">Active</option>
+                  <option value="INACTIVE">Inactive</option>
+                </select>
+              </div>
+              </div>
             </div>
-          </div>
 
           <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex justify-end gap-3">
              <Button variant="ghost" className="rounded-2xl h-12 px-8 font-black text-xs uppercase tracking-widest" onClick={() => setIsSupplierDialogOpen(false)}>Cancel</Button>
@@ -756,6 +901,13 @@ export default function Suppliers() {
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 sm:space-y-5">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Link to Product (Optional)</label>
+                <select className="h-12 w-full rounded-2xl bg-zinc-50 border-none font-bold text-sm px-4 text-zinc-900" value={poForm.product_id} onChange={(e) => { const p = products.find(pr => pr.id === e.target.value); setPoForm({...poForm, product_id: e.target.value, description: p ? p.name : poForm.description, unit_cost: p ? String(p.cost || poForm.unit_cost) : poForm.unit_cost}); }}>
+                  <option value="">-- Select a product --</option>
+                  {products.filter(p => p.supplier_id === selectedSupplier?.id || !p.supplier_id).map(p => (<option key={p.id} value={p.id}>{p.name} — {p.sku || 'No SKU'}</option>))}
+                </select>
+              </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Item / Description *</label>
                 <Input
@@ -792,7 +944,7 @@ export default function Suppliers() {
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest ml-1">Expected Delivery Date</label>
                 <Input
-                  type="date"
+                  type="date" min={new Date().toISOString().split('T')[0]}
                   className="h-12 rounded-2xl bg-zinc-50 border-none font-bold text-sm"
                   value={poForm.expected_date}
                   onChange={(e) => setPoForm({...poForm, expected_date: e.target.value})}

@@ -102,11 +102,15 @@ import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
 import { motion, AnimatePresence } from "motion/react";
 
-import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, where, addDoc, serverTimestamp, deleteDoc, getStorage, ref, uploadBytes, getDownloadURL } from "@/lib/firebase";
+import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, where, addDoc, serverTimestamp, deleteDoc, writeBatch, getStorage, ref, uploadBytes, getDownloadURL, limit } from "@/lib/firebase";
 import { usePendingAction } from "@/context/PendingActionContext";
 
 export default function CRM() {
-  const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId, branding } = useModules();
+  const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId, branding, hasPermission, userRole } = useModules();
+  const isAdmin   = userRole === "admin"  || userRole === "owner";
+  const isManager = isAdmin || userRole === "manager";
+  const canEdit   = isManager || hasPermission("crm", "editor");
+  const canView   = canEdit  || hasPermission("crm", "viewer");
   const { consumeAction } = usePendingAction();
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedSegment, setSelectedSegment] = useState("All");
@@ -314,16 +318,39 @@ export default function CRM() {
 
   const handleDeleteCustomer = async () => {
     if (!selectedCustomer || isSubmittingCustomer) return;
+    if (selectedCustomer.id === 'walk-in') {
+      toast.error("The Walk-in account cannot be deleted.");
+      return;
+    }
+    if (!isManager) {
+      toast.error("You do not have permission to delete customers.");
+      return;
+    }
     setIsSubmittingCustomer(true);
+    const toastId = toast.loading("Purging customer record...");
     try {
-      await deleteDoc(doc(db, "customers", selectedCustomer.id));
-      toast.success("Customer deleted");
+      const batch = writeBatch(db);
+      // Cascade: mark all associated sub-documents for deletion
+      const subCollections = ["transactions", "invoices", "credit_notes", "documents"];
+      for (const col of subCollections) {
+        const snap = await import("@/lib/firebase").then(({ getDocs }) =>
+          getDocs(query(collection(db, col),
+            where("enterprise_id", "==", enterpriseId),
+            where("customer_id", "==", selectedCustomer.id)
+          ))
+        );
+        snap.forEach((d: any) => batch.delete(d.ref));
+      }
+      batch.delete(doc(db, "customers", selectedCustomer.id));
+      await batch.commit();
+      toast.success("Customer and all associated records deleted.", { id: toastId });
       setIsDeleteConfirmOpen(false);
+      setIsPermanentDeleteOpen(false);
       setSelectedCustomer(null);
       setShowDetailOnMobile(false);
     } catch (error) {
       console.error(error);
-      toast.error("Delete failed — please try again");
+      toast.error("Delete failed — please try again", { id: toastId });
     } finally {
       setIsSubmittingCustomer(false);
     }
@@ -348,9 +375,7 @@ export default function CRM() {
     });
     setShowDetailOnMobile(true);
     setAiSummary(null);
-    // FIX: Preserve the active tab when switching customers — power users can stay on
-    // the "Financials" or "Documents" tab as they flip through the customer list.
-    // Only reset to overview for the walk-in virtual account which has no tabs.
+    // Reset tab when selecting walk-in (tabs don't apply) or when first opening
     if (customer.id === 'walk-in') {
       setActiveTab("overview");
     }
@@ -358,9 +383,13 @@ export default function CRM() {
 
   useEffect(() => {
     if (!enterpriseId) return;
+    // FIX: Added limit(500) cap — unbounded onSnapshot would download ALL customers
+    // to the browser on every page load, crashing tabs at scale and causing unbounded
+    // Firebase read billing. Use search to navigate beyond this window.
     const q = query(
-      collection(db, "customers"), 
-      where("enterprise_id", "==", enterpriseId)
+      collection(db, "customers"),
+      where("enterprise_id", "==", enterpriseId),
+      limit(500)
     );
     const path = "customers";
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -370,13 +399,22 @@ export default function CRM() {
       docs = docs.filter(d => d.status !== "Archived");
       docs.sort((a, b) => {
         if (a.status !== b.status) return a.status.localeCompare(b.status);
-        return a.name.localeCompare(b.name);
+        return (a.name || "").localeCompare(b.name || "");
       });
       
       setCustomers(docs);
       if (docs.length > 0 && !selectedCustomer) {
         setSelectedCustomer(docs[0]);
       }
+
+      // Warn admin if the display window cap was hit
+      if (snapshot.size >= 500) {
+        toast.warning("Showing first 500 customers. Use search or filters to find others.", {
+          id: "customer-limit-warn",
+          duration: 8000,
+        });
+      }
+
       setLoading(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, path);
@@ -634,26 +672,36 @@ export default function CRM() {
 
     setIsUploading(true);
     const toastId = toast.loading(`Uploading "${file.name}"...`);
+    let storageRef: any = null;
 
     try {
       const storage = getStorage();
-      // FIX: Use enterprise-scoped path for multi-tenant storage isolation
-      const storageRef = ref(storage, `enterprise/${enterpriseId}/customers/${selectedCustomer.id}/docs/${Date.now()}_${file.name}`);
+      storageRef = ref(storage, `enterprise/${enterpriseId}/customers/${selectedCustomer.id}/docs/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
       const url = await getDownloadURL(storageRef);
 
-      await addDoc(collection(db, "documents"), {
-        customer_id: selectedCustomer.id,
-        enterprise_id: enterpriseId,  // ✅ Fix: ensures security rules & orphan cleanup can filter by tenant
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        url: url,
-        path: storageRef.fullPath,
-        uploadedAt: new Date().toISOString(),
-        timestamp: serverTimestamp(),
-        author: auth.currentUser?.displayName || "System"
-      });
+      // Atomic: if Firestore write fails, delete the orphaned Storage file
+      try {
+        await addDoc(collection(db, "documents"), {
+          customer_id: selectedCustomer.id,
+          enterprise_id: enterpriseId,
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          url: url,
+          path: storageRef.fullPath,
+          uploadedAt: new Date().toISOString(),
+          timestamp: serverTimestamp(),
+          author: auth.currentUser?.displayName || "System"
+        });
+      } catch (firestoreError) {
+        // Rollback: remove the already-uploaded Storage file to prevent orphaning
+        try {
+          const { deleteObject } = await import("firebase/storage");
+          await deleteObject(storageRef);
+        } catch (_) { /* best-effort cleanup */ }
+        throw firestoreError;
+      }
 
       toast.success(`Successfully uploaded ${file.name}`, { id: toastId });
     } catch (error) {
@@ -661,6 +709,8 @@ export default function CRM() {
       toast.error("Upload failed", { id: toastId });
     } finally {
       setIsUploading(false);
+      // Reset input so the same file can be re-uploaded after failure
+      e.target.value = "";
     }
   };
 
@@ -741,6 +791,14 @@ export default function CRM() {
 
   const handleArchiveCustomer = async () => {
     if (!selectedCustomer) return;
+    if (selectedCustomer.id === 'walk-in') {
+      toast.error("The Walk-in account cannot be archived.");
+      return;
+    }
+    if (!canEdit) {
+      toast.error("You do not have permission to archive customers.");
+      return;
+    }
     setIsSubmittingCustomer(true);
     try {
       const customerRef = doc(db, "customers", selectedCustomer.id);
@@ -750,6 +808,7 @@ export default function CRM() {
       });
       toast.success("Customer archived successfully");
       setIsDeleteConfirmOpen(false);
+      setSelectedCustomer(null);
     } catch (error) {
       console.error(error);
       toast.error("Archive failed");
@@ -833,27 +892,32 @@ export default function CRM() {
 
   const handlePrintReport = (reportName: string) => {
     setActivePrintReport(reportName);
-    
-    // 2026 Strategy: Wait for dynamic assets (QR, Logo) to fully resolve before triggering print
-    const timer = setTimeout(() => {
+    let checkInterval: ReturnType<typeof setInterval> | null = null;
+
+    const triggerPrint = () => {
+      if (checkInterval) clearInterval(checkInterval);
       window.print();
       setActivePrintReport(null);
-    }, 2000); // Increased safety margin
+    };
 
-    // Proactive check for image completion
-    const checkInterval = setInterval(() => {
+    // Safety fallback: always print after 3s regardless of image state
+    const timer = setTimeout(triggerPrint, 3000);
+
+    // Proactive check: print as soon as all images are ready
+    checkInterval = setInterval(() => {
       const container = document.getElementById('printable-report-container');
       if (container) {
         const imgs = Array.from(container.getElementsByTagName('img'));
-        const allLoaded = imgs.every(img => img.complete && img.naturalHeight !== 0);
+        const allLoaded = imgs.length === 0 || imgs.every(img => img.complete && img.naturalHeight !== 0);
         if (allLoaded) {
           clearTimeout(timer);
-          clearInterval(checkInterval);
-          window.print();
-          setActivePrintReport(null);
+          triggerPrint();
         }
       }
     }, 100);
+
+    // Guaranteed cleanup if component unmounts mid-wait
+    return () => { clearTimeout(timer); if (checkInterval) clearInterval(checkInterval); };
   };
 
   const handleShareReport = async (reportName: string) => {
@@ -915,6 +979,13 @@ export default function CRM() {
       return;
     }
 
+    // Warn (non-blocking) if the due date is in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dueDateObj < today) {
+      toast.warning("Note: The due date is in the past. Proceeding anyway.");
+    }
+
     const formattedAmount = Number(amountVal.toFixed(2));
 
     setIsSubmittingInvoice(true);
@@ -946,27 +1017,25 @@ export default function CRM() {
   const handleScheduleCall = async () => {
     if (!selectedCustomer || isSubmittingCall) return;
     if (!callData.date) { toast.error("Please select a date"); return; }
+    if (selectedCustomer.id === 'walk-in') { toast.error("Cannot schedule calls for Walk-in account."); return; }
     setIsSubmittingCall(true);
+    const toastId = toast.loading("Scheduling call...");
     try {
       const content = `Scheduled Call: ${callData.objective} on ${callData.date} at ${callData.time}`;
       
-      // Attempt to log to global communications first
-      try {
-        await addDoc(collection(db, "communications"), {
-          customer_id: selectedCustomer.id,
-          customer_name: selectedCustomer.name,
-          type: "Call",
-          content,
-          date: callData.date,
-          timestamp: serverTimestamp(),
-          sender: auth.currentUser?.displayName || "System",
-          status: "Scheduled"
-        });
-      } catch (logErr) {
-        console.warn("Global log failed (continuing to customer update):", logErr);
-      }
+      // Log to global communications collection
+      await addDoc(collection(db, "communications"), {
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.name,
+        type: "Call",
+        content,
+        date: callData.date,
+        timestamp: serverTimestamp(),
+        sender: auth.currentUser?.displayName || "System",
+        status: "Scheduled"
+      });
 
-      // Update customer document
+      // Update customer document inline record
       await updateDoc(doc(db, "customers", selectedCustomer.id), {
         communications: arrayUnion({
           id: Date.now().toString(),
@@ -977,72 +1046,78 @@ export default function CRM() {
         })
       });
       
-      toast.success("Call scheduled and logged");
+      toast.success("Call scheduled and logged", { id: toastId });
       setIsScheduleCallOpen(false);
     } catch (error: any) {
       console.error("Schedule Call Failure:", error);
-      toast.error(`Failed to schedule call: ${error.message || 'Check database permissions'}`);
+      toast.error(`Failed to schedule call: ${error.message || 'Check database permissions'}`, { id: toastId });
     } finally {
       setIsSubmittingCall(false);
     }
   };
 
   const handleAddTag = async () => {
-    if (!newTag.trim() || !selectedCustomer) return;
+    if (!newTag.trim() || !selectedCustomer || isSubmittingCustomer) return;
+    if (selectedCustomer.id === 'walk-in') { toast.error("Cannot tag the Walk-in account."); return; }
+    setIsSubmittingCustomer(true);
     try {
       const customerRef = doc(db, "customers", selectedCustomer.id);
-      await updateDoc(customerRef, {
-        tags: arrayUnion(newTag.trim())
-      });
+      await updateDoc(customerRef, { tags: arrayUnion(newTag.trim()) });
       toast.success("Tag added successfully");
       setNewTag("");
       setIsTagDialogOpen(false);
     } catch (error) {
       toast.error("Failed to add tag");
+    } finally {
+      setIsSubmittingCustomer(false);
     }
   };
 
   const handleGenerateOffer = async () => {
-    if (!offerDetails.trim() || !selectedCustomer) return;
+    if (!offerDetails.trim() || !selectedCustomer || isSubmittingComm) return;
+    if (selectedCustomer.id === 'walk-in') { toast.error("Cannot log offers for Walk-in account."); return; }
+    setIsSubmittingComm(true);
     try {
       const customerRef = doc(db, "customers", selectedCustomer.id);
       const commObj = {
         id: Date.now().toString(),
         type: "Offer",
         content: offerDetails,
-        author: "AI Copilot",
+        author: auth.currentUser?.displayName || "Staff",
         timestamp: new Date().toISOString()
       };
-      await updateDoc(customerRef, {
-        communications: arrayUnion(commObj)
-      });
-      toast.success("Personalized offer generated and saved to communications");
+      await updateDoc(customerRef, { communications: arrayUnion(commObj) });
+      toast.success("Personalized offer saved to communications");
       setOfferDetails("");
       setIsOfferDialogOpen(false);
     } catch (error) {
       toast.error("Failed to generate offer");
+    } finally {
+      setIsSubmittingComm(false);
     }
   };
 
   const handleFollowUp = async () => {
-    if (!outreachMessage.trim() || !selectedCustomer) return;
+    if (!outreachMessage.trim() || !selectedCustomer || isSubmittingComm) return;
+    if (selectedCustomer.id === 'walk-in') { toast.error("Cannot send outreach to Walk-in account."); return; }
+    setIsSubmittingComm(true);
     try {
       const customerRef = doc(db, "customers", selectedCustomer.id);
       const commObj = {
         id: Date.now().toString(),
         type: "Email",
         content: outreachMessage,
-        author: "AI Outreach",
+        author: auth.currentUser?.displayName || "AI Outreach",
         timestamp: new Date().toISOString()
       };
-      await updateDoc(customerRef, {
-        communications: arrayUnion(commObj)
-      });
-      toast.success(`AI Follow-up email scheduled for ${selectedCustomer.name}`);
+      await updateDoc(customerRef, { communications: arrayUnion(commObj) });
+      toast.success(`Follow-up logged for ${selectedCustomer.name}`);
       setOutreachMessage("");
       setIsOutreachDialogOpen(false);
     } catch (error) {
       toast.error("Failed to schedule outreach");
+    } finally {
+      setIsSubmittingComm(false);
     }
   };
 
@@ -1155,7 +1230,7 @@ export default function CRM() {
                       name="customer_type" 
                       value="Business" 
                       checked={customerFormData.customer_type === "Business"}
-                      onChange={(e) => setCustomerFormData({...customerFormData, customer_type: e.target.value})}
+                      onChange={(e) => setCustomerFormData({...customerFormData, customer_type: e.target.value, last_name: ""})}
                       className="w-4 h-4 text-blue-600 border-zinc-300 focus:ring-blue-500"
                     />
                     <span className="text-zinc-900 text-sm">Business</span>
@@ -1290,15 +1365,17 @@ export default function CRM() {
 
             {/* Additional Info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium text-zinc-900">Credit Limit ($)</Label>
-                <Input 
-                  type="number"
-                  value={customerFormData.credit_limit}
-                  onChange={(e) => setCustomerFormData({...customerFormData, credit_limit: Number(e.target.value)})}
-                  className="rounded-xl h-12 border-zinc-200 focus:border-blue-500"
-                />
-              </div>
+              {isAdmin && (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium text-zinc-900">Credit Limit ($)</Label>
+                  <Input 
+                    type="number"
+                    value={customerFormData.credit_limit}
+                    onChange={(e) => setCustomerFormData({...customerFormData, credit_limit: Number(e.target.value)})}
+                    className="rounded-xl h-12 border-zinc-200 focus:border-blue-500"
+                  />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label className="text-sm font-medium text-zinc-900">Birthday</Label>
                 <div className="relative">
@@ -1482,10 +1559,10 @@ export default function CRM() {
                       <p className="text-sm font-bold text-zinc-900 truncate">{customer.name}</p>
                       <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest group-hover:hidden transition-all">{customer.lastContact}</span>
                       <div className="hidden group-hover:flex items-center gap-1 transition-all">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg hover:bg-zinc-200" onClick={(e) => { e.stopPropagation(); toast.success("Drafting Invoice..."); }}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg hover:bg-zinc-200" onClick={(e) => { e.stopPropagation(); handleCustomerSelect(customer); setIsInvoiceDialogOpen(true); }}>
                           <FileText className="w-3.5 h-3.5 text-zinc-600" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg hover:bg-zinc-200" onClick={(e) => { e.stopPropagation(); toast.success("Opening Messenger..."); }}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 rounded-lg hover:bg-zinc-200" onClick={(e) => { e.stopPropagation(); handleCustomerSelect(customer); setIsOutreachDialogOpen(true); }}>
                           <MessageSquare className="w-3.5 h-3.5 text-zinc-600" />
                         </Button>
                       </div>
@@ -1590,10 +1667,10 @@ export default function CRM() {
                     </button>
                   }
                 />
-                <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 p-2 shadow-xl">
+              <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 p-2 shadow-xl">
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-3 py-2">Profile Management</DropdownMenuLabel>
-                    {selectedCustomer.id !== 'walk-in' && (
+                    {selectedCustomer.id !== 'walk-in' && canEdit && (
                       <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => {
                         setCustomerFormData({
                           name: selectedCustomer.name || "",
@@ -1616,45 +1693,57 @@ export default function CRM() {
                         <span className="font-bold text-xs text-zinc-700">Edit Profile</span>
                       </DropdownMenuItem>
                     )}
-                    <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsInvoiceDialogOpen(true)}>
-                      <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600"><FileText className="w-4 h-4" /></div>
-                      <span className="font-bold text-xs text-zinc-700">Create Invoice</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsScheduleCallOpen(true)}>
-                      <div className="p-2 bg-amber-50 rounded-lg text-amber-600"><Calendar className="w-4 h-4" /></div>
-                      <span className="font-bold text-xs text-zinc-700">Schedule Call</span>
-                    </DropdownMenuItem>
+                    {canEdit && (
+                      <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsInvoiceDialogOpen(true)}>
+                        <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600"><FileText className="w-4 h-4" /></div>
+                        <span className="font-bold text-xs text-zinc-700">Create Invoice</span>
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
+                      <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsScheduleCallOpen(true)}>
+                        <div className="p-2 bg-amber-50 rounded-lg text-amber-600"><Calendar className="w-4 h-4" /></div>
+                        <span className="font-bold text-xs text-zinc-700">Schedule Call</span>
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuGroup>
                   
                   <DropdownMenuSeparator className="my-2 bg-zinc-100" />
                   
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-3 py-2">Marketing</DropdownMenuLabel>
-                    <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsOutreachDialogOpen(true)}>
-                      <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><Sparkles className="w-4 h-4" /></div>
-                      <span className="font-bold text-xs text-zinc-700">AI Outreach</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsTagDialogOpen(true)}>
-                      <div className="p-2 bg-zinc-100 rounded-lg text-zinc-600"><Tag className="w-4 h-4" /></div>
-                      <span className="font-bold text-xs text-zinc-700">Manage Tags</span>
-                    </DropdownMenuItem>
+                    {canEdit && (
+                      <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsOutreachDialogOpen(true)}>
+                        <div className="p-2 bg-purple-50 rounded-lg text-purple-600"><Sparkles className="w-4 h-4" /></div>
+                        <span className="font-bold text-xs text-zinc-700">AI Outreach</span>
+                      </DropdownMenuItem>
+                    )}
+                    {canEdit && (
+                      <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3" onClick={() => setIsTagDialogOpen(true)}>
+                        <div className="p-2 bg-zinc-100 rounded-lg text-zinc-600"><Tag className="w-4 h-4" /></div>
+                        <span className="font-bold text-xs text-zinc-700">Manage Tags</span>
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuGroup>
 
-                  <DropdownMenuSeparator className="my-2 bg-zinc-100" />
+                  {isManager && selectedCustomer.id !== 'walk-in' && <DropdownMenuSeparator className="my-2 bg-zinc-100" />}
                   
-                  <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3 text-orange-600 focus:text-orange-600 focus:bg-orange-50" onClick={() => {
-                    setIsDeleteConfirmOpen(true);
-                  }}>
-                    <div className="p-2 bg-orange-50 rounded-lg text-orange-600"><History className="w-4 h-4" /></div>
-                    <span className="font-bold text-xs">Archive Profile</span>
-                  </DropdownMenuItem>
+                  {isManager && selectedCustomer.id !== 'walk-in' && (
+                    <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3 text-orange-600 focus:text-orange-600 focus:bg-orange-50" onClick={() => {
+                      setIsDeleteConfirmOpen(true);
+                    }}>
+                      <div className="p-2 bg-orange-50 rounded-lg text-orange-600"><History className="w-4 h-4" /></div>
+                      <span className="font-bold text-xs">Archive Profile</span>
+                    </DropdownMenuItem>
+                  )}
 
-                  <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3 text-rose-600 focus:text-rose-600 focus:bg-rose-50" onClick={() => {
-                    setIsPermanentDeleteOpen(true);
-                  }}>
-                    <div className="p-2 bg-rose-50 rounded-lg text-rose-600"><Trash2 className="w-4 h-4" /></div>
-                    <span className="font-bold text-xs">Decommission Record</span>
-                  </DropdownMenuItem>
+                  {isAdmin && selectedCustomer.id !== 'walk-in' && (
+                    <DropdownMenuItem className="rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3 text-rose-600 focus:text-rose-600 focus:bg-rose-50" onClick={() => {
+                      setIsPermanentDeleteOpen(true);
+                    }}>
+                      <div className="p-2 bg-rose-50 rounded-lg text-rose-600"><Trash2 className="w-4 h-4" /></div>
+                      <span className="font-bold text-xs">Decommission Record</span>
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
 
@@ -1672,10 +1761,9 @@ export default function CRM() {
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Lifetime Value</p>
                 <TrendingUp className="w-4 h-4 text-emerald-500" />
               </div>
-              <h3 className="text-2xl font-bold text-zinc-900">{formatCurrency(selectedCustomer.spend)}</h3>
+              <h3 className="text-2xl font-bold text-zinc-900">{formatCurrency(selectedCustomer.spend || selectedCustomer.total_spent || 0)}</h3>
               <div className="flex items-center gap-1">
-                <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-100 text-[9px] font-bold">+12%</Badge>
-                <span className="text-[10px] text-zinc-400 font-medium">vs avg</span>
+                <span className="text-[10px] text-zinc-400 font-medium">Total lifetime spend</span>
               </div>
             </Card>
             <Card className="card-modern p-6 space-y-2 group hover:border-blue-500/50 transition-all">
@@ -1712,12 +1800,12 @@ export default function CRM() {
             <div className="w-full overflow-x-auto hide-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
               <TabsList className="flex-none justify-start h-14 bg-transparent border-b border-zinc-200 w-full rounded-none px-0 gap-8 overflow-x-auto scrollbar-hide">
                 <TabsTrigger value="overview" className="tab-modern">Overview</TabsTrigger>
-                <TabsTrigger value="transactions" className="tab-modern">Purchase History</TabsTrigger>
-                <TabsTrigger value="invoices" className="tab-modern">Invoices</TabsTrigger>
-                <TabsTrigger value="documents" className="tab-modern">Documents</TabsTrigger>
-                <TabsTrigger value="reports" className="tab-modern text-blue-600 font-black">Reporting Hub</TabsTrigger>
-                <TabsTrigger value="communication" className="tab-modern">Communication</TabsTrigger>
-                <TabsTrigger value="notes" className="tab-modern">Internal Notes</TabsTrigger>
+                {selectedCustomer.id !== 'walk-in' && <TabsTrigger value="transactions" className="tab-modern">Purchase History</TabsTrigger>}
+                {selectedCustomer.id !== 'walk-in' && <TabsTrigger value="invoices" className="tab-modern">Invoices</TabsTrigger>}
+                {selectedCustomer.id !== 'walk-in' && <TabsTrigger value="documents" className="tab-modern">Documents</TabsTrigger>}
+                {selectedCustomer.id !== 'walk-in' && <TabsTrigger value="reports" className="tab-modern text-blue-600 font-black">Reporting Hub</TabsTrigger>}
+                {selectedCustomer.id !== 'walk-in' && <TabsTrigger value="communication" className="tab-modern">Communication</TabsTrigger>}
+                {selectedCustomer.id !== 'walk-in' && <TabsTrigger value="notes" className="tab-modern">Internal Notes</TabsTrigger>}
               </TabsList>
             </div>
 
@@ -2458,23 +2546,34 @@ export default function CRM() {
               <DialogHeader>
                 <DialogTitle className="text-xl font-bold text-rose-600">Permanent Deletion?</DialogTitle>
                 <DialogDescription>
-                  This will PERMANENTLY erase {selectedCustomer?.name} and all associated metadata. This action cannot be reversed under any protocol.
+                  This will PERMANENTLY erase <strong>{selectedCustomer?.name}</strong> and all associated records (transactions, invoices, documents). This action <strong>cannot be reversed</strong>.
                 </DialogDescription>
               </DialogHeader>
-              <DialogFooter className="gap-3 sm:gap-0 mt-4">
-                <Button variant="outline" className="flex-1 rounded-xl h-12 font-bold" onClick={() => setIsPermanentDeleteOpen(false)}>No, Preserve</Button>
-                <Button 
-                  className="flex-1 rounded-xl bg-rose-600 text-white h-12 font-bold hover:bg-rose-700 shadow-lg shadow-rose-600/20"
-                  onClick={async () => {
-                    await handleDeleteCustomer();
-                    setIsPermanentDeleteOpen(false);
-                  }}
-                  disabled={isSubmittingCustomer}
-                >
-                  {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
-                  Yes, Purge
-                </Button>
-              </DialogFooter>
+              {(() => {
+                const [confirmName, setConfirmName] = React.useState("");
+                return (
+                  <div className="space-y-4 py-2">
+                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Type the customer name to confirm:</p>
+                    <Input
+                      placeholder={selectedCustomer?.name}
+                      value={confirmName}
+                      onChange={(e) => setConfirmName(e.target.value)}
+                      className="rounded-xl h-11 border-rose-200 focus:border-rose-500"
+                    />
+                    <DialogFooter className="gap-3 sm:gap-0 mt-2">
+                      <Button variant="outline" className="flex-1 rounded-xl h-12 font-bold" onClick={() => setIsPermanentDeleteOpen(false)}>No, Preserve</Button>
+                      <Button 
+                        className="flex-1 rounded-xl bg-rose-600 text-white h-12 font-bold hover:bg-rose-700 shadow-lg shadow-rose-600/20"
+                        onClick={async () => { await handleDeleteCustomer(); setIsPermanentDeleteOpen(false); }}
+                        disabled={isSubmittingCustomer || confirmName.trim() !== (selectedCustomer?.name || "").trim()}
+                      >
+                        {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                        Yes, Purge
+                      </Button>
+                    </DialogFooter>
+                  </div>
+                );
+              })()}
             </DialogContent>
           </Dialog>
 
@@ -2708,7 +2807,6 @@ export default function CRM() {
                         {tag}
                         <button 
                           onClick={async () => {
-                            const { updateDoc, doc, arrayRemove } = await import("@/lib/firebase");
                             await updateDoc(doc(db, "customers", selectedCustomer.id), {
                               tags: arrayRemove(tag)
                             });

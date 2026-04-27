@@ -263,7 +263,6 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
   const [transactions, setTransactions] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   // Prevent duplicate subscription triggers
@@ -277,7 +276,18 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
     if (!enterpriseId || !auth.currentUser) return;
 
-    setLoadingMap({ transactions: true, customers: true, inventory: true, logs: true, stats: true });
+    const canFinance = hasPermission("finance");
+    const canInventory = hasPermission("inventory");
+    const canCRM = hasPermission("crm");
+    const canAudit = hasPermission("audit_logs");
+
+    setLoadingMap({
+      transactions: canFinance || canCRM,
+      customers: canCRM,
+      inventory: canInventory,
+      logs: canAudit,
+      stats: true,
+    });
     setErrorMap({ transactions: null, customers: null, inventory: null, logs: null, stats: null });
 
     // 0. Dashboard Stats (Server-side aggregated)
@@ -296,8 +306,10 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
       }
     );
 
-    // 1. Transactions - Limit to most recent 50 for performance
-    const txQuery = activeBranch === "all"
+    // 1. Transactions – only subscribe if user can see finance or CRM
+    let unsubTx = () => {};
+    if (canFinance || canCRM) {
+      const txQuery = activeBranch === "all"
         ? query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), limit(50))
         : query(
             collection(db, "transactions"),
@@ -306,90 +318,105 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
             limit(50)
           );
 
-    const unsubTx = onSnapshot(
-      txQuery,
-      (snap) => {
-        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        docs.sort((a: any, b: any) => {
-          const tA = a.timestamp?.seconds || 0;
-          const tB = b.timestamp?.seconds || 0;
-          return tB - tA;
-        });
-        setTransactions(docs);
-        setLoadingMap((p) => ({ ...p, transactions: false }));
-      },
-      (err) => {
-        console.error("Transactions listener:", err);
-        setErrorMap((p) => ({ ...p, transactions: err.code }));
-        setLoadingMap((p) => ({ ...p, transactions: false }));
-      }
-    );
+      unsubTx = onSnapshot(
+        txQuery,
+        (snap) => {
+          const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          docs.sort((a: any, b: any) => {
+            const tA = a.timestamp?.seconds ?? 0;
+            const tB = b.timestamp?.seconds ?? 0;
+            return tB - tA;
+          });
+          setTransactions(docs);
+          setLoadingMap((p) => ({ ...p, transactions: false }));
+        },
+        (err) => {
+          console.error("Transactions listener:", err);
+          setErrorMap((p) => ({ ...p, transactions: err.code }));
+          setLoadingMap((p) => ({ ...p, transactions: false }));
+        }
+      );
+    } else {
+      setLoadingMap((p) => ({ ...p, transactions: false }));
+    }
 
-    // 2. Customers - Limit to 10 for "Recent" visibility only (Dashboard doesn't need all)
-    // Note: Real-time total counts should ideally come from a stats document
-    const unsubCustomers = onSnapshot(
-      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(10)),
-      (snap) => {
-        setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setLoadingMap((p) => ({ ...p, customers: false }));
-      },
-      (err) => {
-        console.error("Customers listener:", err);
-        setErrorMap((p) => ({ ...p, customers: err.code }));
-        setLoadingMap((p) => ({ ...p, customers: false }));
-      }
-    );
+    // 2. Customers – only subscribe if user has CRM access
+    let unsubCustomers = () => {};
+    if (canCRM) {
+      unsubCustomers = onSnapshot(
+        query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(10)),
+        (snap) => {
+          setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          setLoadingMap((p) => ({ ...p, customers: false }));
+        },
+        (err) => {
+          console.error("Customers listener:", err);
+          setErrorMap((p) => ({ ...p, customers: err.code }));
+          setLoadingMap((p) => ({ ...p, customers: false }));
+        }
+      );
+    } else {
+      setLoadingMap((p) => ({ ...p, customers: false }));
+    }
 
-    // 3. Inventory - Limit to 50 for "Low Stock" visibility
-    const invQuery =
-      activeBranch === "all"
-        ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(50))
-        : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch), limit(50));
+    // 3. Inventory – only subscribe if user has inventory access
+    let unsubInv = () => {};
+    if (canInventory) {
+      const invQuery =
+        activeBranch === "all"
+          ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(50))
+          : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch), limit(50));
 
-    const unsubInv = onSnapshot(
-      invQuery,
-      (snap) => {
-        setInventory(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setLoadingMap((p) => ({ ...p, inventory: false }));
-      },
-      (err) => {
-        console.error("Inventory listener:", err);
-        setErrorMap((p) => ({ ...p, inventory: err.code }));
-        setLoadingMap((p) => ({ ...p, inventory: false }));
-      }
-    );
+      unsubInv = onSnapshot(
+        invQuery,
+        (snap) => {
+          setInventory(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          setLoadingMap((p) => ({ ...p, inventory: false }));
+        },
+        (err) => {
+          console.error("Inventory listener:", err);
+          setErrorMap((p) => ({ ...p, inventory: err.code }));
+          setLoadingMap((p) => ({ ...p, inventory: false }));
+        }
+      );
+    } else {
+      setLoadingMap((p) => ({ ...p, inventory: false }));
+    }
 
-    // 4. Audit Logs
-    const unsubLogs = onSnapshot(
-      query(collection(db, "audit_logs"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(5)),
-      (snap) => {
-        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        docs.sort((a: any, b: any) => {
-          const tA = new Date(a.timestamp).getTime() || 0;
-          const tB = new Date(b.timestamp).getTime() || 0;
-          return tB - tA;
-        });
-        setAuditLogs(docs);
-        setLoadingMap((p) => ({ ...p, logs: false }));
-      },
-      (err) => {
-        console.error("Audit logs listener:", err);
-        setErrorMap((p) => ({ ...p, logs: err.code }));
-        setLoadingMap((p) => ({ ...p, logs: false }));
-      }
-    );
+    // 4. Audit Logs – only subscribe if user has audit access
+    let unsubLogs = () => {};
+    if (canAudit) {
+      // Firestore orderBy handles sorting server-side; no client-side re-sort needed
+      unsubLogs = onSnapshot(
+        query(collection(db, "audit_logs"), where("enterprise_id", "==", enterpriseId), orderBy("timestamp", "desc"), limit(5)),
+        (snap) => {
+          const docs = snap.docs.map((d) => {
+            const raw = d.data();
+            // Normalise timestamp to a plain JS Date regardless of Firestore type
+            const ts = raw.timestamp?.toDate
+              ? raw.timestamp.toDate()
+              : raw.timestamp
+              ? new Date(raw.timestamp)
+              : null;
+            return { id: d.id, ...raw, _parsedTs: ts };
+          });
+          // Secondary sort on the pre-parsed Date so ordering is always reliable
+          docs.sort((a: any, b: any) => (b._parsedTs?.getTime() ?? 0) - (a._parsedTs?.getTime() ?? 0));
+          setAuditLogs(docs);
+          setLoadingMap((p) => ({ ...p, logs: false }));
+        },
+        (err) => {
+          console.error("Audit logs listener:", err);
+          setErrorMap((p) => ({ ...p, logs: err.code }));
+          setLoadingMap((p) => ({ ...p, logs: false }));
+        }
+      );
+    } else {
+      setLoadingMap((p) => ({ ...p, logs: false }));
+    }
 
-    // 3b. Products - needed to cross-reference prices for Inventory Value
-    const unsubProducts = onSnapshot(
-      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(200)),
-      (snap) => {
-        setProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      },
-      (err) => console.error("Products listener:", err)
-    );
-
-    subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs, unsubStats, unsubProducts];
-  }, [activeBranch, enterpriseId]);
+    subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs, unsubStats];
+  }, [activeBranch, enterpriseId, hasPermission]);
 
   useEffect(() => {
     subscribe();
@@ -398,40 +425,41 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
 
   // ── Derived Metrics ────────────────────────────────────────
   const metrics = useMemo(() => {
+    // Prefer server-aggregated stats – they are accurate regardless of client-side limits
     if (dashboardStats?.metrics) return dashboardStats.metrics;
 
+    // ⚠️ FALLBACK: client-side sums are partial (capped at query limits).
+    // Values are intentionally labelled as partial until stats doc is ready.
     const revenue = transactions.reduce((acc, tx) => acc + (Number(tx.total) || 0), 0);
     const orders = transactions.length;
     const customerCount = customers.filter((c) => c.status !== "Archived").length;
-    // Cross-reference inventory stock records with product prices
+    // Use price fields already present on inventory items; no products collection needed
     const inventoryValue = inventory.reduce((acc, item) => {
       const qty = Number(item.quantity ?? item.stock) || 0;
-      // Look up the product to get the price
-      const product = products.find((p) => p.id === item.product_id);
-      const price = Number(product?.cost || product?.retail_price || product?.price || item.retail_price || item.price || item.cost) || 0;
+      const price = Number(item.retail_price || item.price || item.cost) || 0;
       return acc + qty * price;
     }, 0);
-    return { revenue, orders, customers: customerCount, inventory: inventoryValue };
-  }, [dashboardStats, transactions, customers, inventory, products]);
+    return { revenue, orders, customers: customerCount, inventory: inventoryValue, _partial: true };
+  }, [dashboardStats, transactions, customers, inventory]);
 
   // ── Chart Data ─────────────────────────────────────────────
   const chartData = useMemo(() => {
     if (dashboardStats?.chartData) return dashboardStats.chartData;
 
-    const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    // Use local date strings to avoid UTC timezone shift bleeding into wrong day
+    const toLocalDateStr = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    const fmt = new Intl.DateTimeFormat(undefined, { weekday: "short" });
     const days = Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
-      return {
-        name: DAY_LABELS[d.getDay()],
-        date: d.toISOString().split("T")[0],
-        sales: 0,
-      };
+      return { name: fmt.format(d), date: toLocalDateStr(d), sales: 0 };
     });
 
     transactions.forEach((tx) => {
       const raw = tx.timestamp?.toDate ? tx.timestamp.toDate() : new Date(tx.timestamp || 0);
-      const txDate = raw.toISOString().split("T")[0];
+      const txDate = toLocalDateStr(raw);
       const day = days.find((d) => d.date === txDate);
       if (day) day.sales += Number(tx.total) || 0;
     });
@@ -507,22 +535,25 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
   }, [inventory, customers, transactions, metrics.revenue, formatCurrency]);
 
   // ── Sync handler (idempotent guard) ───────────────────────
-  const handleRegenerate = useCallback(() => {
+  const handleRegenerate = useCallback(async () => {
     if (isRegenerating) return;
     setIsRegenerating(true);
-    
-    // Call the background aggregator to update dashboard stats immediately
-    fetch("/api/cron/aggregate-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enterpriseId })
-    }).catch(console.error);
-
     subscribe();
-    setTimeout(() => {
-      setIsRegenerating(false);
+    try {
+      const res = await fetch("/api/cron/aggregate-dashboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enterpriseId }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       toast.success("Intelligence synced with latest data");
-    }, 1200);
+    } catch (err) {
+      // Non-fatal – realtime listeners already refreshed above
+      console.warn("Aggregator API unavailable:", err);
+      toast.info("Live data refreshed (background aggregator unavailable)");
+    } finally {
+      setIsRegenerating(false);
+    }
   }, [isRegenerating, subscribe, enterpriseId]);
 
   // ── Quick Action dispatcher ────────────────────────────────
@@ -535,11 +566,24 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     [setActiveTab, setPendingAction]
   );
 
-  // ── Aggregate loading state ────────────────────────────────
-  const isInitialLoad =
-    Object.values(loadingMap).every(Boolean) && transactions.length === 0;
+  // ── Per-widget loading (independent, no race condition) ───
+  const isStatsLoading = loadingMap.stats;
+  const isTxLoading = loadingMap.transactions;
+  const isLogsLoading = loadingMap.logs;
+  const isInsightsLoading = loadingMap.inventory || loadingMap.customers;
 
-  const hasAnyError = Object.values(errorMap).some(Boolean);
+  // Only show full skeleton if stats AND transactions are still in-flight
+  const isInitialLoad = isStatsLoading && isTxLoading;
+
+  // Permission-denied errors should not trigger the network banner
+  const hasNetworkError = Object.entries(errorMap).some(
+    ([, code]) => code && code !== "permission-denied"
+  );
+  const hasPermissionError = Object.entries(errorMap).some(
+    ([, code]) => code === "permission-denied"
+  );
+  // Keep for backward compat with existing JSX references
+  const hasAnyError = hasNetworkError;
 
   // ────────────────────────────────────────────────────────────────────
   // RENDER
@@ -582,7 +626,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
           </div>
         </div>
 
-        {/* ── Connection error banner ──────────────────────────── */}
+        {/* ── Network error banner (not permission-related) ─────── */}
         {hasAnyError && (
           <div className="flex items-center gap-3 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-700">
             <WifiOff className="w-5 h-5 shrink-0" />
@@ -598,6 +642,13 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
             >
               <RefreshCw className="w-3 h-3" /> Retry All
             </Button>
+          </div>
+        )}
+        {/* ── Permission info banner ──────────────────────────────── */}
+        {hasPermissionError && !hasAnyError && (
+          <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-100 rounded-2xl text-amber-700">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <p className="text-sm font-medium flex-1">Some widgets are hidden because your role doesn't have access to those modules.</p>
           </div>
         )}
 
@@ -644,7 +695,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                 change="0%"
                 icon={Users}
                 trend="up"
-                onClick={() => setActiveTab?.("crm")}
+                onClick={hasPermission("crm") ? () => setActiveTab?.("crm") : undefined}
               />
               <StatCard
                 title="Total Orders"
@@ -652,7 +703,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                 change="0%"
                 icon={ShoppingCart}
                 trend="up"
-                onClick={() => setActiveTab?.("pos")}
+                onClick={hasPermission("pos") ? () => setActiveTab?.("pos") : undefined}
               />
               {hasPermission("inventory") && (
                 <StatCard
@@ -686,7 +737,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                 </div>
               </CardHeader>
               <CardContent className="pt-6 pb-4 px-2 sm:px-6">
-                {loadingMap.transactions ? (
+                {(loadingMap.transactions || loadingMap.stats) ? (
                   <Skeleton className="h-[240px] sm:h-[320px] w-full rounded-2xl" />
                 ) : errorMap.transactions ? (
                   <WidgetError onRetry={subscribe} />
@@ -756,7 +807,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
               <CardDescription className="mt-1">Real-time operational insights</CardDescription>
             </CardHeader>
             <CardContent className="flex-1 p-4 space-y-3 overflow-y-auto">
-              {(loadingMap.inventory || loadingMap.customers) ? (
+              {isInsightsLoading ? (
                 Array.from({ length: 2 }).map((_, i) => (
                   <div key={i} className="p-4 rounded-2xl border border-zinc-100 space-y-2">
                     <Skeleton className="h-4 w-3/4 rounded" />
@@ -775,8 +826,12 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
                     actionLabel={insight.actionLabel}
                     status={insight.status}
                     onAction={() => {
-                      setActiveTab?.(insight.actionTab);
-                      toast.success(`Navigating to ${insight.actionTab}`);
+                      // Only navigate if the user has access to the target module
+                      if (hasPermission(insight.actionTab)) {
+                        setActiveTab?.(insight.actionTab);
+                      } else {
+                        toast.error("You don't have permission to access that module.");
+                      }
                     }}
                   />
                 ))
@@ -829,7 +884,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
             </CardHeader>
             {!isActivityCollapsed && (
               <CardContent className="p-0 animate-in slide-in-from-top-2 fade-in duration-300">
-              {loadingMap.logs ? (
+              {isLogsLoading ? (
                 <div className="divide-y divide-zinc-50">
                   {Array.from({ length: 3 }).map((_, i) => (
                     <div key={i} className="p-5 flex items-center gap-4">
@@ -853,11 +908,8 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
               ) : (
                 <div className="divide-y divide-zinc-50">
                   {auditLogs.map((log, i) => {
-                    const ts = log.timestamp?.toDate
-                      ? log.timestamp.toDate()
-                      : log.timestamp
-                      ? new Date(log.timestamp)
-                      : null;
+                    // Use pre-normalised _parsedTs from the snapshot handler (safe for all Firestore types)
+                    const ts: Date | null = log._parsedTs instanceof Date ? log._parsedTs : null;
                     const timeStr = ts
                       ? ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
                       : "Just now";

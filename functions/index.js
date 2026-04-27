@@ -342,3 +342,224 @@ exports.aggregateFinancials = functions.firestore
     return summaryRef.set(updates, { merge: true });
   });
 
+
+// ════════════════════════════════════════════════════════════════════
+// FUNCTION 9: Sync Group Memberships (on customer write)
+// 
+// FIX for Groups module production risk #5 (Staleness):
+// Triggers automatically whenever a customer document is written.
+// Evaluates all dynamic groups for that customer's enterprise and
+// updates member_count on affected groups — no manual "Sync Now" needed.
+//
+// FIX for Groups module production risk #1 (Client-Side Scale):
+// Heavy evaluation runs here in Node.js (Admin SDK), NOT in the browser.
+// Eliminates the frontend getDocs() full-table-scan risk entirely.
+// ════════════════════════════════════════════════════════════════════
+
+/** Client-side evaluator mirror — must stay in sync with Groups.tsx evalRules() */
+function evalRulesServer(customer, rules, logic) {
+  if (!rules || !rules.length) return true;
+  const NUMERIC = ["balance", "loyalty_points"];
+  const ARRAY = ["tags"];
+
+  const results = rules.map((r) => {
+    const cv = customer[r.field];
+    const rv = String(r.value ?? "");
+
+    if (NUMERIC.includes(r.field)) {
+      const n = parseFloat(cv ?? 0), v = parseFloat(rv);
+      if (isNaN(v)) return false;
+      switch (r.operator) {
+        case ">":  return n > v;
+        case ">=": return n >= v;
+        case "<":  return n < v;
+        case "<=": return n <= v;
+        case "==": return n === v;
+        case "!=": return n !== v;
+        default: return false;
+      }
+    }
+
+    if (ARRAY.includes(r.field)) {
+      const arr = Array.isArray(cv) ? cv : [];
+      const q = rv.toLowerCase().trim();
+      if (r.operator === "array-contains") return arr.some((t) => String(t).toLowerCase() === q);
+      if (r.operator === "contains") return arr.some((t) => String(t).toLowerCase().includes(q));
+      return false;
+    }
+
+    // FIX: Consistent case-insensitive string comparison (mirrors Groups.tsx)
+    const s = String(cv ?? "").toLowerCase(), q = rv.toLowerCase().trim();
+    switch (r.operator) {
+      case "==": return s === q;
+      case "!=": return s !== q;
+      case "contains": return s.includes(q);
+      default: return false;
+    }
+  });
+
+  return logic === "AND" ? results.every(Boolean) : results.some(Boolean);
+}
+
+exports.syncGroupMembershipsOnCustomerWrite = functions.firestore
+  .document("customers/{customerId}")
+  .onWrite(async (change, context) => {
+    const customerId = context.params.customerId;
+
+    // Get the new state (null if deleted)
+    const afterData = change.after.exists ? { id: customerId, ...change.after.data() } : null;
+    const enterpriseId = afterData?.enterprise_id || change.before.data()?.enterprise_id;
+
+    if (!enterpriseId) return null;
+
+    try {
+      // Fetch all dynamic groups for this enterprise
+      const groupsSnap = await db
+        .collection("customer_groups")
+        .where("enterprise_id", "==", enterpriseId)
+        .where("type", "==", "Dynamic")
+        .get();
+
+      if (groupsSnap.empty) return null;
+
+      const batch = db.batch();
+      let batchCount = 0;
+
+      for (const groupDoc of groupsSnap.docs) {
+        const group = groupDoc.data();
+        const rules = group.rules || [];
+        const logic = group.logic || "AND";
+
+        // Check if this customer now qualifies
+        const qualifies = afterData ? evalRulesServer(afterData, rules, logic) : false;
+
+        // We need the current count to delta — use a lightweight count query
+        // Recount only if customer qualification status changed
+        const prevData = change.before.exists ? { id: customerId, ...change.before.data() } : null;
+        const prevQualified = prevData ? evalRulesServer(prevData, rules, logic) : false;
+
+        if (qualifies === prevQualified) continue; // No change for this group, skip
+
+        const delta = qualifies ? 1 : -1;
+        batch.update(groupDoc.ref, {
+          member_count: admin.firestore.FieldValue.increment(delta),
+          last_synced: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        batchCount++;
+
+        // Firestore batch limit is 500 — commit and start new batch if needed
+        if (batchCount >= 490) {
+          await batch.commit();
+          batchCount = 0;
+        }
+      }
+
+      if (batchCount > 0) await batch.commit();
+
+      return null;
+    } catch (err) {
+      console.error("syncGroupMembershipsOnCustomerWrite error:", err);
+      return null;
+    }
+  });
+
+// ════════════════════════════════════════════════════════════════════
+// FUNCTION 10: Full Group Resync (callable — for admin "Sync All" action)
+// FIX: Provides an exact count by iterating ALL customers server-side.
+// FIX: Chunked pagination prevents 9-minute Cloud Function timeout on
+// enterprises with 100k+ customers. Processes in pages of 1000 documents.
+// Runtime: 540s timeout, 1GB memory (set via runWith options).
+// ════════════════════════════════════════════════════════════════════
+exports.resyncAllGroups = functions
+  .runWith({ timeoutSeconds: 540, memory: "1GB" })
+  .https.onCall(async (data, context) => {
+  if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+
+  const { enterpriseId } = data;
+  if (!enterpriseId) throw new functions.https.HttpsError("invalid-argument", "enterpriseId required.");
+
+  try {
+    // Load all groups once — groups per enterprise are bounded (usually < 100)
+    const groupsSnap = await db.collection("customer_groups").where("enterprise_id", "==", enterpriseId).get();
+    if (groupsSnap.empty) return { success: true, groupsProcessed: 0, customersEvaluated: 0 };
+
+    // Pre-fetch Manual group member counts from subcollections
+    const manualCounts = {};
+    for (const gDoc of groupsSnap.docs) {
+      if (gDoc.data().type !== "Dynamic") {
+        const membSnap = await gDoc.ref.collection("members").get();
+        manualCounts[gDoc.id] = membSnap.size;
+      }
+    }
+
+    // Dynamic groups: accumulate match counts per group using paginated customer scan
+    // FIX: Cursor-based pagination prevents timeout — loads 1000 customers per iteration.
+    const dynamicGroups = groupsSnap.docs.filter(g => g.data().type === "Dynamic");
+    const matchCounts = {};
+    dynamicGroups.forEach(g => { matchCounts[g.id] = 0; });
+
+    let totalCustomers = 0;
+    let lastDoc = null;
+    const PAGE_SIZE = 1000;
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      let custQuery = db.collection("customers")
+        .where("enterprise_id", "==", enterpriseId)
+        .limit(PAGE_SIZE);
+      if (lastDoc) custQuery = custQuery.startAfter(lastDoc);
+
+      const custSnap = await custQuery.get();
+      if (custSnap.empty) break;
+
+      totalCustomers += custSnap.size;
+      const customers = custSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+      for (const gDoc of dynamicGroups) {
+        const group = gDoc.data();
+        const matched = customers.filter(c =>
+          evalRulesServer(c, group.rules || [], group.logic || "AND")
+        ).length;
+        matchCounts[gDoc.id] += matched;
+      }
+
+      if (custSnap.size < PAGE_SIZE) break;
+      lastDoc = custSnap.docs[custSnap.size - 1];
+    }
+
+    // Write all counts in batches
+    let batch = db.batch();
+    let batchCount = 0;
+
+    for (const groupDoc of groupsSnap.docs) {
+      const count = groupDoc.data().type === "Dynamic"
+        ? (matchCounts[groupDoc.id] || 0)
+        : (manualCounts[groupDoc.id] || 0);
+
+      batch.update(groupDoc.ref, {
+        member_count: count,
+        last_synced: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      batchCount++;
+      if (batchCount >= 490) {
+        await batch.commit();
+        batch = db.batch();
+        batchCount = 0;
+      }
+    }
+
+    if (batchCount > 0) await batch.commit();
+
+    return {
+      success: true,
+      groupsProcessed: groupsSnap.size,
+      customersEvaluated: totalCustomers,
+    };
+  } catch (err) {
+    console.error("resyncAllGroups error:", err);
+    throw new functions.https.HttpsError("internal", "Resync failed: " + err.message);
+  }
+});
+

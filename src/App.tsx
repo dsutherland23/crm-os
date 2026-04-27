@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, lazy, Suspense } from "react";
 import { Sidebar, Header } from "./components/Layout";
 import { Toaster } from "@/components/ui/sonner";
 import PWAInstallPrompt from "@/components/PWAInstallPrompt";
@@ -12,21 +12,24 @@ import Dashboard from "./components/Dashboard";
 import AIInsights from "./components/AIInsights";
 import CRM from "./components/CRM";
 import POS from "./components/POS";
-import Inventory from "./components/Inventory";
-import Revenue from "./components/Revenue";
-import Groups from "./components/Groups";
-import Loyalty from "./components/Loyalty";
 import Settings from "./components/Settings";
 import Analytics from "./components/Analytics";
 import AuditLogs from "./components/AuditLogs";
-import Workflow from "./components/Workflow";
 import Auth from "./components/Auth";
 import StaffManager from "./components/StaffManager";
-import Suppliers from "./components/Suppliers";
 import VerificationGate from "./components/VerificationGate";
 import AdminPortal from "./components/AdminPortal";
 import Support from "./components/Support";
 import { SocialHub } from "./components/SocialHub";
+
+// Heavy data-intensive modules — lazy loaded so Firestore listeners only mount
+// when the user actually navigates to that tab, preventing boot-time OOM risk.
+const Inventory = lazy(() => import("./components/Inventory"));
+const Revenue   = lazy(() => import("./components/Revenue"));
+const Groups    = lazy(() => import("./components/Groups"));
+const Loyalty   = lazy(() => import("./components/Loyalty"));
+const Suppliers = lazy(() => import("./components/Suppliers"));
+const Workflow  = lazy(() => import("./components/Workflow"));
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { PendingActionProvider } from "./context/PendingActionContext";
 import { Sparkles, Activity } from "lucide-react";
@@ -289,7 +292,19 @@ function AppContent() {
                   <div className="lg:pl-72 flex flex-col h-screen">
                     <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} activeTab={activeTab} />
                     <TrialBanner onUpgrade={() => { setSettingsTab("billing"); setActiveTab("settings"); }} />
-                    <main className={cn("flex-1 overflow-x-hidden", activeTab === 'pos' ? "overflow-hidden" : "overflow-y-auto")}>{renderContent()}</main>
+                    <main className={cn("flex-1 overflow-x-hidden", activeTab === 'pos' ? "overflow-hidden" : "overflow-y-auto")}>
+                      {/* Suspense for lazy-loaded heavy modules */}
+                      <Suspense fallback={
+                        <div className="flex items-center justify-center h-64">
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="w-8 h-8 border-2 border-zinc-200 border-t-blue-600 rounded-full animate-spin" />
+                            <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest">Loading module...</p>
+                          </div>
+                        </div>
+                      }>
+                        {renderContent()}
+                      </Suspense>
+                    </main>
                   </div>
                   {isModuleEnabled("ai") && activeTab !== "ai" && (
                     <Dialog><DialogTrigger className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white shadow-2xl hover:scale-110 active:scale-95 transition-all z-50 p-0 flex items-center justify-center border-none cursor-pointer"><Sparkles className="w-6 h-6 text-blue-400" /></DialogTrigger><DialogContent className="max-w-5xl h-[85vh] p-0 overflow-hidden rounded-[2rem] border-zinc-200/60 shadow-2xl"><AIInsights /></DialogContent></Dialog>

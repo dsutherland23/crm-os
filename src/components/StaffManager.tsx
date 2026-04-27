@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { User, Plus, X as XIcon, Activity, UserMinus, ShieldAlert, MoreVertical, CheckCircle2, Coins } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,14 +11,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
-import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, where, orderBy, addDoc, setAdminRole } from "@/lib/firebase";
+import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, where, orderBy, addDoc, setAdminRole, writeBatch, limit } from "@/lib/firebase";
 import { db } from "@/lib/firebase";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/lib/utils";
 import { useModules } from "@/context/ModuleContext";
 
 export default function StaffManager() {
-  const { formatCurrency, enterpriseId, branding, checkLimit } = useModules();
+  const { formatCurrency, enterpriseId, branding, checkLimit, hasPermission, currency } = useModules();
   const [staff, setStaff] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
@@ -43,17 +43,27 @@ export default function StaffManager() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+    // FIX: Added limit() to unbounded staff/roles/branches listeners
+    const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), limit(500)), (snapshot) => {
       setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    const unsubSessions = onSnapshot(query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => new Date(b.startTime || 0).getTime() - new Date(a.startTime || 0).getTime());
-      setSessions(docs);
-    });
+    // Limit to last 500 sessions to prevent memory bloat — paginate further on demand
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const unsubSessions = onSnapshot(
+      query(
+        collection(db, "pos_sessions"),
+        where("enterprise_id", "==", enterpriseId),
+        where("startTime", ">=", thirtyDaysAgo),
+        orderBy("startTime", "desc"),
+        limit(500)
+      ),
+      (snapshot) => {
+        setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+      }
+    );
 
-    const unsubRoles = onSnapshot(query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+    const unsubRoles = onSnapshot(query(collection(db, "roles"), where("enterprise_id", "==", enterpriseId), limit(50)), (snapshot) => {
       const rolesList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRoles(rolesList);
       if (rolesList.length > 0 && !newUser.role) {
@@ -61,7 +71,7 @@ export default function StaffManager() {
       }
     });
 
-    const unsubBranchesList = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
+    const unsubBranchesList = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId), limit(100)), (snapshot) => {
       setAvailableBranches(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
@@ -88,13 +98,18 @@ export default function StaffManager() {
   const handleInviteToPortal = async () => {
     const email = newUser.email?.trim().toLowerCase();
     if (!email) {
-      toast.error("Email Required", { description: "Please save the staff record with a valid email first." });
+      toast.error("Email Required", { description: "Please enter a valid email first." });
+      return;
+    }
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can provision portal access.');
       return;
     }
 
     const loadingToast = toast.loading(`Provisioning portal access for ${newUser.name}...`);
     try {
-      const inviteId = email.replace(/[^a-z0-9]/g, '_');
+      // Prefix with enterpriseId to prevent cross-enterprise invite collisions
+      const inviteId = `${enterpriseId}_${email.replace(/[^a-z0-9]/g, '_')}`;
 
       await setDoc(doc(db, "staff_invites", inviteId), {
         fullName: newUser.name,
@@ -106,9 +121,9 @@ export default function StaffManager() {
         enterpriseName: branding?.name || enterpriseId
       }, { merge: true });
 
-      toast.success("Portal access provisioned!", { 
+      toast.success("Portal access provisioned!", {
         description: `${newUser.name} can now sign up using ${email}.`,
-        id: loadingToast 
+        id: loadingToast
       });
     } catch (error: any) {
       toast.error("Provisioning failed: " + error.message, { id: loadingToast });
@@ -118,6 +133,10 @@ export default function StaffManager() {
   const handleCreateStaff = async () => {
     if (!newUser.name || newUser.pin.length !== 4) {
       toast.error("Please enter a valid name and 4-digit PIN");
+      return;
+    }
+    if (!isEditing && !hasPermission('settings', 'editor')) {
+      toast.error('Insufficient permissions to create staff.');
       return;
     }
     const loadingToast = toast.loading(isEditing ? "Updating staff record..." : "Creating staff record...");
@@ -138,26 +157,27 @@ export default function StaffManager() {
           updatedAt: new Date().toISOString()
         });
 
-        if (selectedStaffMember.id.length >= 20) {
+        // Only attempt auth sync if the record appears to be a real Firebase Auth UID
+        // (Firebase UIDs are exactly 28 chars; local PIN-only IDs are shorter)
+        if (selectedStaffMember.id.length === 28) {
           try {
-            await updateDoc(doc(db, "users", selectedStaffMember.id), {
-              role: newUser.role
-            });
+            await updateDoc(doc(db, "users", selectedStaffMember.id), { role: newUser.role });
             await setAdminRole(selectedStaffMember.id, newUser.role);
           } catch (syncErr) {
-            console.warn("Auth Claims sync skipped");
+            // Auth claims sync failed — surface a warning; don't swallow silently
+            toast.warning('Profile saved, but permission sync failed. Role may not update until next login.', { duration: 6000 });
           }
         }
         toast.success("Staff profile updated", { id: loadingToast });
       } else {
-        const id = newUser.name.toLowerCase().replace(/\s+/g, '-') + Math.floor(Math.random() * 1000);
+        const id = newUser.name.toLowerCase().replace(/\s+/g, '-') + '-' + Math.floor(Math.random() * 10000);
         await setDoc(doc(db, "staff", id), {
           ...newUser,
           status: "ACTIVE",
           createdAt: new Date().toISOString(),
           enterprise_id: enterpriseId
         });
-        
+
         await addDoc(collection(db, "audit_logs"), {
           action: "Staff Access Created",
           details: `Created new ${newUser.role} access for ${newUser.name}`,
@@ -165,27 +185,31 @@ export default function StaffManager() {
           user: "Admin",
           enterprise_id: enterpriseId
         });
-        
+
         toast.success("Staff profile created", { id: loadingToast });
       }
 
-      setIsAddUserOpen(false);
-      setIsEditing(false);
-      setNewUser({ 
-        name: "", 
-        role: "Cashier", 
-        pin: "", 
-        branches: ["all"],
-        email: "",
-        phone: "",
-        salaryType: "HOURLY",
-        baseRate: 25,
-        payGrade: "STANDARD",
-        productivityTarget: 2500
-      });
+      resetAndCloseForm();
     } catch (error: any) {
       toast.error("Operation failed: " + error.message, { id: loadingToast });
     }
+  };
+
+  const resetAndCloseForm = () => {
+    setIsAddUserOpen(false);
+    setIsEditing(false);
+    setNewUser({
+      name: "",
+      role: "Cashier",
+      pin: "",
+      branches: ["all"],
+      email: "",
+      phone: "",
+      salaryType: "HOURLY",
+      baseRate: 25,
+      payGrade: "STANDARD",
+      productivityTarget: 2500
+    });
   };
 
   const openEditDialog = (member: any) => {
@@ -207,6 +231,10 @@ export default function StaffManager() {
   };
 
   const handleToggleStatus = async (id: string, currentStatus: string, staffName: string) => {
+    if (!hasPermission('settings', 'editor')) {
+      toast.error('Insufficient permissions to change staff status.');
+      return;
+    }
     try {
       const newStatus = currentStatus === "ACTIVE" ? "DISABLED" : "ACTIVE";
       const updates: any = { status: newStatus };
@@ -215,16 +243,16 @@ export default function StaffManager() {
       }
 
       await updateDoc(doc(db, "staff", id), updates);
-      
+
       if (newStatus === "DISABLED") {
-         const activeSessions = sessions.filter(s => s.staffId === id && s.status !== 'CLOSED');
-         for (const s of activeSessions) {
-           await updateDoc(doc(db, "pos_sessions", s.id), {
-             status: "CLOSED",
-             endTime: new Date().toISOString(),
-             notes: "Security Token Revoked: System Auto-Closed via Admin Suspension."
-           });
-         }
+        const activeSessions = sessions.filter(s => s.staffId === id && s.status !== 'CLOSED');
+        for (const s of activeSessions) {
+          await updateDoc(doc(db, "pos_sessions", s.id), {
+            status: "CLOSED",
+            endTime: new Date().toISOString(),
+            notes: "Security Token Revoked: System Auto-Closed via Admin Suspension."
+          });
+        }
       }
 
       await addDoc(collection(db, "audit_logs"), {
@@ -242,17 +270,23 @@ export default function StaffManager() {
   };
 
   const handleDeleteStaff = async (id: string, staffName: string) => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can delete staff members.');
+      return;
+    }
     try {
+      // Use writeBatch for atomic session close + staff delete
+      const batch = writeBatch(db);
       const activeSessions = sessions.filter(s => s.staffId === id && s.status !== 'CLOSED');
       for (const s of activeSessions) {
-        await updateDoc(doc(db, "pos_sessions", s.id), {
+        batch.update(doc(db, "pos_sessions", s.id), {
           status: "CLOSED",
           endTime: new Date().toISOString(),
           notes: "Account Terminated: Session force-closed during staff deletion."
         });
       }
-
-      await deleteDoc(doc(db, "staff", id));
+      batch.delete(doc(db, "staff", id));
+      await batch.commit();
 
       await addDoc(collection(db, "audit_logs"), {
         action: "Staff Deleted",
@@ -266,7 +300,7 @@ export default function StaffManager() {
       setSelectedStaffIds(prev => prev.filter(sid => sid !== id));
       toast.success(`${staffName} decommissioned successfully`);
     } catch (error: any) {
-      toast.error("Failed to delete staff");
+      toast.error("Failed to delete staff: " + error.message);
     }
   };
 
@@ -281,7 +315,8 @@ export default function StaffManager() {
 
       const printWindow = window.open('', '_blank', 'width=1000,height=1200');
       if (!printWindow) {
-        toast.error("Pop-up blocked.", { id: tid });
+        toast.dismiss(tid); // Clear the loading toast before showing the error
+        toast.error("Pop-up blocked. Please allow pop-ups for this site and try again.");
         return;
       }
 
@@ -358,6 +393,10 @@ export default function StaffManager() {
   };
 
   const handleBatchOperation = async (action: 'SUSPEND' | 'ACTIVATE' | 'DELETE') => {
+    if (!hasPermission('settings', action === 'DELETE' ? 'admin' : 'editor')) {
+      toast.error('Insufficient permissions for this batch operation.');
+      return;
+    }
     if (action === 'DELETE') {
       if (!window.confirm(`Are you sure you want to permanently decommission ${selectedStaffIds.length} staff members? This action is irreversible and will force-close all active POS sessions.`)) return;
     }
@@ -375,6 +414,45 @@ export default function StaffManager() {
       toast.error("Cloud synchronization failed", { id: loadingToast });
     }
   };
+
+  // ── Memoized stat calculations (fixes O(N^2) render-cycle computation) ──────
+  const todayStart = useMemo(() => new Date().toISOString().slice(0, 10), []);
+
+  const staffStats = useMemo(() => {
+    const statsMap: Record<string, { lifetimeSales: number; todaySales: number; sessionCount: number }> = {};
+    for (const s of sessions) {
+      if (!statsMap[s.staffId]) statsMap[s.staffId] = { lifetimeSales: 0, todaySales: 0, sessionCount: 0 };
+      statsMap[s.staffId].lifetimeSales += s.totalSales || 0;
+      statsMap[s.staffId].sessionCount += 1;
+      if (s.startTime?.slice(0, 10) === todayStart) {
+        statsMap[s.staffId].todaySales += s.totalSales || 0;
+      }
+    }
+    return statsMap;
+  }, [sessions, todayStart]);
+
+  const topPerformer = useMemo(() => {
+    if (staff.length === 0) return "N/A";
+    return [...staff].sort((a, b) =>
+      (staffStats[b.id]?.lifetimeSales || 0) - (staffStats[a.id]?.lifetimeSales || 0)
+    )[0]?.name || "N/A";
+  }, [staff, staffStats]);
+
+  const enterpriseATV = useMemo(() => {
+    const totalSales = sessions.reduce((acc, s) => acc + (s.totalSales || 0), 0);
+    const totalTx = sessions.reduce((acc, s) => acc + (s.transactionCount || 0), 0);
+    return totalTx > 0 ? totalSales / totalTx : (sessions.length > 0 ? totalSales / sessions.length : 0);
+  }, [sessions]);
+
+  const realProductivityScore = useMemo(() => {
+    if (staff.length === 0) return 0;
+    const scores = staff.map(s => {
+      const target = s.productivityTarget || 2500;
+      const today = staffStats[s.id]?.todaySales || 0;
+      return Math.min(100, (today / target) * 100);
+    });
+    return scores.reduce((a, b) => a + b, 0) / scores.length;
+  }, [staff, staffStats, todayStart]);
 
   const toggleStaffSelection = (id: string) => {
     setSelectedStaffIds(prev => prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]);
@@ -403,7 +481,7 @@ export default function StaffManager() {
           <h2 className="text-3xl md:text-5xl font-black tracking-tight text-zinc-900 font-display">Staff Registry</h2>
           <p className="text-sm text-zinc-500 font-medium max-w-md">Manage POS PIN codes, track sessions, and monitor enterprise register closures.</p>
         </div>
-        <Dialog open={isAddUserOpen} onOpenChange={setIsAddUserOpen}>
+        <Dialog open={isAddUserOpen} onOpenChange={(open) => { if (!open) resetAndCloseForm(); else setIsAddUserOpen(true); }}>
           <DialogTrigger render={<button className={cn(buttonVariants({ variant: "default" }), "rounded-2xl px-8 h-14 bg-zinc-900 text-white hover:bg-zinc-800 font-black shadow-2xl shadow-zinc-900/20 text-xs uppercase tracking-widest w-full md:w-auto border-none cursor-pointer")} onClick={() => { setIsEditing(false); setIsAddUserOpen(true); }}><Plus className="w-4 h-4 mr-2" /> Provision Access</button>} />
           <DialogContent className="rounded-3xl border-zinc-100 p-0 overflow-hidden sm:max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="p-6 bg-zinc-50 border-b border-zinc-100 flex items-center justify-between sticky top-0 z-10">
@@ -468,18 +546,11 @@ export default function StaffManager() {
           <CardContent className="p-6">
             <div className="flex items-center justify-between mb-4"><div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Coins className="w-5 h-5" /></div></div>
             <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Enterprise ATV</p>
-            <h3 className="text-3xl font-black mt-1">
-              {(() => {
-                const totalSales = sessions.reduce((acc, s) => acc + (s.totalSales || 0), 0);
-                const totalTransactions = sessions.reduce((acc, s) => acc + (s.transactionCount || 0), 0);
-                const atv = totalTransactions > 0 ? totalSales / totalTransactions : (sessions.length > 0 ? totalSales / sessions.length : 0);
-                return formatCurrency(atv);
-              })()}
-            </h3>
+            <h3 className="text-3xl font-black mt-1">{formatCurrency(enterpriseATV)}</h3>
           </CardContent>
         </Card>
-        <Card className="card-modern group hover:border-indigo-200 transition-all"><CardContent className="p-6"><div className="flex items-center justify-between mb-4"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><CheckCircle2 className="w-5 h-5" /></div></div><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Productivity Score</p><h3 className="text-3xl font-black mt-1 text-indigo-600">84.2%</h3></CardContent></Card>
-        <Card className="card-modern group hover:border-emerald-200 transition-all"><CardContent className="p-6 border-l-4 border-l-emerald-500"><div className="flex items-center justify-between mb-2"><div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><User className="w-5 h-5" /></div></div><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Top Revenue Performer</p><h3 className="text-lg font-black mt-2 truncate text-zinc-900">{staff.length > 0 ? staff.sort((a,b) => (sessions.filter(s => s.staffId === b.id).reduce((acc,s) => acc + (s.totalSales || 0), 0)) - (sessions.filter(s => s.staffId === a.id).reduce((acc,s) => acc + (s.totalSales || 0), 0)))[0].name : "N/A"}</h3></CardContent></Card>
+        <Card className="card-modern group hover:border-indigo-200 transition-all"><CardContent className="p-6"><div className="flex items-center justify-between mb-4"><div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><CheckCircle2 className="w-5 h-5" /></div></div><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Productivity Score (Today)</p><h3 className="text-3xl font-black mt-1 text-indigo-600">{staff.length === 0 ? '—' : `${realProductivityScore.toFixed(1)}%`}</h3></CardContent></Card>
+        <Card className="card-modern group hover:border-emerald-200 transition-all"><CardContent className="p-6 border-l-4 border-l-emerald-500"><div className="flex items-center justify-between mb-2"><div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><User className="w-5 h-5" /></div></div><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Top Revenue Performer</p><h3 className="text-lg font-black mt-2 truncate text-zinc-900">{topPerformer}</h3></CardContent></Card>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-8">
@@ -490,9 +561,10 @@ export default function StaffManager() {
                {selectedStaffIds.length > 0 ? <div className="flex items-center gap-2"><Button variant="outline" size="sm" className="h-8 rounded-lg text-[10px] font-black uppercase text-rose-600 border-rose-100 hover:bg-rose-50" onClick={() => handleBatchOperation('DELETE')}>Decommission</Button></div> : <Badge variant="secondary" className="font-bold">{staff.length} Users</Badge>}
             </div>
             <div className="divide-y divide-zinc-100">
-              {staff.map(s => {
-                const staffSessions = sessions.filter(sess => sess.staffId === s.id);
-                const totalSalesValue = staffSessions.reduce((acc, sess) => acc + (sess.totalSales || 0), 0);
+              {staff.length === 0 ? (
+                <div className="p-12 text-center text-sm font-medium text-zinc-400">No staff members found. Click "Provision Access" to add your first team member.</div>
+              ) : staff.map(s => {
+                const lifetimeSales = staffStats[s.id]?.lifetimeSales || 0;
                 const isActive = sessions.find(session => session.staffId === s.id && session.status === 'ACTIVE');
                 return (
                   <div key={s.id} className={cn("group p-4 flex items-center justify-between transition-all cursor-pointer", selectedStaffIds.includes(s.id) ? "bg-zinc-50" : "hover:bg-zinc-50/30")} onClick={() => setSelectedStaffMember(s)}>
@@ -502,7 +574,7 @@ export default function StaffManager() {
                       <div><p className="font-bold text-zinc-900 text-sm group-hover:text-blue-600 transition-colors">{s.name}</p><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{s.role}</p></div>
                     </div>
                     <div className="flex items-center gap-6">
-                      <div className="hidden md:block text-right"><p className="text-sm font-bold text-zinc-900">{formatCurrency(totalSalesValue)}</p><p className="text-[9px] text-zinc-400 font-bold uppercase tracking-widest">Lifetime GMV</p></div>
+                      <div className="hidden md:block text-right"><p className="text-sm font-bold text-zinc-900">{formatCurrency(lifetimeSales)}</p><p className="text-[9px] text-zinc-400 font-bold uppercase tracking-widest">Lifetime GMV</p></div>
                       <DropdownMenu><DropdownMenuTrigger render={<button className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-9 w-9 rounded-xl text-zinc-400 hover:bg-white hover:text-zinc-900 border border-transparent flex items-center justify-center cursor-pointer")}><MoreVertical className="w-4 h-4" /></button>} />
                         <DropdownMenuContent align="end" className="w-56 rounded-2xl font-medium shadow-2xl border-zinc-100"><DropdownMenuItem className="gap-2 py-3" onClick={() => setSelectedStaffMember(s)}><Activity className="w-4 h-4 text-blue-600" />View Intelligence</DropdownMenuItem><DropdownMenuItem className="gap-2 py-3" onClick={(e) => { e.stopPropagation(); openEditDialog(s); }}><ShieldAlert className="w-4 h-4 text-emerald-600" />Configure Access</DropdownMenuItem><DropdownMenuItem className="gap-2 py-3" onClick={(e) => { e.stopPropagation(); handleToggleStatus(s.id, s.status, s.name); }}><ShieldAlert className="w-4 h-4 text-rose-600" />{s.status === 'ACTIVE' ? 'Suspend' : 'Activate'}</DropdownMenuItem><DropdownMenuItem className="gap-2 py-3 text-rose-600" onClick={(e) => { e.stopPropagation(); if (window.confirm(`Are you sure you want to permanently delete ${s.name}?`)) handleDeleteStaff(s.id, s.name); }}><UserMinus className="w-4 h-4" />Delete</DropdownMenuItem></DropdownMenuContent>
                       </DropdownMenu>
@@ -529,8 +601,28 @@ export default function StaffManager() {
                 <Card className="card-modern border-blue-100 bg-blue-50/10 overflow-hidden sticky top-24">
                   <div className="p-6 border-b border-blue-100 bg-white"><div className="flex items-center justify-between mb-6"><Button variant="ghost" size="sm" onClick={() => setSelectedStaffMember(null)} className="text-zinc-400 hover:text-zinc-900">Close</Button><Badge className="bg-blue-600 text-white border-0 py-1 px-3 rounded-full font-bold uppercase tracking-widest text-[9px]">STAFF INSIGHT</Badge></div><div className="flex items-center gap-4"><div className="w-16 h-16 rounded-3xl bg-zinc-900 text-white flex items-center justify-center text-xl font-bold">{selectedStaffMember.name.substring(0,2).toUpperCase()}</div><div><h3 className="text-xl font-bold text-zinc-900">{selectedStaffMember.name}</h3><p className="text-xs font-bold text-blue-600 uppercase tracking-widest mt-1">{selectedStaffMember.role}</p></div></div></div>
                   <CardContent className="p-6 space-y-8">
-                    <div className="grid grid-cols-2 gap-4"><div className="p-4 rounded-2xl bg-white border border-zinc-100 shadow-sm"><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mb-1">Shift Hours</p><p className="text-lg font-black text-zinc-900">{sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'CLOSED').length * 8}h</p></div><div className="p-4 rounded-2xl bg-white border border-zinc-100 shadow-sm"><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mb-1">Conversion</p><p className="text-lg font-black text-emerald-600">88.4%</p></div></div>
-                    <div className="space-y-4"><div className="flex items-center justify-between"><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Shift Progress</p><span className="text-[10px] text-zinc-900 font-black">{formatCurrency(sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'ACTIVE').reduce((acc,s) => acc + (s.totalSales || 0), 0))} / {formatCurrency(selectedStaffMember.productivityTarget || 0)}</span></div><div className="h-2.5 w-full bg-zinc-100 rounded-full overflow-hidden border border-zinc-200"><div className={cn("h-full rounded-full transition-all duration-1000", ((sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'ACTIVE').reduce((acc,s) => acc + (s.totalSales || 0), 0) / (selectedStaffMember.productivityTarget || 1)) * 100) > 100 ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-blue-600")} style={{ width: `${Math.min(100, (sessions.filter(s => s.staffId === selectedStaffMember.id && s.status === 'ACTIVE').reduce((acc,s) => acc + (s.totalSales || 0), 0) / (selectedStaffMember.productivityTarget || 1)) * 100)}%` }} /></div></div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 rounded-2xl bg-white border border-zinc-100 shadow-sm">
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mb-1">Sessions (30d)</p>
+                        <p className="text-lg font-black text-zinc-900">{staffStats[selectedStaffMember.id]?.sessionCount || 0}</p>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-white border border-zinc-100 shadow-sm">
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mb-1">Today Sales</p>
+                        <p className="text-lg font-black text-emerald-600">{formatCurrency(staffStats[selectedStaffMember.id]?.todaySales || 0)}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Today's Progress</p>
+                        <span className="text-[10px] text-zinc-900 font-black">{formatCurrency(staffStats[selectedStaffMember.id]?.todaySales || 0)} / {formatCurrency(selectedStaffMember.productivityTarget || 0)}</span>
+                      </div>
+                      <div className="h-2.5 w-full bg-zinc-100 rounded-full overflow-hidden border border-zinc-200">
+                        {(() => {
+                           const pct = Math.min(100, ((staffStats[selectedStaffMember.id]?.todaySales || 0) / (selectedStaffMember.productivityTarget || 1)) * 100);
+                           return <div className={cn("h-full rounded-full transition-all duration-1000", pct >= 100 ? "bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]" : "bg-blue-600")} style={{ width: `${pct}%` }} />;
+                        })()}
+                      </div>
+                    </div>
                     <div className="pt-4 space-y-3"><Button className="w-full rounded-xl h-12 bg-white text-zinc-900 border border-zinc-200 hover:bg-zinc-50 font-bold text-xs" onClick={() => handleExportProductivityPDF(selectedStaffMember)}>Export Productivity PDF</Button><Button variant="ghost" className="w-full h-12 text-rose-600 font-bold text-xs hover:bg-rose-50" onClick={() => handleToggleStatus(selectedStaffMember.id, selectedStaffMember.status, selectedStaffMember.name)}>Suspend Security Token</Button></div>
                   </CardContent>
                 </Card>
@@ -541,7 +633,7 @@ export default function StaffManager() {
               </motion.div>
             )}
           </AnimatePresence>
-          <Card className="card-modern"><CardContent className="p-6"><div className="flex items-center gap-3 mb-4"><div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600"><Activity className="w-4 h-4" /></div><h4 className="font-bold text-sm">System Health</h4></div><div className="space-y-4"><div className="flex justify-between text-xs"><span className="text-zinc-500">Cloud Sync</span><span className="text-emerald-600 font-bold">Online</span></div><div className="flex justify-between text-xs"><span className="text-zinc-500">Latency</span><span className="text-zinc-900 font-bold">14ms</span></div></div></CardContent></Card>
+          <Card className="card-modern"><CardContent className="p-6"><div className="flex items-center gap-3 mb-4"><div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600"><Activity className="w-4 h-4" /></div><h4 className="font-bold text-sm">System Health</h4></div><div className="space-y-4"><div className="flex justify-between text-xs"><span className="text-zinc-500">Cloud Sync</span><span className="text-emerald-600 font-bold">Online</span></div><div className="flex justify-between text-xs"><span className="text-zinc-500">Active Sessions</span><span className="text-zinc-900 font-bold">{sessions.filter(s => s.status === 'ACTIVE').length}</span></div><div className="flex justify-between text-xs"><span className="text-zinc-500">Last 30 Days</span><span className="text-zinc-900 font-bold">{sessions.length} sessions</span></div></div></CardContent></Card>
         </div>
 
         <Card className="card-modern">

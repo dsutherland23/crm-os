@@ -18,7 +18,7 @@ export interface LedgerEntry {
   type: "DEBIT" | "CREDIT";
   account: LedgerAccount;
   source_id: string; // ID of the transaction, invoice, or expense
-  source_type: "POS_TRANSACTION" | "INVOICE" | "EXPENSE" | "CREDIT_NOTE" | "RETURN" | "PETTY_CASH_FUNDING";
+  source_type: "POS_TRANSACTION" | "INVOICE" | "EXPENSE" | "CREDIT_NOTE" | "RETURN" | "PETTY_CASH_FUNDING" | "PAYMENT_RECEIVED" | "INVOICE_VOID";
   description: string;
   metadata?: any;
 }
@@ -228,6 +228,57 @@ export async function recordFinancialEvent(params: {
         metadata
       });
       break;
+    case "PAYMENT_RECEIVED":
+      // Cash received against a receivable: Debit Cash, Credit Receivable
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount,
+        type: "DEBIT",
+        account: LedgerAccount.CASH,
+        source_id: sourceId,
+        source_type: sourceType,
+        description,
+        metadata
+      });
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount,
+        type: "CREDIT",
+        account: LedgerAccount.RECEIVABLE,
+        source_id: sourceId,
+        source_type: sourceType,
+        description,
+        metadata
+      });
+      break;
+
+    case "INVOICE_VOID":
+      // Reversal of a previously recognized receivable: Debit Sales Returns, Credit Receivable
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount: Math.abs(amount),
+        type: "DEBIT",
+        account: LedgerAccount.SALES_RETURNS,
+        source_id: sourceId,
+        source_type: sourceType,
+        description,
+        metadata
+      });
+      entries.push({
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        amount: Math.abs(amount),
+        type: "CREDIT",
+        account: LedgerAccount.RECEIVABLE,
+        source_id: sourceId,
+        source_type: sourceType,
+        description,
+        metadata
+      });
+      break;
   }
 
   // Write entries to Firestore
@@ -239,14 +290,18 @@ export async function recordFinancialEvent(params: {
   const updates: any = { last_updated: serverTimestamp() };
 
   const isRevenue = ["POS_TRANSACTION", "INVOICE"].includes(sourceType) && (sourceType !== "INVOICE" || metadata?.status === "PAID");
-  const isReduction = ["RETURN", "CREDIT_NOTE"].includes(sourceType);
+  const isReduction = ["RETURN", "CREDIT_NOTE", "INVOICE_VOID"].includes(sourceType);
+  const isCashIn = sourceType === "PAYMENT_RECEIVED";
 
   if (isRevenue) {
     updates.total_revenue = increment(netAmount);
     updates.net_profit = increment(netAmount);
   } else if (isReduction) {
-    updates.total_revenue = increment(-netAmount);
-    updates.net_profit = increment(-netAmount);
+    updates.total_revenue = increment(-Math.abs(netAmount));
+    updates.net_profit = increment(-Math.abs(netAmount));
+  } else if (isCashIn) {
+    // Payment received moves cash in but doesn't change revenue (already booked at invoice)
+    updates.cash_received = increment(amount);
   } else if (sourceType === "EXPENSE") {
     updates.total_expenses = increment(amount);
     updates.net_profit = increment(-amount);

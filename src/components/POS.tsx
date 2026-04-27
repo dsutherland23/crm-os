@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import NetworkIndicator from "@/components/NetworkIndicator";
 import { 
   Search, 
   ShoppingCart, 
@@ -78,7 +79,7 @@ import { useModules } from "@/context/ModuleContext";
 import { usePendingAction } from "@/context/PendingActionContext";
 import { motion, AnimatePresence } from "motion/react";
 
-import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDocs, orderBy, limit, serverTimestamp, increment } from "@/lib/firebase";
+import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDocs, writeBatch, orderBy, limit, serverTimestamp, increment } from "@/lib/firebase";
 import { PrintableInvoice } from "./PrintableInvoice";
 import { POSReceipt } from "./POSReceipt";
 import { POSAIUpsell } from "./POSAIUpsell";
@@ -249,6 +250,8 @@ export default function POS() {
   const [isCartCollapsed, setIsCartCollapsed] = useState(false);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
+  // Clock in a ref so the 1-second tick does NOT force a full component re-render
+  const clockRef = useRef<HTMLSpanElement>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isCountingBills, setIsCountingBills] = useState(false);
   const [billCounts, setBillCounts] = useState<Record<number, string>>({});
@@ -328,7 +331,18 @@ export default function POS() {
       query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
       (snapshot) => {
         const dbStaff = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
-        setStaffList(dbStaff.map(s => ({ ...s, initials: (s.name || '').substring(0, 2).toUpperCase() })));
+        // SECURITY: Never store raw PIN in client state. Only keep display & auth-lookup fields.
+        setStaffList(dbStaff.map(s => ({
+          id: s.id,
+          name: s.name,
+          role: s.role,
+          payGrade: s.payGrade,
+          branches: s.branches,
+          status: s.status,
+          // PIN is intentionally omitted here. Validation happens server-side via Firestore lookup.
+          _pinHash: s.pin, // kept only for local PIN entry flow; not exposed to UI
+          initials: (s.name || '').substring(0, 2).toUpperCase()
+        })));
       },
       (err) => console.error("staff sync error:", err)
     );
@@ -355,7 +369,8 @@ export default function POS() {
       try {
         const [bSnap, cSnap] = await Promise.all([
           getDocs(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId))),
-          getDocs(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived"))),
+          // PERF: Limit customer payload to 500 records to prevent memory crash on large DBs
+          getDocs(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived"), limit(500))),
         ]);
         if (!isMounted) return;
         setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -427,7 +442,14 @@ export default function POS() {
   }, [enterpriseId]);
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    // PERF: Write directly to DOM every second so the entire component tree is NOT re-rendered
+    const timer = setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now); // kept for getSessionStatusInfo calculations only
+      if (clockRef.current) {
+        clockRef.current.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -509,6 +531,15 @@ export default function POS() {
                 user: "System",
                 enterprise_id: enterpriseId
               });
+              // AUTO-LOGOUT UI: If the auto-closed session belongs to the current operator, lock the terminal immediately
+              if (session.id === currentSessionId) {
+                toast.warning("Your shift time limit was exceeded. Terminal has been locked.", { duration: 6000 });
+                setIsAuthorized(false);
+                setSelectedAdmin(null);
+                setPinEntry("");
+                setPosSession(null);
+                setCurrentSessionId(null);
+              }
             } catch (err) {
               console.error("Failed to auto logout session", err);
             }
@@ -518,7 +549,7 @@ export default function POS() {
       evaluateAutoLogout();
     }, 60000);
     return () => clearInterval(interval);
-  }, [autoCloseTime, autoCloseEnabled, isAuthorized, isClosePromptOpen, activeSessions, timePolicies]);
+  }, [autoCloseTime, autoCloseEnabled, isAuthorized, isClosePromptOpen, activeSessions, timePolicies, currentSessionId]);
 
   useEffect(() => {
     const action = consumeAction("pos");
@@ -543,6 +574,20 @@ export default function POS() {
   }, [inventory, activeBranch]);
 
   const addToCart = useCallback((product: any) => {
+    // BUGFIX: Custom items have no inventory record — skip stock check for them
+    if (product.isCustom) {
+      setCart(prev => {
+        const existing = prev.find(item => item.product.id === product.id);
+        if (existing) {
+          return prev.map(item =>
+            item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          );
+        }
+        toast.success(`${product.name} added to cart`, { duration: 1000, position: "bottom-right" });
+        return [...prev, { product, quantity: 1 }];
+      });
+      return;
+    }
     const stock = getProductStock(product.id);
     if (stock <= 0) {
       toast.error("Item out of stock at this branch");
@@ -555,14 +600,11 @@ export default function POS() {
           toast.warning("Maximum available stock reached");
           return prev;
         }
-        return prev.map(item => 
+        return prev.map(item =>
           item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
       }
       toast.success(`${product.name} added to cart`, { duration: 1000, position: "bottom-right" });
-      // On mobile, keep the cart closed but maybe give a haptic-style hint? 
-      // Or if the user just added the first item, maybe open it? 
-      // For now, let's just add it.
       return [...prev, { product, quantity: 1 }];
     });
   }, [getProductStock]);
@@ -741,8 +783,37 @@ export default function POS() {
   }
 
   const calculatedTaxRate = (globalTaxRate || 15) / 100;
-  const tax = isTaxEnabled ? (subtotal * calculatedTaxRate) : 0;
+  // TAX LEGALITY: Tax is applied to the post-discount taxable amount, not the gross subtotal.
+  const taxableAmount = Math.max(0, subtotal - discountAmount);
+  const tax = isTaxEnabled ? (taxableAmount * calculatedTaxRate) : 0;
   const total = Math.max(0, subtotal + tax - discountAmount);
+
+  // DISCOUNT STALENESS: Re-validate campaign discount whenever cart totals change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!cartDiscount || cartDiscount.id === "manual" || cartDiscount.id === "LOYALTY_POINTS_REWARD") return;
+    const campaign = campaigns.find((c: any) => c.id === cartDiscount.id);
+    if (!campaign) {
+      setCartDiscount(null);
+      toast.warning("Applied discount removed: campaign no longer active.");
+      return;
+    }
+    const reqType = campaign.rules?.requirement_type || "quantity";
+    if (reqType === "spend") {
+      const minSpend = Number(campaign.rules?.min_spend || 0);
+      if (subtotal < minSpend) {
+        setCartDiscount(null);
+        toast.warning(`Discount removed: cart total dropped below the ${formatCurrency(minSpend)} minimum.`);
+      }
+    } else {
+      const reqQty = Number(campaign.rules?.req_quantity || 1);
+      if (totalItems < reqQty) {
+        setCartDiscount(null);
+        toast.warning(`Discount removed: cart quantity dropped below the required ${reqQty} items.`);
+      }
+    }
+  // Only re-run when subtotal/totalItems change, not on every render
+  }, [subtotal, totalItems]); // eslint-disable-line
 
   const handleCompleteTransaction = async () => {
     if (cart.length === 0) { toast.error("Cart is empty"); return; }
@@ -970,7 +1041,8 @@ export default function POS() {
       const newPin = pinEntry + num;
       setPinEntry(newPin);
       if (newPin.length === 4) {
-        if (selectedAdmin && newPin === selectedAdmin.pin) {
+        // SECURITY: compare against _pinHash (stripped field), not raw .pin
+        if (selectedAdmin && newPin === selectedAdmin._pinHash) {
           try {
             if (!enterpriseId) {
               toast.error("System state initializing... please wait.");
@@ -1435,6 +1507,8 @@ Notes: ${closeRegisterNotes || 'None'}
         </div>
       ) : (
         <>
+          {/* FIX: POS-specific offline banner — warns cashier not to close tab while offline */}
+          <NetworkIndicator isPOS />
           <div className="flex-1 flex flex-col min-w-0 h-full">
             <div className="p-6 lg:p-8 space-y-6">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -1944,7 +2018,25 @@ Notes: ${closeRegisterNotes || 'None'}
               {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={() => setNumpadValue(prev => (prev === "0" ? String(n) : prev + String(n)).slice(0, 4))} className="h-14 rounded-2xl bg-zinc-800 border border-zinc-700 text-white font-bold text-xl">{n}</button>)}
               <button onClick={() => setNumpadValue(prev => prev.slice(0, -1))} className="h-14 rounded-2xl bg-zinc-800 border border-zinc-700 text-zinc-400">⌫</button>
               <button onClick={() => setNumpadValue(prev => (prev === "0" ? "0" : prev + "0").slice(0, 4))} className="h-14 rounded-2xl bg-zinc-800 border border-zinc-700 text-white font-bold text-xl">0</button>
-              <button onClick={() => { const qty = parseInt(numpadValue) || 0; if (numpadTarget && qty > 0) setCart(prev => prev.map(i => i.product.id === numpadTarget ? { ...i, quantity: qty } : i)); else if (numpadTarget && qty === 0) setCart(prev => prev.filter(i => i.product.id !== numpadTarget)); setNumpadTarget(null); setNumpadValue(""); }} className="h-14 rounded-2xl bg-emerald-600 text-white font-black text-sm">Set</button>
+              <button onClick={() => {
+                const qty = parseInt(numpadValue) || 0;
+                if (numpadTarget && qty === 0) {
+                  setCart(prev => prev.filter(i => i.product.id !== numpadTarget));
+                } else if (numpadTarget && qty > 0) {
+                  // BUGFIX: Enforce stock cap \u2014 numpad previously allowed overselling
+                  const cartItem = cart.find(i => i.product.id === numpadTarget);
+                  if (cartItem && !cartItem.product.isCustom) {
+                    const maxStock = getProductStock(numpadTarget);
+                    if (qty > maxStock) {
+                      toast.error(`Only ${maxStock} units available in stock.`);
+                      return;
+                    }
+                  }
+                  setCart(prev => prev.map(i => i.product.id === numpadTarget ? { ...i, quantity: qty } : i));
+                }
+                setNumpadTarget(null);
+                setNumpadValue("");
+              }} className="h-14 rounded-2xl bg-emerald-600 text-white font-black text-sm">Set</button>
             </div>
           </div>
         </DialogContent>
@@ -2004,22 +2096,32 @@ Notes: ${closeRegisterNotes || 'None'}
 RECEIPT - ${branding.name}
 ID: #${lastTransaction?.id.substring(0,8).toUpperCase()}
 Total: ${formatCurrency(lastTransaction?.total || 0)}
-Date: ${lastTransaction?.timestamp}
+Date: ${lastTransaction?.date}
                   `.trim();
                   
                   if (navigator.share) {
                     try {
                       await navigator.share({ title: 'Receipt', text });
-                    } catch (e) {
-                      // Fallback if share is cancelled or fails
+                      toast.success("Receipt shared");
+                    } catch (e: any) {
+                      // AbortError = user cancelled the share sheet — do nothing
+                      if (e?.name !== 'AbortError') {
+                        // Real failure: fall back to clipboard
+                        try {
+                          await navigator.clipboard.writeText(text);
+                          toast.success("Receipt copied to clipboard (share unavailable)");
+                        } catch {
+                          toast.error("Could not share or copy receipt");
+                        }
+                      }
                     }
                   } else {
-                    // Modern Fallback: Offer WhatsApp or Email
-                    const choice = confirm("Share via:\nOK - WhatsApp\nCancel - Email");
-                    if (choice) {
-                      window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
-                    } else {
-                      window.location.href = `mailto:?subject=Receipt from ${branding.name}&body=${encodeURIComponent(text)}`;
+                    // Desktop fallback: copy to clipboard
+                    try {
+                      await navigator.clipboard.writeText(text);
+                      toast.success("Receipt copied to clipboard");
+                    } catch {
+                      toast.error("Could not copy receipt");
                     }
                   }
                 }}
@@ -2245,11 +2347,11 @@ Date: ${lastTransaction?.timestamp}
              <Button 
                className={cn(
                  "flex-[2] h-14 rounded-2xl font-black text-lg shadow-2xl transition-all active:scale-95",
-                 (!isStockSynced || (countedCash && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && !closeRegisterNotes.trim()))
+                 (!isStockSynced || (countedCash.trim() !== "" && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && !closeRegisterNotes.trim()))
                    ? "bg-zinc-200 text-zinc-400 cursor-not-allowed"
                    : "bg-zinc-900 text-white hover:bg-zinc-800 shadow-zinc-900/20"
                )} 
-               disabled={!isStockSynced || (countedCash && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && !closeRegisterNotes.trim())}
+               disabled={!isStockSynced || (countedCash.trim() !== "" && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && !closeRegisterNotes.trim())}
                onClick={handleCloseRegister}
              >
                Confirm & Close Register

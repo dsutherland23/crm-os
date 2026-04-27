@@ -14,15 +14,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, setDoc, doc, serverTimestamp } from "@/lib/firebase";
+import { collection, onSnapshot, query, orderBy, addDoc, updateDoc, setDoc, doc, serverTimestamp, where, limit, writeBatch } from "@/lib/firebase";
 import { db, handleFirestoreError, OperationType } from "@/lib/firebase";
 import { cn } from "@/lib/utils";
-
 import { useModules } from "@/context/ModuleContext";
-import { where, limit } from "firebase/firestore";
 
 export default function Loyalty() {
-  const { enterpriseId } = useModules();
+  const { enterpriseId, hasPermission, currency } = useModules();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [campaignCreationType, setCampaignCreationType] = useState<"Standard" | "Action">("Standard");
   const [branches, setBranches] = useState<any[]>([]);
@@ -42,6 +40,8 @@ export default function Loyalty() {
   const [selectedCampaigns, setSelectedCampaigns] = useState<string[]>([]);
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null);
   const [utilizationLogs, setUtilizationLogs] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [productSearch, setProductSearch] = useState("");
 
   const [formData, setFormData] = useState({
     name: "",
@@ -69,20 +69,25 @@ export default function Loyalty() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    const unsubBranches = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)), (snap) => setBranches(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "branches"));
-    const unsubGroups = onSnapshot(query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId)), (snap) => setGroups(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "customer_groups"));
-    const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)), (snap) => setProducts(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "products"));
-    const unsubCampaigns = onSnapshot(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId)), (snap) => setCampaigns(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "campaigns"));
-    const unsubUsage = onSnapshot(query(collection(db, "customer_campaign_usage"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      const docs = snapshot.docs.map(d => ({id:d.id, ...d.data()} as any));
-      docs.sort((a, b) => {
-        const tA = a.used_at?.toDate?.()?.getTime() || new Date(a.used_at || 0).getTime();
-        const tB = b.used_at?.toDate?.()?.getTime() || new Date(b.used_at || 0).getTime();
-        return tB - tA;
-      });
-      setUtilizationLogs(docs.slice(0, 50));
-    }, (e) => console.error("usage logs error:", e));
-    
+    // FIX: Added limit() caps — previously unbounded
+    const unsubBranches = onSnapshot(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId), limit(100)), (snap) => setBranches(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "branches"));
+    const unsubGroups = onSnapshot(query(collection(db, "customer_groups"), where("enterprise_id", "==", enterpriseId), limit(100)), (snap) => setGroups(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "customer_groups"));
+    const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(500)), (snap) => setProducts(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "products"));
+    const unsubCampaigns = onSnapshot(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), limit(100)), (snap) => setCampaigns(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => handleFirestoreError(e, OperationType.GET, "campaigns"));
+    const unsubCustomers = onSnapshot(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(500)), (snap) => setCustomers(snap.docs.map(d => ({id:d.id, ...d.data()}))), (e) => console.error("customers error:", e));
+
+    // Fixed: use Firestore native orderBy+limit instead of client-side sort+slice (OOM risk)
+    const unsubUsage = onSnapshot(
+      query(
+        collection(db, "customer_campaign_usage"),
+        where("enterprise_id", "==", enterpriseId),
+        orderBy("used_at", "desc"),
+        limit(50)
+      ),
+      (snapshot) => setUtilizationLogs(snapshot.docs.map(d => ({id:d.id, ...d.data()} as any))),
+      (e) => console.error("usage logs error:", e)
+    );
+
     const unsubSettings = onSnapshot(doc(db, "loyalty_settings", enterpriseId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -92,17 +97,20 @@ export default function Loyalty() {
           rewardValue: data.rewardValue || 5
         });
       }
-      // If doc doesn't exist, silently keep defaults — it will be created on first save
-    }, () => {
-      // Silently ignore permission errors — loyalty settings will use defaults
-      // until the user sets up their workspace
-    });
+    }, () => { /* Silently use defaults until workspace is set up */ });
 
-    return () => { unsubBranches(); unsubGroups(); unsubProducts(); unsubCampaigns(); unsubUsage(); unsubSettings(); };
+    return () => { unsubBranches(); unsubGroups(); unsubProducts(); unsubCampaigns(); unsubCustomers(); unsubUsage(); unsubSettings(); };
   }, [enterpriseId]);
 
   const handleOpenDialog = (type: "Standard" | "Action") => {
+    if (!hasPermission('settings', 'editor')) {
+      toast.error('Insufficient permissions to create campaigns.');
+      return;
+    }
+    // Critical fix: always clear editing ID when opening for a new campaign
+    setEditingCampaignId(null);
     setCampaignCreationType(type);
+    setProductSearch("");
     setFormData({
       name: "",
       description: "",
@@ -129,9 +137,20 @@ export default function Loyalty() {
   };
 
   const handleCreateCampaign = async () => {
+    if (!hasPermission('settings', 'editor')) {
+      toast.error('Insufficient permissions to create or edit campaigns.');
+      return;
+    }
     if (!formData.name.trim()) return toast.error("Campaign name is required.");
     if (formData.start_date && formData.end_date && formData.end_date < formData.start_date) {
       return toast.error("End date cannot be before start date.");
+    }
+    const discountVal = parseFloat(formData.rules.discount_value);
+    if (isNaN(discountVal) || discountVal <= 0) {
+      return toast.error("Discount value must be a positive number.");
+    }
+    if (formData.applies_to === "Specific Products" && formData.selected_products.length === 0) {
+      return toast.error("Please select at least one product for this campaign.");
     }
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -145,8 +164,9 @@ export default function Loyalty() {
         end_date: formData.end_date,
         rules: formData.rules,
         branches: formData.selected_branches,
-        target_products: formData.selected_products,
+        // Store IDs, not names, so renaming groups doesn't break campaigns
         target_customers: formData.target_customers,
+        target_products: formData.applies_to === "Specific Products" ? formData.selected_products : [],
         one_time_per_customer: formData.oneTimePerCustomer,
         status: "ACTIVE",
         enterprise_id: enterpriseId
@@ -163,13 +183,17 @@ export default function Loyalty() {
       setIsDialogOpen(false);
       setEditingCampaignId(null);
     } catch (e: any) {
-      toast.error("Failed to create campaign: " + e.message);
+      toast.error("Failed to save campaign: " + e.message);
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const handleSaveRewardLogic = async () => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can modify reward logic.');
+      return;
+    }
     if (rewardLogic.pointsPerDollar <= 0) return toast.error("Points per dollar must be greater than 0.");
     if (rewardLogic.pointsRequiredForReward <= 0) return toast.error("Points required must be greater than 0.");
     if (rewardLogic.rewardValue <= 0) return toast.error("Reward value must be greater than 0.");
@@ -206,9 +230,16 @@ export default function Loyalty() {
     setIsDialogOpen(true);
   };
 
-  const deleteCampaign = async (id: string) => {
+  const deleteCampaign = async (id: string, name: string) => {
+    if (!hasPermission('settings', 'editor')) {
+      toast.error('Insufficient permissions to delete campaigns.');
+      return;
+    }
+    if (!confirm(`Are you sure you want to delete "${name}"? This cannot be undone.`)) return;
     try {
       await updateDoc(doc(db, "campaigns", id), { status: "DELETED" });
+      // Also clear it from selection state to prevent dangling reference
+      setSelectedCampaigns(prev => prev.filter(sid => sid !== id));
       toast.success("Campaign deleted");
     } catch (e) {
       toast.error("Failed to delete campaign");
@@ -216,17 +247,23 @@ export default function Loyalty() {
   };
 
   const handleBulkDelete = async () => {
+    if (!hasPermission('settings', 'editor')) {
+      toast.error('Insufficient permissions to delete campaigns.');
+      return;
+    }
     if (selectedCampaigns.length === 0) return;
-    if (!confirm(`Are you sure you want to delete ${selectedCampaigns.length} campaigns?`)) return;
-    
+    if (!confirm(`Are you sure you want to delete ${selectedCampaigns.length} campaigns? This cannot be undone.`)) return;
+
     setIsSubmitting(true);
     try {
-      const promises = selectedCampaigns.map(id => updateDoc(doc(db, "campaigns", id), { status: "DELETED" }));
-      await Promise.all(promises);
+      // Use writeBatch for atomic multi-document writes (prevents partial failure state)
+      const batch = writeBatch(db);
+      selectedCampaigns.forEach(id => batch.update(doc(db, "campaigns", id), { status: "DELETED" }));
+      await batch.commit();
       toast.success(`${selectedCampaigns.length} campaigns deleted`);
       setSelectedCampaigns([]);
-    } catch (e) {
-      toast.error("Bulk delete failed");
+    } catch (e: any) {
+      toast.error("Bulk delete failed: " + e.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -271,48 +308,49 @@ export default function Loyalty() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="card-modern p-6 space-y-4">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600">
-              <Star className="w-5 h-5" />
+        {/* KPI Cards — computed from live Firestore data */}
+        {(() => {
+          const totalPoints = customers.reduce((sum, c) => sum + (c.loyaltyPoints || 0), 0);
+          const vipCount = customers.filter(c => c.tier === 'Gold' || c.tier === 'Platinum').length;
+          const redemptionRate = customers.length > 0 ? Math.min(100, (utilizationLogs.length / customers.length) * 100) : 0;
+          const activeCampaigns = campaigns.filter(c => c.status === 'ACTIVE').length;
+          return (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <Card className="card-modern p-6 space-y-4">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-600"><Star className="w-5 h-5" /></div>
+                <div>
+                  <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Total Points Issued</p>
+                  <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">{totalPoints.toLocaleString()}</h3>
+                  <p className="text-[10px] text-zinc-400 font-bold mt-1">{customers.length} enrolled members</p>
+                </div>
+              </Card>
+              <Card className="card-modern p-6 space-y-4">
+                <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600"><Gift className="w-5 h-5" /></div>
+                <div>
+                  <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Redemption Rate</p>
+                  <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">{redemptionRate.toFixed(1)}%</h3>
+                  <Progress value={redemptionRate} className="h-1.5 mt-2 bg-purple-100" />
+                </div>
+              </Card>
+              <Card className="card-modern p-6 space-y-4">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600"><Crown className="w-5 h-5" /></div>
+                <div>
+                  <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">VIP Members</p>
+                  <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">{vipCount}</h3>
+                  <p className="text-[10px] text-zinc-400 font-bold mt-1">Tier: Gold &amp; Platinum</p>
+                </div>
+              </Card>
+              <Card className="card-modern p-6 space-y-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600"><TrendingUp className="w-5 h-5" /></div>
+                <div>
+                  <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Active Campaigns</p>
+                  <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">{activeCampaigns}</h3>
+                  <p className="text-[10px] text-zinc-400 font-bold mt-1">{campaigns.length} total configured</p>
+                </div>
+              </Card>
             </div>
-            <div>
-              <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Total Points Issued</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">0</h3>
-              <p className="text-[10px] text-zinc-400 font-bold mt-1">Awaiting data...</p>
-            </div>
-          </Card>
-          <Card className="card-modern p-6 space-y-4">
-            <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600">
-              <Gift className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Redemption Rate</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">0%</h3>
-              <Progress value={0} className="h-1.5 mt-2 bg-purple-100" />
-            </div>
-          </Card>
-          <Card className="card-modern p-6 space-y-4">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
-              <Crown className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">VIP Members</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">0</h3>
-              <p className="text-[10px] text-zinc-400 font-bold mt-1">Tier: Gold & Platinum</p>
-            </div>
-          </Card>
-          <Card className="card-modern p-6 space-y-4">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600">
-              <TrendingUp className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">Retention Boost</p>
-              <h3 className="text-2xl font-bold text-zinc-900 tracking-tight">+0%</h3>
-              <p className="text-[10px] text-zinc-400 font-bold mt-1">Baseline established</p>
-            </div>
-          </Card>
-        </div>
+          );
+        })()}
 
         <Card className="card-modern overflow-hidden">
           <CardHeader className="border-b border-zinc-100">
@@ -337,56 +375,30 @@ export default function Loyalty() {
                 <TableHead className="py-4 font-bold text-zinc-900 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody>
-              <TableRow className="hover:bg-zinc-50/30">
-                <TableCell className="py-4 font-bold">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-zinc-300" />
-                    Silver
-                  </div>
-                </TableCell>
-                <TableCell className="py-4 text-xs font-mono">0 pts</TableCell>
-                <TableCell className="py-4 text-center">
-                  <Badge variant="outline" className="text-[10px] font-bold">BASIC</Badge>
-                </TableCell>
-                <TableCell className="py-4 text-xs font-bold text-zinc-600">0 Customers</TableCell>
-                <TableCell className="py-4 text-right">
-                  <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
-                </TableCell>
-              </TableRow>
-              <TableRow className="hover:bg-zinc-50/30">
-                <TableCell className="py-4 font-bold text-amber-600">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-amber-500" />
-                    Gold
-                  </div>
-                </TableCell>
-                <TableCell className="py-4 text-xs font-mono">5,000 pts</TableCell>
-                <TableCell className="py-4 text-center">
-                  <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[10px] font-bold">5% CASHBACK</Badge>
-                </TableCell>
-                <TableCell className="py-4 text-xs font-bold text-zinc-600">0 Customers</TableCell>
-                <TableCell className="py-4 text-right">
-                  <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
-                </TableCell>
-              </TableRow>
-              <TableRow className="hover:bg-zinc-50/30">
-                <TableCell className="py-4 font-bold text-blue-600">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-blue-600" />
-                    Platinum
-                  </div>
-                </TableCell>
-                <TableCell className="py-4 text-xs font-mono">20,000 pts</TableCell>
-                <TableCell className="py-4 text-center">
-                  <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] font-bold">10% CASHBACK + VIP EVENTS</Badge>
-                </TableCell>
-                <TableCell className="py-4 text-xs font-bold text-zinc-600">0 Customers</TableCell>
-                <TableCell className="py-4 text-right">
-                  <Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="w-4 h-4" /></Button>
-                </TableCell>
-              </TableRow>
-            </TableBody>
+          {/* Member Tiers — with live customer counts and working search filter */}
+          {(() => {
+            const tiers = [
+              { name: 'Silver', minPts: '0 pts', dotColor: 'bg-zinc-300', badge: <Badge variant="outline" className="text-[10px] font-bold">BASIC</Badge>, count: customers.filter(c => !c.tier || c.tier === 'Silver').length },
+              { name: 'Gold', minPts: '5,000 pts', dotColor: 'bg-amber-500', textColor: 'text-amber-600', badge: <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-[10px] font-bold">5% CASHBACK</Badge>, count: customers.filter(c => c.tier === 'Gold').length },
+              { name: 'Platinum', minPts: '20,000 pts', dotColor: 'bg-blue-600', textColor: 'text-blue-600', badge: <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-[10px] font-bold">10% CASHBACK + VIP EVENTS</Badge>, count: customers.filter(c => c.tier === 'Platinum').length },
+            ].filter(t => t.name.toLowerCase().includes(memberSearch.toLowerCase()));
+            return (
+              <TableBody>
+                {tiers.length === 0 ? (
+                  <TableRow><TableCell colSpan={4} className="py-8 text-center text-zinc-400 text-sm">No tiers match your search.</TableCell></TableRow>
+                ) : tiers.map(t => (
+                  <TableRow key={t.name} className="hover:bg-zinc-50/30">
+                    <TableCell className={cn("py-4 font-bold", t.textColor)}>
+                      <div className="flex items-center gap-2"><div className={cn("w-2 h-2 rounded-full", t.dotColor)} />{t.name}</div>
+                    </TableCell>
+                    <TableCell className="py-4 text-xs font-mono">{t.minPts}</TableCell>
+                    <TableCell className="py-4 text-center">{t.badge}</TableCell>
+                    <TableCell className="py-4 text-xs font-bold text-zinc-600">{t.count} {t.count === 1 ? 'Customer' : 'Customers'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            );
+          })()}
           </Table>
         </Card>
 
@@ -476,7 +488,7 @@ export default function Loyalty() {
                             Edit
                           </DropdownMenuItem>
                           <DropdownMenuSeparator className="bg-zinc-100" />
-                          <DropdownMenuItem onClick={() => deleteCampaign(c.id)} className="py-2 px-3 font-bold text-[10px] uppercase tracking-widest cursor-pointer text-rose-600">
+                          <DropdownMenuItem onClick={() => deleteCampaign(c.id, c.name)} className="py-2 px-3 font-bold text-[10px] uppercase tracking-widest cursor-pointer text-rose-600">
                             <Trash2 className="w-3.5 h-3.5 mr-2" />
                             Delete
                           </DropdownMenuItem>
@@ -576,7 +588,7 @@ export default function Loyalty() {
           <div className="p-6 space-y-6">
             <div className="space-y-4">
               <div className="space-y-2">
-                 <Label className="text-xs font-bold text-zinc-700">Points Earned per $1 Spent</Label>
+                 <Label className="text-xs font-bold text-zinc-700">Points Earned per {currency} Spent</Label>
                  <Input 
                    type="number" 
                    value={rewardLogic.pointsPerDollar} 
@@ -594,7 +606,7 @@ export default function Loyalty() {
                  />
               </div>
               <div className="space-y-2">
-                 <Label className="text-xs font-bold text-zinc-700">Reward Value ($ OFF)</Label>
+                 <Label className="text-xs font-bold text-zinc-700">Reward Value ({currency} OFF)</Label>
                  <Input 
                    type="number" 
                    value={rewardLogic.rewardValue} 
@@ -604,7 +616,7 @@ export default function Loyalty() {
               </div>
               <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-xl">
                  <p className="text-sm font-medium text-zinc-600">
-                    Summary: Customers earn <strong className="text-zinc-900">{rewardLogic.pointsPerDollar} points</strong> for every $1 spent. They can redeem <strong className="text-zinc-900">{rewardLogic.pointsRequiredForReward} points</strong> for <strong className="text-zinc-900">${rewardLogic.rewardValue} off</strong> their purchase.
+                    Summary: Customers earn <strong className="text-zinc-900">{rewardLogic.pointsPerDollar} points</strong> for every {currency} spent. They can redeem <strong className="text-zinc-900">{rewardLogic.pointsRequiredForReward} points</strong> for <strong className="text-zinc-900">{currency}{rewardLogic.rewardValue} off</strong> their purchase.
                  </p>
               </div>
             </div>
@@ -618,7 +630,7 @@ export default function Loyalty() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isDialogOpen} onOpenChange={(open) => { if (!open) setEditingCampaignId(null); setIsDialogOpen(open); }}>
         <DialogContent className="sm:max-w-4xl w-[95vw] rounded-3xl p-0 overflow-hidden border-none shadow-2xl bg-zinc-50/50">
           <DialogHeader className="p-6 bg-white border-b border-zinc-100">
             <DialogTitle className="text-xl font-bold font-display tracking-tight text-zinc-900">
@@ -629,16 +641,6 @@ export default function Loyalty() {
           <ScrollArea className="max-h-[75vh] px-6 py-6">
             <div className="space-y-6 max-w-4xl mx-auto pb-10">
 
-              {campaignCreationType === "Action" && (
-                <Card className="shadow-sm border-zinc-200 overflow-hidden rounded-2xl bg-white">
-                  <div className="p-6">
-                    <h3 className="text-sm font-bold text-zinc-900 mb-4">Campaign Preview</h3>
-                    <div className="flex items-center justify-center p-10 bg-zinc-50 rounded-xl border border-dashed border-zinc-200">
-                      <span className="text-zinc-500 font-medium">Campaign preview will appear here</span>
-                    </div>
-                  </div>
-                </Card>
-              )}
 
               <Card className="shadow-sm border-zinc-200 overflow-hidden rounded-2xl bg-white">
                 <div className="p-6 space-y-6">
@@ -664,13 +666,13 @@ export default function Loyalty() {
                  <div className="space-y-2">
                     <Label className="text-xs font-bold text-zinc-700">Start Date</Label>
                     <div className="relative">
-                      <Input type="date" className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full px-4" value={formData.start_date} onChange={(e) => setFormData({...formData, start_date: e.target.value})} />
+                      <Input type="date" min={new Date().toISOString().split('T')[0]} className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full px-4" value={formData.start_date} onChange={(e) => setFormData({...formData, start_date: e.target.value})} />
                     </div>
                   </div>
                   <div className="space-y-2">
                     <Label className="text-xs font-bold text-zinc-700">End Date</Label>
                     <div className="relative">
-                      <Input type="date" className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full px-4" value={formData.end_date} onChange={(e) => setFormData({...formData, end_date: e.target.value})} />
+                      <Input type="date" min={formData.start_date || new Date().toISOString().split('T')[0]} className="h-11 rounded-lg bg-zinc-50 border-zinc-200 w-full px-4" value={formData.end_date} onChange={(e) => setFormData({...formData, end_date: e.target.value})} />
                     </div>
                  </div>
               </div>
@@ -837,26 +839,40 @@ export default function Loyalty() {
                   )}
 
                   <div className="space-y-4">
-                     <div className="flex items-center justify-between">
-                       <Label className="text-sm font-bold text-zinc-900">Select Products <span className="text-zinc-500 font-normal">({formData.selected_products.length} selected)</span></Label>
-                       <div className="flex items-center gap-2">
-                         <Button variant="outline" className="h-8 rounded-lg text-xs font-medium" onClick={() => setFormData({...formData, selected_products: []})}>Deselect All</Button>
-                       </div>
-                     </div>
-                     <div className="max-h-60 overflow-y-auto border border-zinc-200 rounded-xl bg-zinc-50">
-                        {products.length === 0 ? (
-                          <div className="p-6 text-center text-zinc-500 font-medium">No products available in the database</div>
-                        ) : (
-                          <div className="divide-y divide-zinc-200">
-                             {products.map(p => {
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-bold text-zinc-900">
+                          {formData.applies_to === "Specific Products" ? "Select Products" : "Product Preview"}
+                          <span className="text-zinc-500 font-normal"> ({formData.selected_products.length} selected)</span>
+                        </Label>
+                        <div className="flex items-center gap-2">
+                          {formData.applies_to === "Specific Products" && (
+                            <Button variant="outline" className="h-8 rounded-lg text-xs font-medium" onClick={() => setFormData({...formData, selected_products: products.map(p => p.id)})}>Select All</Button>
+                          )}
+                          <Button variant="outline" className="h-8 rounded-lg text-xs font-medium" onClick={() => setFormData({...formData, selected_products: []})}>Deselect All</Button>
+                        </div>
+                      </div>
+                      {/* Product search — prevents unvirtualized render lockup on large catalogs */}
+                      <Input
+                        placeholder="Search products..."
+                        className="h-9 rounded-lg border-zinc-200 text-xs"
+                        value={productSearch}
+                        onChange={(e) => setProductSearch(e.target.value)}
+                      />
+                      <div className="max-h-60 overflow-y-auto border border-zinc-200 rounded-xl bg-zinc-50">
+                         {products.length === 0 ? (
+                           <div className="p-6 text-center text-zinc-500 font-medium">No products available in the database</div>
+                         ) : formData.applies_to !== "Specific Products" ? (
+                           <div className="p-4 text-center text-zinc-400 text-xs font-medium">All products are eligible. Switch to "Specific Products" to select individual items.</div>
+                         ) : (
+                           <div className="divide-y divide-zinc-200">
+                             {products
+                               .filter(p => p.name?.toLowerCase().includes(productSearch.toLowerCase()) || p.sku?.toLowerCase().includes(productSearch.toLowerCase()))
+                               .map(p => {
                                const isSelected = formData.selected_products.includes(p.id);
                                return (
-                                 <div 
-                                   key={p.id} 
-                                   className={cn(
-                                     "flex items-center gap-3 p-3 cursor-pointer hover:bg-zinc-100 transition-colors",
-                                     isSelected && "bg-indigo-50 hover:bg-indigo-100"
-                                   )}
+                                 <div
+                                   key={p.id}
+                                   className={cn("flex items-center gap-3 p-3 cursor-pointer hover:bg-zinc-100 transition-colors", isSelected && "bg-indigo-50 hover:bg-indigo-100")}
                                    onClick={() => {
                                      if (isSelected) {
                                        setFormData({...formData, selected_products: formData.selected_products.filter(id => id !== p.id)});
@@ -873,9 +889,9 @@ export default function Loyalty() {
                                  </div>
                                );
                              })}
-                          </div>
-                        )}
-                     </div>
+                           </div>
+                         )}
+                      </div>
                   </div>
                 </div>
               </Card>
@@ -922,9 +938,10 @@ export default function Loyalty() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="All Customers">All Customers</SelectItem>
+                        <SelectItem value="all">All Customers</SelectItem>
                         {groups.map(g => (
-                          <SelectItem key={g.id} value={g.name}>{g.name}</SelectItem>
+                          // Fix: bind by group id, not name — renaming a group won't break campaigns
+                          <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

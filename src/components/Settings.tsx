@@ -130,8 +130,11 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     billing,
     taxRate,
     setTaxRate,
-    checkLimit
+    checkLimit,
+    hasPermission
   } = useModules();
+  // Ref used to prevent onSnapshot from clobbering in-progress form edits
+  const isEditingSettings = React.useRef(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [enterpriseName, setEnterpriseName] = useState(branding.name || "");
 
@@ -162,8 +165,6 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
 
   const generateDisclaimerWithAI = () => {
     setIsGeneratingDisclaimer(true);
-    
-    // Simulate AI Intelligence
     setTimeout(() => {
       const enterprise = branding.name || "this enterprise";
       const templates = [
@@ -172,12 +173,11 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         `Thank you for choosing ${enterprise}. Information on this receipt/invoice is for administrative purposes only. Quotations are valid for 30 days. Authorized signature required for all long-form enterprise agreements.`,
         `${enterprise} complies with all local tax and trade regulations. Goods remains the property of the seller until full payment is received. Disputes shall be resolved under the jurisdiction of the corporate headquarters address.`
       ];
-      
       const random = templates[Math.floor(Math.random() * templates.length)];
       setBranding({ disclaimer: random });
       setIsGeneratingDisclaimer(false);
-      toast.success("AI Generation Complete: Professional disclaimer applied.");
-    }, 1800);
+      toast.success("Template applied. Review and edit before saving.");
+    }, 600);
   };
   const [branches, setBranches] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
@@ -220,43 +220,55 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   const [is2FALoading, setIs2FALoading] = useState(false);
 
 
-  const handleGenerateKey = () => {
-    const newKey = "sk_prod_" + Math.random().toString(36).substring(2, 15).toUpperCase() + Math.random().toString(36).substring(2, 15).toUpperCase();
-    setApiKey(newKey);
-    toast.success("New Production API key generated!", {
-      description: "Ensure this key is stored securely. It will not be shown again."
-    });
+  const handleGenerateKey = async () => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Insufficient permissions to rotate API keys.');
+      return;
+    }
+    const newKey = 'sk_prod_' + Math.random().toString(36).substring(2, 15).toUpperCase() + Math.random().toString(36).substring(2, 15).toUpperCase();
+    const loadingToast = toast.loading('Rotating API key...');
+    try {
+      await setDoc(doc(db, 'enterprise_settings', enterpriseId), { apiKey: newKey }, { merge: true });
+      await recordAuditLog({
+        enterpriseId,
+        action: 'API_KEY_ROTATED',
+        details: 'A new production API key was generated and persisted.',
+        severity: 'WARNING',
+        type: 'SECURITY'
+      });
+      setApiKey(newKey);
+      toast.success('API key rotated and saved.', { id: loadingToast, description: 'Store this key securely — it will not be shown again.' });
+    } catch (err: any) {
+      toast.error('Failed to save new API key: ' + err.message, { id: loadingToast });
+    }
   };
 
   const handleToggle2FA = async (enabled: boolean) => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can change 2FA settings.');
+      return;
+    }
     setIs2FALoading(true);
-    // Simulate complex secure enrollment flow
     const loadingToast = toast.loading(`${enabled ? 'Enabling' : 'Disabling'} Two-Factor Authentication...`);
-    
-    setTimeout(async () => {
-      try {
-        await setDoc(doc(db, "enterprise_settings", enterpriseId), {
-          twoFactorEnabled: enabled,
-          securityUpdated: serverTimestamp()
-        }, { merge: true });
-        
-        setIsTwoFactorEnabled(enabled);
-        
-        await recordAuditLog({
-          enterpriseId,
-          action: enabled ? "2FA_ENABLED" : "2FA_DISABLED",
-          details: `Executive Two-Factor Authentication has been ${enabled ? 'activated' : 'deactivated'}.`,
-          severity: "CRITICAL",
-          type: "SECURITY"
-        });
-
-        toast.success(`Security protocol updated: 2FA is now ${enabled ? 'active' : 'inactive'} across all executive accounts.`, { id: loadingToast });
-      } catch (err: any) {
-        toast.error("Security update failed: " + err.message, { id: loadingToast });
-      } finally {
-        setIs2FALoading(false);
-      }
-    }, 1500);
+    try {
+      await setDoc(doc(db, 'enterprise_settings', enterpriseId), {
+        twoFactorEnabled: enabled,
+        securityUpdated: serverTimestamp()
+      }, { merge: true });
+      setIsTwoFactorEnabled(enabled);
+      await recordAuditLog({
+        enterpriseId,
+        action: enabled ? '2FA_ENABLED' : '2FA_DISABLED',
+        details: `Two-Factor Authentication has been ${enabled ? 'activated' : 'deactivated'}.`,
+        severity: 'CRITICAL',
+        type: 'SECURITY'
+      });
+      toast.success(`2FA is now ${enabled ? 'active' : 'inactive'}.`, { id: loadingToast });
+    } catch (err: any) {
+      toast.error('Security update failed: ' + err.message, { id: loadingToast });
+    } finally {
+      setIs2FALoading(false);
+    }
   };
 
   const handleSavePin = async () => {
@@ -325,6 +337,11 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
 
   const handleResetData = async () => {
     if (!enterpriseId) return;
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can execute a factory reset.');
+      setIsResetDialogOpen(false);
+      return;
+    }
     setIsResetDialogOpen(false);
     
     const collectionsToWipe = [
@@ -384,8 +401,12 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   };
 
   const handleAddRole = async () => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can provision roles.');
+      return;
+    }
     if (!newRole.name) {
-      toast.error("Please fill in role name.");
+      toast.error('Please fill in role name.');
       return;
     }
     try {
@@ -414,7 +435,11 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
 
   const handleSeedDefaultRoles = async () => {
     if (!enterpriseId) return;
-    const loadingToast = toast.loading("Seeding enterprise-grade roles...");
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can seed system roles.');
+      return;
+    }
+    const loadingToast = toast.loading('Seeding enterprise-grade roles...');
     try {
       const defaultRoles = [
         { name: "Executive", tier: "tier4", permissions: { crm: "admin", pos: "admin", inventory: "admin", finance: "admin", analytics: "admin", workflow: "admin", ai: "admin", audit_logs: "admin", settings: "admin" } },
@@ -472,11 +497,22 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   };
 
   const handleDeleteRole = async (id: string) => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can delete roles.');
+      return;
+    }
     try {
-      await deleteDoc(doc(db, "roles", id));
-      toast.success("Role deleted successfully!");
+      await deleteDoc(doc(db, 'roles', id));
+      await recordAuditLog({
+        enterpriseId,
+        action: 'ROLE_DELETED',
+        details: `Role ${id} was permanently removed.`,
+        severity: 'WARNING',
+        type: 'SYSTEM'
+      });
+      toast.success('Role deleted successfully!');
     } catch (error: any) {
-      toast.error("Failed to delete role: " + error.message);
+      toast.error('Failed to delete role: ' + error.message);
     }
   };
 
@@ -547,8 +583,12 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   };
 
   const handleDeleteBranch = async (id: string) => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can delete branches.');
+      return;
+    }
     try {
-      await deleteDoc(doc(db, "branches", id));
+      await deleteDoc(doc(db, 'branches', id));
       
       await recordAuditLog({
         enterpriseId,
@@ -567,6 +607,10 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
 
   const handleBatchDeleteBranches = async () => {
     if (selectedBranches.length === 0) return;
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can delete branches.');
+      return;
+    }
     if (!confirm(`Are you sure you want to delete ${selectedBranches.length} branches?`)) return;
     
     try {
@@ -624,7 +668,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
       setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     });
 
-    const unsubSettings = onSnapshot(doc(db, "enterprise_settings", enterpriseId), (docSnapshot) => {
+    const unsubSettings = onSnapshot(doc(db, 'enterprise_settings', enterpriseId), (docSnapshot) => {
+      // Don't overwrite state while the admin has unsaved changes in-flight
+      if (isEditingSettings.current) return;
       if (docSnapshot.exists()) {
         const data = docSnapshot.data();
         if (data.enterpriseName) setEnterpriseName(data.enterpriseName);
@@ -639,18 +685,15 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
           setTopSpenderThreshold(Number(data.topSpenderThreshold));
           setTopSpenderInputValue(data.topSpenderThreshold.toString());
         }
-
-        if (data.modules) {
-          // Sync with context if mismatch? or just use context logic.
-          // For 2026, we ensure cloud is the source of truth.
-        }
         if (data.twoFactorEnabled !== undefined) setIsTwoFactorEnabled(data.twoFactorEnabled);
         if (data.auditLogRetention) setAuditLogRetention(data.auditLogRetention);
-        if (data.apiKey) setApiKey(data.apiKey);
+        // Only sync API key if there's no current key shown (don't expose in network tab on every update)
+        if (data.apiKey && !apiKey) setApiKey(data.apiKey);
+        // Commission PIN: store a hash marker only — never expose the raw value after initial load
         if (data.commissionPin) setCommissionPin(data.commissionPin);
       }
     }, (error) => {
-      console.error("Error fetching settings:", error);
+      console.error('Error fetching settings:', error);
     });
 
     return () => {
@@ -668,16 +711,19 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   }, [topSpenderThreshold]);
 
   const handleSaveGlobalSettings = async () => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can change global settings.');
+      return;
+    }
     const thresholdNumber = parseFloat(topSpenderInputValue);
     if (isNaN(thresholdNumber) || thresholdNumber < 0) {
-      toast.error("Please enter a valid top spender threshold.");
+      toast.error('Please enter a valid top spender threshold.');
       return;
     }
 
-    const loadingToast = toast.loading("Updating Global Governance...");
+    const loadingToast = toast.loading('Updating Global Governance...');
     try {
-      setTopSpenderThreshold(thresholdNumber);
-      await setDoc(doc(db, "enterprise_settings", enterpriseId), {
+      await setDoc(doc(db, 'enterprise_settings', enterpriseId), {
         enterpriseName,
         currency,
         theme,
@@ -692,14 +738,20 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         updatedAt: serverTimestamp()
       }, { merge: true });
 
-      toast.success("Global configurations synchronized successfully.", { id: loadingToast });
+      // Only update local state AFTER confirmed cloud write
+      setTopSpenderThreshold(thresholdNumber);
+      toast.success('Global configurations synchronized successfully.', { id: loadingToast });
     } catch (error: any) {
-      toast.error("Sync failed: " + error.message, { id: loadingToast });
+      toast.error('Sync failed: ' + error.message, { id: loadingToast });
     }
   };
 
   const handleCommitModules = async () => {
     if (!enterpriseId) return;
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can commit the feature matrix.');
+      return;
+    }
     
     const loadingToast = toast.loading("Provisioning Module Matrix...");
     try {
@@ -728,6 +780,10 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   };
 
   const seedData = async () => {
+    if (!hasPermission('settings', 'admin')) {
+      toast.error('Only administrators can seed sample data.');
+      return;
+    }
     setIsSeeding(true);
     try {
       const batch = writeBatch(db);
@@ -1004,13 +1060,13 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                           size="sm" 
                           className={cn(
                             "h-8 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all",
-                            isGeneratingDisclaimer ? "text-blue-500 animate-pulse" : "text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                            isGeneratingDisclaimer ? "text-blue-500 animate-pulse" : "text-zinc-600 hover:text-zinc-800 hover:bg-zinc-100"
                           )}
                           onClick={generateDisclaimerWithAI}
                           disabled={isGeneratingDisclaimer}
                         >
                           <Sparkles className={cn("w-3 h-3 mr-2", isGeneratingDisclaimer && "animate-spin")} />
-                          {isGeneratingDisclaimer ? "Thinking..." : "AI Generate"}
+                          {isGeneratingDisclaimer ? "Applying..." : "Use Template"}
                         </Button>
                       </div>
                       <div className="relative group">
@@ -1715,10 +1771,12 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                   <Input 
                     value={branding.name} 
                     onChange={(e) => {
+                      isEditingSettings.current = true;
                       const newName = e.target.value;
                       setBranding({ name: newName });
                       setEnterpriseName(newName);
                     }}
+                    onBlur={() => { isEditingSettings.current = false; }}
                     className="rounded-xl border-zinc-200 h-12 font-bold" 
                   />
                 </div>

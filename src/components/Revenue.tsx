@@ -82,8 +82,9 @@ import { toast } from "sonner";
 import { 
   collection, 
   onSnapshot, 
+  limit,
+  orderBy,
   query, 
-  orderBy, 
   addDoc, 
   updateDoc, 
   setDoc,
@@ -126,7 +127,7 @@ import { PrintableInvoice } from "./PrintableInvoice";
 
 export default function Revenue() {
   const { setPendingAction, consumeAction } = usePendingAction();
-  const { activeBranch, formatCurrency, enterpriseId, branding, currency, taxRate: globalTaxRate, setTaxRate: setGlobalTaxRate } = useModules();
+  const { activeBranch, formatCurrency, enterpriseId, branding, currency, taxRate: globalTaxRate, setTaxRate: setGlobalTaxRate, hasPermission } = useModules();
   const [searchTerm, setSearchTerm] = useState("");
   const [invoices, setInvoices] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -175,56 +176,76 @@ export default function Revenue() {
 
 
   const handleRunPayrun = async () => {
+    if (!hasPermission('finance', 'admin')) {
+      toast.error('Authorization denied: Finance admin access required.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const batch = writeBatch(db);
-      
-      // Record expenses for each staff member's total due
-      for (const s of staff) {
+      // Build all expense records first
+      const payrunEntries: Array<{ staffMember: any; totalDue: number }> = staff.map(s => {
         const staffSessions = sessions.filter(sess => sess.staffId === s.id);
         const totalSales = staffSessions.reduce((acc, sess) => acc + (sess.totalSales || 0), 0);
         const commission = totalSales * (commissionRate / 100);
         let basePay = s.baseRate || 2200;
         if (s.salaryType === 'HOURLY') {
-          const hours = staffSessions.length * 8 || 160;
-          basePay = hours * (s.baseRate || 25);
+          basePay = (staffSessions.length * 8 || 160) * (s.baseRate || 25);
         } else if (s.salaryType === 'WEEKLY') {
           basePay = s.baseRate || 500;
         } else if (s.salaryType === 'FORTNIGHTLY') {
           basePay = s.baseRate || 1000;
         }
-        const totalDue = basePay + commission;
+        return { staffMember: s, totalDue: basePay + commission };
+      });
 
-        const docRef = doc(collection(db, "expenses"));
-        batch.set(docRef, {
-          amount: totalDue,
-          category: "Payroll",
-          description: `Payrun Settlement: ${s.name} (Base + Commission)`,
-          date: new Date().toISOString().split('T')[0],
-          status: "PAID",
-          staff_id: s.id,
-          timestamp: serverTimestamp(),
-          enterprise_id: enterpriseId,
-          branch_id: activeBranch === "all" ? "main" : activeBranch
-        });
+      // Chunk at 200 rows (each entry = 1 batch.set) — safely under Firestore 500-op limit
+      const CHUNK = 200;
+      for (let i = 0; i < payrunEntries.length; i += CHUNK) {
+        const chunk = payrunEntries.slice(i, i + CHUNK);
+        const batch = writeBatch(db);
+        for (const { staffMember, totalDue } of chunk) {
+          const docRef = doc(collection(db, 'expenses'));
+          batch.set(docRef, {
+            amount: totalDue,
+            category: 'Payroll',
+            description: `Payrun Settlement: ${staffMember.name} (Base + Commission)`,
+            date: new Date().toISOString().split('T')[0],
+            status: 'PAID',
+            staff_id: staffMember.id,
+            timestamp: serverTimestamp(),
+            enterprise_id: enterpriseId,
+            branch_id: activeBranch === 'all' ? 'main' : activeBranch
+          });
+        }
+        await batch.commit();
+
+        // Record each payroll disbursement in the financial ledger
+        for (const { staffMember, totalDue } of chunk) {
+          await recordFinancialEvent({
+            enterpriseId,
+            amount: totalDue,
+            sourceId: staffMember.id,
+            sourceType: 'EXPENSE',
+            description: `Payroll: ${staffMember.name}`,
+            metadata: { category: 'Payroll', staffId: staffMember.id }
+          });
+        }
       }
-      
-      await batch.commit();
-      
+
       await recordAuditLog({
         enterpriseId,
-        action: "PAYRUN_EXECUTED",
+        action: 'PAYRUN_EXECUTED',
         details: `Payroll settlement executed for ${staff.length} staff members.`,
-        severity: "CRITICAL",
-        type: "FINANCE",
+        severity: 'CRITICAL',
+        type: 'FINANCE',
         metadata: { staffCount: staff.length }
       });
-      
-      toast.success("Payrun completed and general ledger updated.");
+
+      toast.success('Payrun completed and general ledger updated.');
       setIsPayrunDialogOpen(false);
     } catch (error) {
-      console.error("Payrun failure:", error);
-      toast.error("Critical failure during payrun settlement.");
+      console.error('Payrun failure:', error);
+      toast.error('Critical failure during payrun settlement.');
     } finally {
       setIsSubmitting(false);
     }
@@ -233,30 +254,43 @@ export default function Revenue() {
   const handleReplenishPettyCash = async () => {
     const amt = parseFloat(pettyCashReplenishAmount);
     if (isNaN(amt) || amt <= 0 || isSubmitting) return;
+    if (!hasPermission('finance', 'admin')) {
+      toast.error('Authorization denied: Finance admin access required.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const docRef = await addDoc(collection(db, "petty_cash_fundings"), {
+      const docRef = await addDoc(collection(db, 'petty_cash_fundings'), {
         amount: amt,
         timestamp: serverTimestamp(),
         enterprise_id: enterpriseId,
-        branch_id: activeBranch === "all" ? "main" : activeBranch,
-        staff_name: auth.currentUser?.displayName || "Admin"
+        branch_id: activeBranch === 'all' ? 'main' : activeBranch,
+        staff_name: auth.currentUser?.displayName || 'Admin'
       });
 
       await recordFinancialEvent({
         enterpriseId,
         amount: amt,
         sourceId: docRef.id,
-        sourceType: "PETTY_CASH_FUNDING",
+        sourceType: 'PETTY_CASH_FUNDING',
         description: `Petty Cash Imprest Replenishment - ${formatCurrency(amt)}`,
         metadata: { staff: auth.currentUser?.displayName }
       });
 
-      toast.success("Petty Cash fund replenished");
+      await recordAuditLog({
+        enterpriseId,
+        action: 'PETTY_CASH_REPLENISHED',
+        details: `Petty Cash fund replenished by ${auth.currentUser?.displayName || 'Admin'} — ${formatCurrency(amt)}.`,
+        severity: 'WARNING',
+        type: 'FINANCE',
+        metadata: { amount: amt, fundingId: docRef.id }
+      });
+
+      toast.success('Petty Cash fund replenished');
       setIsPettyCashDialogOpen(false);
-      setPettyCashReplenishAmount("");
+      setPettyCashReplenishAmount('');
     } catch (error) {
-      toast.error("Failed to replenish fund");
+      toast.error('Failed to replenish fund');
     } finally {
       setIsSubmitting(false);
     }
@@ -272,9 +306,13 @@ export default function Revenue() {
 
   const handleIssueCreditNote = async () => {
     if (!targetInvoiceForCredit || isSubmitting) return;
+    if (!hasPermission('finance', 'admin')) {
+      toast.error('Authorization denied: Finance admin access required.');
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const docRef = await addDoc(collection(db, "credit_notes"), {
+      const docRef = await addDoc(collection(db, 'credit_notes'), {
         ...creditNoteData,
         invoice_id: targetInvoiceForCredit.id,
         invoice_number: targetInvoiceForCredit.invoice_number || targetInvoiceForCredit.invoiceNumber,
@@ -285,23 +323,34 @@ export default function Revenue() {
         branch_id: targetInvoiceForCredit.branch_id
       });
 
+      // Use the tax rate stored on the original invoice, not the current global rate
+      const originalTaxRate = targetInvoiceForCredit.tax_rate ?? globalTaxRate;
       await recordFinancialEvent({
         enterpriseId,
-        amount: creditNoteData.amount,
+        amount: -Math.abs(creditNoteData.amount), // Negative = liability reversal
         sourceId: docRef.id,
-        sourceType: "CREDIT_NOTE",
+        sourceType: 'CREDIT_NOTE',
         description: `Credit Note issued for Inv: ${targetInvoiceForCredit.invoiceNumber || targetInvoiceForCredit.invoice_number}`,
-        metadata: { 
-          reason: creditNoteData.reason, 
+        metadata: {
+          reason: creditNoteData.reason,
           isRefund: creditNoteData.isRefund,
-          tax: (creditNoteData.amount * (globalTaxRate / 100)) // Estimated tax reversal
+          tax: creditNoteData.amount * (originalTaxRate / 100)
         }
       });
 
-      toast.success("Credit Note issued successfully");
+      await recordAuditLog({
+        enterpriseId,
+        action: 'CREDIT_NOTE_ISSUED',
+        details: `Credit Note issued for Invoice #${targetInvoiceForCredit.invoice_number || targetInvoiceForCredit.invoiceNumber}. Amount: ${formatCurrency(creditNoteData.amount)}.`,
+        severity: 'WARNING',
+        type: 'FINANCE',
+        metadata: { creditNoteId: docRef.id, invoiceId: targetInvoiceForCredit.id, reason: creditNoteData.reason }
+      });
+
+      toast.success('Credit Note issued successfully');
       setIsCreditNoteDialogOpen(false);
     } catch (error) {
-      toast.error("Failed to issue credit note");
+      toast.error('Failed to issue credit note');
     } finally {
       setIsSubmitting(false);
     }
@@ -310,15 +359,15 @@ export default function Revenue() {
 
   const handleCreateExpense = async () => {
     if (!newExpense.amount || !newExpense.description || isSubmitting) {
-      toast.error("Please fill in all required fields (Amount and Document / Memo)");
+      toast.error('Please fill in all required fields (Amount and Document / Memo)');
       return;
     }
     setIsSubmitting(true);
     try {
-      const targetBranch = activeBranch === "all" ? "main" : activeBranch;
+      const targetBranch = activeBranch === 'all' ? 'main' : activeBranch;
       const parsedAmount = parseFloat(newExpense.amount as string);
-      
-      const docRef = await addDoc(collection(db, "expenses"), {
+
+      const docRef = await addDoc(collection(db, 'expenses'), {
         ...newExpense,
         amount: parsedAmount,
         timestamp: new Date().toISOString(),
@@ -332,24 +381,33 @@ export default function Revenue() {
         enterpriseId,
         amount: parsedAmount,
         sourceId: docRef.id,
-        sourceType: "EXPENSE",
+        sourceType: 'EXPENSE',
         description: `Expense: ${newExpense.description}`,
         metadata: { category: newExpense.category, status: newExpense.status }
       });
 
-      toast.success("Expense recorded successfully");
+      await recordAuditLog({
+        enterpriseId,
+        action: 'EXPENSE_CREATED',
+        details: `Expense recorded: "${newExpense.description}" — ${formatCurrency(parsedAmount)} (${newExpense.category}).`,
+        severity: 'INFO',
+        type: 'FINANCE',
+        metadata: { expenseId: docRef.id, amount: parsedAmount, category: newExpense.category }
+      });
+
+      toast.success('Expense recorded successfully');
       setIsExpenseSheetOpen(false);
       setNewExpense({
-        amount: "",
-        category: "Operations",
-        description: "",
-        status: "PAID",
-        payment_method: "Bank Transfer",
+        amount: '',
+        category: 'Operations',
+        description: '',
+        status: 'PAID',
+        payment_method: 'Bank Transfer',
         date: new Date().toISOString().split('T')[0]
       });
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, "expenses");
-      toast.error("Failed to record expense");
+      handleFirestoreError(error, OperationType.CREATE, 'expenses');
+      toast.error('Failed to record expense');
     } finally {
       setIsSubmitting(false);
     }
@@ -440,6 +498,18 @@ export default function Revenue() {
         }
 
         await batch.commit();
+
+        // Record each auto-generated invoice in the financial ledger
+        for (const plan of chunk) {
+          await recordFinancialEvent({
+            enterpriseId,
+            amount: plan.amount,
+            sourceId: plan.id,
+            sourceType: 'INVOICE',
+            description: `Auto-billed recurring invoice from plan: ${plan.plan_id}`,
+            metadata: { planId: plan.id, customerId: plan.customer_id }
+          });
+        }
       }
       
       await recordAuditLog({
@@ -576,64 +646,72 @@ export default function Revenue() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    const unsubInvoices = onSnapshot(query(collection(db, "invoices"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => new Date(b.due_date || 0).getTime() - new Date(a.due_date || 0).getTime());
-      setInvoices(docs);
-      setLoading(false);
-    }, (error) => {
-      console.error("invoices:", error);
-      setLoading(false);
-    });
+    // FIX: Added limit() + orderBy() caps to all listeners.
+    // Previously unbounded — would download ALL records to the browser on every
+    // load, causing OOM crashes and unbounded Firebase read billing at scale.
+    const unsubInvoices = onSnapshot(
+      query(collection(db, "invoices"), where("enterprise_id", "==", enterpriseId), orderBy("due_date", "desc"), limit(500)),
+      (snapshot) => {
+        setInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+        setLoading(false);
+      }, (error) => { console.error("invoices:", error); setLoading(false); });
 
-    const unsubExpenses = onSnapshot(query(collection(db, "expenses"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => {
-        const tA = new Date(a.date || a.timestamp || 0).getTime();
-        const tB = new Date(b.date || b.timestamp || 0).getTime();
-        return tB - tA;
-      });
-      setExpenses(docs);
-    }, (error) => console.error("expenses:", error));
+    const unsubExpenses = onSnapshot(
+      query(collection(db, "expenses"), where("enterprise_id", "==", enterpriseId), orderBy("date", "desc"), limit(500)),
+      (snapshot) => {
+        setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+      }, (error) => console.error("expenses:", error));
 
-    const unsubQuotes = onSnapshot(query(collection(db, "quotes"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
-      setQuotes(docs);
-    }, (error) => console.error("quotes:", error));
+    const unsubQuotes = onSnapshot(
+      query(collection(db, "quotes"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc"), limit(300)),
+      (snapshot) => {
+        setQuotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+      }, (error) => console.error("quotes:", error));
 
-    const unsubPos = onSnapshot(query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      setPosTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => console.error("pos transactions:", error));
+    const unsubPos = onSnapshot(
+      query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc"), limit(500)),
+      (snapshot) => {
+        setPosTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (error) => console.error("pos transactions:", error));
 
-    const unsubRecurring = onSnapshot(query(collection(db, "recurring_billing"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-      docs.sort((a, b) => new Date(a.next_billing_date || 0).getTime() - new Date(b.next_billing_date || 0).getTime());
-      setRecurring(docs);
-    }, (error) => console.error("recurring:", error));
+    const unsubRecurring = onSnapshot(
+      query(collection(db, "recurring_billing"), where("enterprise_id", "==", enterpriseId), limit(200)),
+      (snapshot) => {
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        docs.sort((a, b) => new Date(a.next_billing_date || 0).getTime() - new Date(b.next_billing_date || 0).getTime());
+        setRecurring(docs);
+      }, (error) => console.error("recurring:", error));
 
-    const unsubCustomers = onSnapshot(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => console.error("customers:", error));
+    const unsubCustomers = onSnapshot(
+      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(500)),
+      (snapshot) => {
+        setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (error) => console.error("customers:", error));
 
-    const unsubProducts = onSnapshot(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      setLoading(false);
-    }, (error) => console.error("products:", error));
+    const unsubProducts = onSnapshot(
+      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(500)),
+      (snapshot) => {
+        setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        setLoading(false);
+      }, (error) => console.error("products:", error));
 
+    const unsubStaff = onSnapshot(
+      query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), limit(200)),
+      (snapshot) => {
+        setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (error) => console.error("staff:", error));
 
+    const unsubSessions = onSnapshot(
+      query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), orderBy("startTime", "desc"), limit(500)),
+      (snapshot) => {
+        setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (error) => console.error("sessions:", error));
 
-    const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => console.error("staff:", error));
-
-    const unsubSessions = onSnapshot(query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => console.error("sessions:", error));
-
-    const unsubBankAccounts = onSnapshot(query(collection(db, "bankAccounts"), where("enterprise_id", "==", enterpriseId)), (snapshot) => {
-      setBankAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => console.error("bankAccounts:", error));
+    const unsubBankAccounts = onSnapshot(
+      query(collection(db, "bankAccounts"), where("enterprise_id", "==", enterpriseId), limit(50)),
+      (snapshot) => {
+        setBankAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      }, (error) => console.error("bankAccounts:", error));
 
     const unsubSummary = onSnapshot(doc(db, "financial_summaries", enterpriseId), (snapshot) => {
       if (snapshot.exists()) {
@@ -884,8 +962,18 @@ export default function Revenue() {
         branch_id: targetBranch,
         created_at: new Date().toISOString()
       });
-      toast.success("Recurring invoice configured successfully!");
+      toast.success('Recurring invoice configured successfully!');
       setIsRecurringDialogOpen(false);
+
+      await recordAuditLog({
+        enterpriseId,
+        action: 'RECURRING_BILLING_CREATED',
+        details: `New recurring billing plan configured. Frequency: ${recurringFormData.frequency}, Amount: ${formatCurrency(total)}.`,
+        severity: 'INFO',
+        type: 'FINANCE',
+        metadata: { customerId: recurringFormData.customer_id, amount: total, frequency: recurringFormData.frequency }
+      });
+
       setRecurringFormData({
         customer_id: "",
         billing_email: "",
@@ -962,46 +1050,49 @@ export default function Revenue() {
         status: saveAndSend ? "SENT" : newInvoiceData.status
       };
 
-      const docRef = await addDoc(collection(db, "invoices"), invoiceData);
-      
-      // 1.5 Record to Double-Entry Ledger
-      await recordFinancialEvent({
-        enterpriseId,
-        amount: grandTotal,
-        sourceId: docRef.id,
-        sourceType: "INVOICE",
-        description: `Invoice ${newInvoiceData.invoiceNumber || docRef.id.slice(0,6)} created`,
-        metadata: { status: invoiceData.status, customer: invoiceData.customer_name }
-      });
-      
+      const docRef = await addDoc(collection(db, 'invoices'), invoiceData);
+
+      // Only record to the financial ledger when revenue is actually recognized (i.e., invoice is sent).
+      // Draft invoices are provisional — firing the event on them causes ghost revenue.
+      if (saveAndSend || newInvoiceData.status === 'SENT') {
+        await recordFinancialEvent({
+          enterpriseId,
+          amount: grandTotal,
+          sourceId: docRef.id,
+          sourceType: 'INVOICE',
+          description: `Invoice ${newInvoiceData.invoiceNumber || docRef.id.slice(0, 6)} issued`,
+          metadata: { status: invoiceData.status, customer: invoiceData.customer_name }
+        });
+      }
+
       await recordAuditLog({
         enterpriseId,
-        action: "INVOICE_CREATED",
+        action: 'INVOICE_CREATED',
         details: `Invoice #${newInvoiceData.invoiceNumber} created for ${customer?.name}. Total: ${formatCurrency(grandTotal)}`,
-        severity: "INFO",
-        type: "FINANCE",
-        metadata: { invoiceId: docRef.id, customerId: newInvoiceData.customer_id }
+        severity: 'INFO',
+        type: 'FINANCE',
+        metadata: { invoiceId: docRef.id, customerId: newInvoiceData.customer_id, status: invoiceData.status }
       });
 
-      toast.success(saveAndSend ? "Invoice saved and sent" : "Invoice draft created");
+      toast.success(saveAndSend ? 'Invoice saved and sent' : 'Invoice draft created');
       setIsInvoiceDialogOpen(false);
       // Reset form
       setNewInvoiceData({
-        invoiceNumber: "",
-        status: "Draft",
-        customer_id: "",
-        payment_terms: "Due on Receipt",
+        invoiceNumber: '',
+        status: 'Draft',
+        customer_id: '',
+        payment_terms: 'Due on Receipt',
         issue_date: new Date().toISOString().split('T')[0],
         due_date: new Date().toISOString().split('T')[0],
-        discount_type: "Percentage (%)",
+        discount_type: 'Percentage (%)',
         discount_value: 0,
-        notes: "",
-        terms_conditions: ""
+        notes: '',
+        terms_conditions: ''
       });
-      setInvoiceItems([{ id: Date.now() + Math.random(), product_id: "", quantity: 1, unit_price: 0, tax: 0, description: "" }]);
+      setInvoiceItems([{ id: Date.now() + Math.random(), product_id: '', quantity: 1, unit_price: 0, tax: 0, description: '' }]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, "invoices");
-      toast.error("Failed to create invoice");
+      handleFirestoreError(error, OperationType.CREATE, 'invoices');
+      toast.error('Failed to create invoice');
     } finally {
       setIsSubmitting(false);
     }
@@ -1012,34 +1103,55 @@ export default function Revenue() {
 
     setIsSubmitting(true);
     try {
-      const invoiceRef = doc(db, "invoices", selectedInvoice.id);
-      const paidAmount = parseFloat(newPayment.amount);
+      const invoiceRef = doc(db, 'invoices', selectedInvoice.id);
+      const paidAmount = parseFloat(newPayment.amount as string);
       const newTotalPaid = (selectedInvoice.amount_paid || 0) + paidAmount;
-      const newStatus = newTotalPaid >= selectedInvoice.total ? "PAID" : "PARTIAL";
+      const newStatus = newTotalPaid >= selectedInvoice.total ? 'PAID' : 'PARTIAL';
 
+      // 1. Update the invoice with new paid amount + status
       await updateDoc(invoiceRef, {
         amount_paid: newTotalPaid,
         status: newStatus,
         last_payment_at: serverTimestamp()
       });
 
-      // Also record as a transaction or audit log if needed
-      await recordAuditLog({
-        enterpriseId,
-        action: "INVOICE_PAYMENT",
-        details: `Payment of ${formatCurrency(paidAmount)} recorded for invoice #${selectedInvoice.id.substring(0,8)}.`,
-        severity: "INFO",
-        type: "FINANCE",
-        metadata: { invoiceId: selectedInvoice.id, amount: paidAmount }
+      // 2. Persist the payment tranche to a subcollection for a full payment history
+      await addDoc(collection(db, `invoices/${selectedInvoice.id}/payments`), {
+        amount: paidAmount,
+        payment_method: newPayment.payment_method,
+        reference: newPayment.reference,
+        recorded_at: serverTimestamp(),
+        recorded_by: auth.currentUser?.uid || 'unknown',
+        enterprise_id: enterpriseId
       });
 
-      toast.success("Payment recorded successfully");
+      // 3. Record the realized cash receipt in the financial ledger
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: paidAmount,
+        sourceId: selectedInvoice.id,
+        sourceType: 'PAYMENT_RECEIVED',
+        description: `Payment received for Invoice #${selectedInvoice.invoiceNumber || selectedInvoice.invoice_number || selectedInvoice.id.slice(0, 8)}`,
+        metadata: { method: newPayment.payment_method, reference: newPayment.reference, newStatus }
+      });
+
+      // 4. Audit trail
+      await recordAuditLog({
+        enterpriseId,
+        action: 'INVOICE_PAYMENT',
+        details: `Payment of ${formatCurrency(paidAmount)} via ${newPayment.payment_method} recorded for invoice #${selectedInvoice.id.substring(0, 8)}. New status: ${newStatus}.`,
+        severity: 'INFO',
+        type: 'FINANCE',
+        metadata: { invoiceId: selectedInvoice.id, amount: paidAmount, method: newPayment.payment_method }
+      });
+
+      toast.success('Payment recorded successfully');
       setIsPaymentSheetOpen(false);
       setSelectedInvoice(null);
-      setNewPayment({ amount: "", payment_method: "Bank Transfer", reference: "" });
+      setNewPayment({ amount: '', payment_method: 'Bank Transfer', reference: '' });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `invoices/${selectedInvoice?.id}`);
-      toast.error("Failed to record payment");
+      toast.error('Failed to record payment');
     } finally {
       setIsSubmitting(false);
     }
@@ -1164,7 +1276,11 @@ export default function Revenue() {
   const [isMounted, setIsMounted] = useState(false);
 
   React.useEffect(() => {
-    setIsMounted(true);
+    // Delay chart mount by one animation frame so Recharts ResizeObserver
+    // measures the container AFTER the browser completes its initial layout.
+    // Prevents the width(-1)/height(-1) console warning.
+    const id = requestAnimationFrame(() => setIsMounted(true));
+    return () => cancelAnimationFrame(id);
   }, []);
 
   if (loading) {
@@ -1554,7 +1670,10 @@ export default function Revenue() {
                             }
                           />
                           <DropdownMenuContent align="end" className="w-48 rounded-xl">
-                            <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer">
+                            <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer" onClick={() => {
+                              setSelectedInvoice(inv);
+                              handlePrintReport('invoice');
+                            }}>
                               <Download className="w-4 h-4" /> Download PDF
                             </DropdownMenuItem>
                             <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer" onClick={() => {
@@ -1566,20 +1685,32 @@ export default function Revenue() {
                             </DropdownMenuItem>
                             <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600" onClick={async () => {
                               try {
-                                await updateDoc(doc(db, "invoices", inv.id), { status: "VOIDED" });
-                                
+                                await updateDoc(doc(db, 'invoices', inv.id), { status: 'VOIDED' });
+
+                                // Reverse the ledger entry if the invoice had been recognized as revenue
+                                if (inv.status === 'SENT' || inv.status === 'PAID' || inv.status === 'PARTIAL') {
+                                  await recordFinancialEvent({
+                                    enterpriseId,
+                                    amount: -(inv.total || inv.amount || 0),
+                                    sourceId: inv.id,
+                                    sourceType: 'INVOICE_VOID',
+                                    description: `Ledger reversal: Invoice #${inv.invoice_number || inv.invoiceNumber || inv.id.slice(0, 8)} voided`,
+                                    metadata: { invoiceId: inv.id }
+                                  });
+                                }
+
                                 await recordAuditLog({
                                   enterpriseId,
-                                  action: "INVOICE_VOIDED",
-                                  details: `Invoice #${inv.id.substring(0, 8)} for ${formatCurrency(inv.amount)} was voided.`,
-                                  severity: "WARNING",
-                                  type: "FINANCE",
-                                  metadata: { invoiceId: inv.id, amount: inv.amount }
+                                  action: 'INVOICE_VOIDED',
+                                  details: `Invoice #${inv.id.substring(0, 8)} for ${formatCurrency(inv.total || inv.amount || 0)} was voided.`,
+                                  severity: 'WARNING',
+                                  type: 'FINANCE',
+                                  metadata: { invoiceId: inv.id, amount: inv.total || inv.amount }
                                 });
 
-                                toast.success("Invoice voided successfully");
+                                toast.success('Invoice voided successfully');
                               } catch (e) {
-                                toast.error("Failed to void invoice");
+                                toast.error('Failed to void invoice');
                               }
                             }}>
                               Void Invoice
@@ -1653,10 +1784,20 @@ export default function Revenue() {
                               <DropdownMenuContent align="end" className="w-48 rounded-xl">
                                 <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600" onClick={async () => {
                                   try {
-                                    await updateDoc(doc(db, "quotes", quote.id), { status: "VOIDED" });
-                                    toast.success("Quote voided successfully");
+                                    await updateDoc(doc(db, 'quotes', quote.id), { status: 'VOIDED' });
+
+                                    await recordAuditLog({
+                                      enterpriseId,
+                                      action: 'QUOTE_VOIDED',
+                                      details: `Quote #${quote.id.substring(0, 8)} for ${formatCurrency(quote.total || 0)} was voided.`,
+                                      severity: 'WARNING',
+                                      type: 'FINANCE',
+                                      metadata: { quoteId: quote.id, amount: quote.total }
+                                    });
+
+                                    toast.success('Quote voided successfully');
                                   } catch (e) {
-                                    toast.error("Failed to void quote");
+                                    toast.error('Failed to void quote');
                                   }
                                 }}>
                                   Void Quote

@@ -38,13 +38,16 @@ import {
   doc, 
   deleteDoc, 
   writeBatch,
+  runTransaction,
   getStorage,
   ref,
   uploadBytes,
   getDownloadURL,
   auth,
   increment,
-  serverTimestamp
+  serverTimestamp,
+  limit,
+  orderBy
 } from '@/lib/firebase';
 import * as XLSX from 'xlsx';
 import { recordFinancialEvent } from '@/lib/ledger';
@@ -177,6 +180,7 @@ export default function Inventory() {
   const [cameraMode, setCameraMode] = useState<'user' | 'environment'>('environment');
   const [flashlight, setFlashlight] = useState(false);
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
+  const [cameraError, setCameraError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [poForm, setPoForm] = useState<any>({
     supplier_id: '',
@@ -205,6 +209,7 @@ export default function Inventory() {
   const startCamera = async () => {
     setIsInitializing(true);
     setHasCameraAccess(false);
+    setCameraError(false);
     stopCamera();
 
     try {
@@ -225,7 +230,8 @@ export default function Inventory() {
       }
     } catch (err) {
       console.error("Camera error:", err);
-      toast.error("Lens hardware unavailable");
+      setCameraError(true);
+      toast.error("Camera unavailable — use manual entry below");
     } finally {
       setIsInitializing(false);
     }
@@ -247,15 +253,18 @@ export default function Inventory() {
     if (!enterpriseId) return;
     try {
       setLoading(true);
+      // FIX: Added limit() caps to all getDocs fetches.
+      // Products and inventory capped at 1000 (warehouse scale),
+      // movements at 500 (most recent is what matters for display).
       const [pSnap, iSnap, mSnap, bSnap, sSnap, poSnap, stSnap, btSnap] = await Promise.all([
-        getDocs(query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'inventory'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'inventory_movements'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'branches'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'purchase_orders'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'stocktakes'), where('enterprise_id', '==', enterpriseId))),
-        getDocs(query(collection(db, 'inventory_batches'), where('enterprise_id', '==', enterpriseId)))
+        getDocs(query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId), limit(1000))),
+        getDocs(query(collection(db, 'inventory'), where('enterprise_id', '==', enterpriseId), limit(1000))),
+        getDocs(query(collection(db, 'inventory_movements'), where('enterprise_id', '==', enterpriseId), orderBy('date', 'desc'), limit(500))),
+        getDocs(query(collection(db, 'branches'), where('enterprise_id', '==', enterpriseId), limit(100))),
+        getDocs(query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId), limit(200))),
+        getDocs(query(collection(db, 'purchase_orders'), where('enterprise_id', '==', enterpriseId), limit(300))),
+        getDocs(query(collection(db, 'stocktakes'), where('enterprise_id', '==', enterpriseId), limit(100))),
+        getDocs(query(collection(db, 'inventory_batches'), where('enterprise_id', '==', enterpriseId), limit(500)))
       ]);
 
       setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -372,6 +381,7 @@ export default function Inventory() {
         // ── so keep batch at 200 rows max (400 ops max per batch, safely under 500)
         const BATCH_SIZE = 200;
         let importedCount = 0;
+        let skippedCount = 0;
 
         for (let i = 0; i < validRows.length; i += BATCH_SIZE) {
           const chunk = validRows.slice(i, i + BATCH_SIZE);
@@ -396,7 +406,7 @@ export default function Inventory() {
             };
 
             const name = getVal(['NAME', 'PRODUCT', 'STOCK_ITEMS', 'ITEM_NAME', 'DESCRIPTION', 'ITEM', 'PRODUCT_NAME']);
-            if (!name) continue;
+            if (!name) { skippedCount++; continue; }
 
             let sku = getVal(['SKU', 'CODE', 'PART_NUMBER', 'PART_NO', 'ID', 'SERIAL', 'ITEM_CODE']);
             if (!sku) {
@@ -455,7 +465,7 @@ export default function Inventory() {
         }).length;
 
         toast.success(
-          `Import complete: ${importedCount} products onboarded${withQty > 0 ? `, ${withQty} stock levels synced` : ''}${targetBranch ? ` → ${branches.find(b => b.id === targetBranch)?.name || targetBranch}` : ''}.`,
+          `Import complete: ${importedCount} products onboarded${withQty > 0 ? `, ${withQty} stock levels synced` : ''}${targetBranch ? ` → ${branches.find(b => b.id === targetBranch)?.name || targetBranch}` : ''}${skippedCount > 0 ? `. ⚠️ ${skippedCount} rows skipped (missing Name field)` : ''}.`,
           { id: loadingToast, duration: 6000 }
         );
 
@@ -1077,20 +1087,24 @@ export default function Inventory() {
     if (selectedProducts.length === 0) return;
     setIsBatchDeleting(true);
     try {
-      // Parallelise all inventory lookups to avoid serial await-in-loop
-      const inventorySnaps = await Promise.all(
-        selectedProducts.map(id =>
-          getDocs(query(
-            collection(db, 'inventory'),
-            where('product_id', '==', id),
-            where('enterprise_id', '==', enterpriseId)
-          ))
-        )
-      );
+      // Parallelise all Firestore lookups to avoid serial await-in-loop
+      const [inventorySnaps, batchSnaps, movementSnaps] = await Promise.all([
+        Promise.all(selectedProducts.map(id =>
+          getDocs(query(collection(db, 'inventory'), where('product_id', '==', id), where('enterprise_id', '==', enterpriseId)))
+        )),
+        Promise.all(selectedProducts.map(id =>
+          getDocs(query(collection(db, 'inventory_batches'), where('product_id', '==', id), where('enterprise_id', '==', enterpriseId)))
+        )),
+        Promise.all(selectedProducts.map(id =>
+          getDocs(query(collection(db, 'inventory_movements'), where('product_id', '==', id), where('enterprise_id', '==', enterpriseId)))
+        ))
+      ]);
 
       const allRefs: any[] = [
         ...selectedProducts.map(id => doc(db, 'products', id)),
-        ...inventorySnaps.flatMap(snap => snap.docs.map(d => d.ref))
+        ...inventorySnaps.flatMap(snap => snap.docs.map(d => d.ref)),
+        ...batchSnaps.flatMap(snap => snap.docs.map(d => d.ref)),
+        ...movementSnaps.flatMap(snap => snap.docs.map(d => d.ref)),
       ];
 
       // Commit in chunks of 500 to respect Firestore limits
@@ -1100,6 +1114,15 @@ export default function Inventory() {
         allRefs.slice(i, i + CHUNK).forEach(ref => batch.delete(ref));
         await batch.commit();
       }
+
+      await recordAuditLog({
+        enterpriseId,
+        action: 'INVENTORY_BATCH_DELETE',
+        details: `Batch decommission of ${selectedProducts.length} products with all associated inventory, batch, and movement records.`,
+        severity: 'CRITICAL',
+        type: 'SYSTEM',
+        metadata: { productIds: selectedProducts, count: selectedProducts.length }
+      });
 
       toast.success(`${selectedProducts.length} assets purged`);
       setSelectedProducts([]);
@@ -1157,6 +1180,14 @@ export default function Inventory() {
         selectedMovements.slice(i, i + CHUNK).forEach(id => batch.delete(doc(db, 'inventory_movements', id)));
         await batch.commit();
       }
+      await recordAuditLog({
+        enterpriseId,
+        action: 'INVENTORY_MOVEMENTS_PURGE',
+        details: `Purged ${selectedMovements.length} inventory movement log entries.`,
+        severity: 'WARNING',
+        type: 'SYSTEM',
+        metadata: { movementIds: selectedMovements, count: selectedMovements.length }
+      });
       toast.success(`${selectedMovements.length} logs purged`);
       setSelectedMovements([]);
       fetchData();
@@ -1261,84 +1292,97 @@ export default function Inventory() {
       toast.error('Mission violation: Incomplete routing or quantity');
       return;
     }
-
     if (transferData.from_branch_id === transferData.to_branch_id) {
-       toast.error('Logistics error: Source and destination nodes identical');
-       return;
-    }
-
-    const sourceProduct = products.find(p => p.id === transferData.product_id);
-    const sourceStock = getProductStock(transferData.product_id, transferData.from_branch_id);
-
-    if (sourceStock < transferData.qty) {
-      toast.error('Insufficient saturation: Source node lacks depth for this transfer.');
+      toast.error('Logistics error: Source and destination nodes identical');
       return;
     }
 
+    const sourceProduct = products.find(p => p.id === transferData.product_id);
+    const transferQty = transferData.qty;
+    const fromBranch = branches.find(b => b.id === transferData.from_branch_id)?.name || 'SOURCE';
+    const toBranch = branches.find(b => b.id === transferData.to_branch_id)?.name || 'DESTINATION';
+
     try {
-      const batch = writeBatch(db);
-      
-      // 1. Decrease from source
-      const sourceQ = query(
-        collection(db, 'inventory'), 
-        where('product_id', '==', transferData.product_id),
-        where('branch_id', '==', transferData.from_branch_id),
-        where('enterprise_id', '==', enterpriseId)
-      );
-      const sourceSnap = await getDocs(sourceQ);
-      if (!sourceSnap.empty) {
-        batch.update(sourceSnap.docs[0].ref, {
-          quantity: sourceSnap.docs[0].data().quantity - transferData.qty,
+      // Use runTransaction for server-side atomic enforcement — prevents race conditions
+      // where two concurrent transfers could both pass a client-side stock check.
+      await runTransaction(db, async (transaction: any) => {
+        const sourceQ = query(
+          collection(db, 'inventory'),
+          where('product_id', '==', transferData.product_id),
+          where('branch_id', '==', transferData.from_branch_id),
+          where('enterprise_id', '==', enterpriseId)
+        );
+        const sourceSnap = await getDocs(sourceQ);
+        if (sourceSnap.empty) throw new Error('Source inventory record not found.');
+
+        const sourceDoc = sourceSnap.docs[0];
+        const currentQty = sourceDoc.data().quantity || 0;
+        if (currentQty < transferQty) {
+          throw new Error(`Insufficient stock: only ${currentQty} units available at source.`);
+        }
+
+        // Deduct source
+        transaction.update(sourceDoc.ref, {
+          quantity: currentQty - transferQty,
           updated_at: new Date().toISOString()
         });
-      }
 
-      // 2. Increase at destination
-      const destQ = query(
-        collection(db, 'inventory'), 
-        where('product_id', '==', transferData.product_id),
-        where('branch_id', '==', transferData.to_branch_id),
-        where('enterprise_id', '==', enterpriseId)
-      );
-      const destSnap = await getDocs(destQ);
-      if (destSnap.empty) {
-        const invRef = doc(collection(db, 'inventory'));
-        batch.set(invRef, {
+        // Increase destination
+        const destQ = query(
+          collection(db, 'inventory'),
+          where('product_id', '==', transferData.product_id),
+          where('branch_id', '==', transferData.to_branch_id),
+          where('enterprise_id', '==', enterpriseId)
+        );
+        const destSnap = await getDocs(destQ);
+        if (destSnap.empty) {
+          const invRef = doc(collection(db, 'inventory'));
+          transaction.set(invRef, {
+            product_id: transferData.product_id,
+            branch_id: transferData.to_branch_id,
+            quantity: transferQty,
+            enterprise_id: enterpriseId,
+            updated_at: new Date().toISOString()
+          });
+        } else {
+          const destDoc = destSnap.docs[0];
+          transaction.update(destDoc.ref, {
+            quantity: (destDoc.data().quantity || 0) + transferQty,
+            updated_at: new Date().toISOString()
+          });
+        }
+
+        // Log movement inside the transaction
+        const movRef = doc(collection(db, 'inventory_movements'));
+        transaction.set(movRef, {
           product_id: transferData.product_id,
-          branch_id: transferData.to_branch_id,
-          quantity: transferData.qty,
-          enterprise_id: enterpriseId,
-          updated_at: new Date().toISOString()
+          product: sourceProduct?.name || 'Unknown',
+          qty: transferQty,
+          type: 'TRANSFER',
+          from: fromBranch,
+          to: toBranch,
+          date: new Date().toISOString(),
+          status: 'COMPLETED',
+          enterprise_id: enterpriseId
         });
-      } else {
-        batch.update(destSnap.docs[0].ref, {
-          quantity: destSnap.docs[0].data().quantity + transferData.qty,
-          updated_at: new Date().toISOString()
-        });
-      }
-
-      // 3. Log movement
-      const movRef = doc(collection(db, 'inventory_movements'));
-      batch.set(movRef, {
-        product_id: transferData.product_id,
-        product: sourceProduct?.name || 'Unknown',
-        qty: transferData.qty,
-        type: 'TRANSFER',
-        from: branches.find(b => b.id === transferData.from_branch_id)?.name || 'LOCAL',
-        to: branches.find(b => b.id === transferData.to_branch_id)?.name || 'REMOTE',
-        date: new Date().toISOString(),
-        status: 'COMPLETED',
-        enterprise_id: enterpriseId
       });
 
-      await batch.commit();
+      await recordAuditLog({
+        enterpriseId,
+        action: 'INVENTORY_TRANSFER',
+        details: `Transferred ${transferQty}x ${sourceProduct?.name || transferData.product_id} from ${fromBranch} → ${toBranch}.`,
+        severity: 'WARNING',
+        type: 'SYSTEM',
+        metadata: { productId: transferData.product_id, qty: transferQty, from: transferData.from_branch_id, to: transferData.to_branch_id }
+      });
+
       toast.success('Logistical transfer synchronized');
       setIsTransferDialogOpen(false);
       setTransferData({ product_id: '', from_branch_id: '', to_branch_id: '', qty: 0, reason: 'INTERNAL_TRANSFER' });
       fetchData();
     } catch (error: any) {
       console.error('Transfer execution failure:', error);
-      toast.error('Strategic transfer failure. Verify operational clearance.');
+      toast.error(error.message?.includes('Insufficient') ? error.message : 'Strategic transfer failure. Verify operational clearance.');
     }
   };
 
@@ -2533,11 +2577,13 @@ export default function Inventory() {
                                 </TableCell>
                                 <TableCell className="text-right py-5 pr-6">
                                   <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
-                                      <MoreHorizontal className="w-5 h-5" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
+                                  <DropdownMenuTrigger
+                                    render={
+                                      <button className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all flex items-center justify-center outline-none appearance-none">
+                                        <MoreHorizontal className="w-5 h-5" />
+                                      </button>
+                                    }
+                                  />
                                     <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
                                       <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs" onClick={() => openProductSheet(item)}>
                                         <Box className="w-4 h-4 text-zinc-400" /> Edit Product Profile
@@ -2977,11 +3023,13 @@ export default function Inventory() {
                             </TableCell>
                             <TableCell className="py-6 pr-6 text-right">
                               <DropdownMenu>
-                           <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all">
-                                  <MoreHorizontal className="w-5 h-5" />
-                                </Button>
-                           </DropdownMenuTrigger>
+                                <DropdownMenuTrigger 
+                                  render={
+                                    <button className="h-10 w-10 rounded-xl hover:bg-zinc-100 text-zinc-400 hover:text-zinc-900 transition-all flex items-center justify-center outline-none appearance-none">
+                                      <MoreHorizontal className="w-5 h-5" />
+                                    </button>
+                                  }
+                                />
                                 <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 shadow-2xl p-2 bg-white ring-1 ring-zinc-50">
                                   <DropdownMenuItem 
                                     className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs uppercase"
@@ -3723,7 +3771,24 @@ export default function Inventory() {
                </motion.div>
             </div>
 
-            {(!hasCameraAccess || isInitializing) && (
+            {(cameraError) && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-black z-50 px-8 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
+                  <XIcon className="w-8 h-8 text-rose-400" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-black uppercase tracking-widest text-white">Camera Unavailable</p>
+                  <p className="text-xs text-zinc-500 font-medium">Permission denied or hardware not detected.</p>
+                </div>
+                <Button
+                  className="rounded-2xl bg-white text-zinc-900 font-black text-[10px] uppercase tracking-widest px-8 h-12 hover:scale-[1.02] transition-all"
+                  onClick={() => setIsCameraOpen(false)}
+                >
+                  Use Manual Entry
+                </Button>
+              </div>
+            )}
+            {(!hasCameraAccess && !cameraError) && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 text-zinc-500 bg-black z-50">
                 <RefreshCw className="w-12 h-12 animate-spin text-blue-500/40" />
                 <p className="text-[10px] font-black uppercase tracking-[0.4em] text-zinc-400 animate-pulse">
