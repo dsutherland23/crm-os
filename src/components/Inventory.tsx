@@ -279,9 +279,9 @@ export default function Inventory() {
       setPurchaseOrders(poSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setStocktakes(stSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       setInventoryBatches(btSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching inventory:', error);
-      toast.error('Logistics error: Could not sync assets');
+      toast.error(`Logistics error: ${error?.message || 'Could not sync assets'}`);
     } finally {
       setLoading(false);
     }

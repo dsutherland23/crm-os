@@ -359,9 +359,6 @@ export default function POS() {
 
   useEffect(() => {
     if (!enterpriseId || !isAuthorized) {
-      if (!isAuthorized) {
-        setLoading(false);
-      }
       return;
     }
     let isMounted = true;
@@ -375,7 +372,8 @@ export default function POS() {
         if (!isMounted) return;
         setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setCustomers(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setLoading(false);
+        // Loading is now handled by the products listener to ensure data is present before showing the UI
+        // setLoading(false);
       } catch (err) {
         console.error("Static data load error:", err);
         if (isMounted) setLoading(false);
@@ -383,11 +381,15 @@ export default function POS() {
     };
     loadStaticData();
     const unsubProducts = onSnapshot(
-      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId)),
+      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(1000)),
       (snapshot) => {
-        if (isMounted) setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        setProducts(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        if (isMounted) setLoading(false);
       },
-      (err) => console.error("products sync error:", err)
+      (err) => {
+        console.error("products sync error:", err);
+        setLoading(false);
+      }
     );
     const unsubCampaigns = onSnapshot(
       query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
@@ -397,9 +399,9 @@ export default function POS() {
       (err) => console.error("campaigns sync error:", err)
     );
     const unsubInventory = onSnapshot(
-      query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId)),
+      query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(1500)),
       (snapshot) => {
-        if (isMounted) setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        setInventory(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
       },
       (err) => console.error("inventory sync error:", err)
     );
@@ -939,7 +941,11 @@ export default function POS() {
       };
 
       await Promise.all(cart.map(async (item) => {
-        const invItem = inventory.find(i => i.product_id === item.product.id && (activeBranch === "all" ? true : i.branch_id === resolvedBranch));
+        const invItem = inventory.find(i => 
+          i.product_id === item.product.id && 
+          (activeBranch === "all" ? (i.branch_id === "main" || i.branch_id === "primary") : i.branch_id === resolvedBranch)
+        ) || inventory.find(i => i.product_id === item.product.id); // Fallback to first available branch record
+
         if (invItem) {
           const qtyAdjustment = isReturnMode ? (restockOnReturn ? item.quantity : 0) : -item.quantity;
           if (qtyAdjustment !== 0) {
@@ -1041,6 +1047,8 @@ export default function POS() {
     setCartDiscount(null);
     setSelectedCustomer(null);
     setSmartCashTendered(null);
+    setSearchTerm("");
+    setSelectedCategory("All Items");
     if (cartKey) localStorage.removeItem(cartKey);
     toast.success("Ready for new transaction");
   };
@@ -1651,7 +1659,6 @@ Notes: ${closeRegisterNotes || 'None'}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6">
-                  <AnimatePresence>
                     {products.filter(p => {
                       const name = (p.name || "").toLowerCase();
                       const category = (p.category || "").toLowerCase();
@@ -1662,7 +1669,7 @@ Notes: ${closeRegisterNotes || 'None'}
                     }).map((product) => {
                       const stock = getProductStock(product.id);
                       return (
-                        <motion.div key={product.id} layout initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}>
+                        <motion.div key={product.id} layout initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
                           <Card className="card-modern group cursor-pointer overflow-hidden border-zinc-200 hover:border-blue-500/50 transition-all" onClick={() => addToCart(product)}>
                             <div className="aspect-square overflow-hidden bg-zinc-100 relative">
                               <img src={product.image_url || product.image || "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&q=80&w=400"} alt={product.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" referrerPolicy="no-referrer" onError={(e) => { (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1581646730702-60193386ec9c?auto=format&fit=crop&q=80&w=400"; }} />
@@ -1684,7 +1691,6 @@ Notes: ${closeRegisterNotes || 'None'}
                         </motion.div>
                       );
                     })}
-                  </AnimatePresence>
                 </div>
               )}
               </div>
@@ -2037,7 +2043,7 @@ Notes: ${closeRegisterNotes || 'None'}
       </Dialog>
       {/* Transaction Success / Receipt Dialog */}
       <Dialog open={showReceipt} onOpenChange={(open) => {
-        if (!open) handleNewTransaction();
+        if (!open && showReceipt) handleNewTransaction();
       }}>
         <DialogContent className="sm:max-w-md rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
           <div className="p-10 flex flex-col items-center text-center space-y-6">
@@ -2129,7 +2135,7 @@ Date: ${lastTransaction?.date}
               className="w-full rounded-2xl h-16 bg-zinc-900 text-white hover:bg-zinc-800 font-black text-lg shadow-xl shadow-zinc-900/20 transition-all active:scale-95"
               onClick={handleNewTransaction}
             >
-              New Transaction
+              Start New Sale
             </Button>
           </div>
 
@@ -2137,7 +2143,7 @@ Date: ${lastTransaction?.date}
       </Dialog>
 
        <Dialog open={isClosePromptOpen} onOpenChange={setIsClosePromptOpen}>
-         <DialogContent className="w-full max-w-full sm:max-w-2xl rounded-none sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden max-h-[100dvh] sm:max-h-[90vh] flex flex-col">
+         <DialogContent className="w-full max-w-full sm:max-w-2xl rounded-none sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden h-[100dvh] max-h-[100dvh] sm:h-auto sm:max-h-[90vh] flex flex-col">
            <div className="p-5 sm:p-8 pb-4 border-b border-zinc-100 bg-zinc-50/50 flex-none">
              <DialogHeader>
                <div className="flex flex-col gap-3">
@@ -2243,7 +2249,7 @@ Date: ${lastTransaction?.date}
                        </div>
                      </div>
                    ) : (
-                     <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                     <div className="grid grid-cols-1 xs:grid-cols-2 gap-3 sm:gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
                         {[1000, 500, 100, 50, 20, 10, 5, 1].map(denom => (
                           <div key={denom} className="flex items-center gap-3 p-3 bg-white/5 rounded-2xl border border-white/10 focus-within:border-blue-500/50 transition-colors">
                             <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center font-black text-zinc-400 text-xs shadow-inner">

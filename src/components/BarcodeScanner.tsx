@@ -32,9 +32,16 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
     if (!s) return;
     scannerRef.current = null;
     try {
-      if (s.isScanning) await s.stop();
-      s.clear();
-    } catch (_) {}
+      if (s.isScanning) {
+        await s.stop();
+      }
+      // Ensure element still exists before clearing
+      if (document.getElementById(scannerDivId)) {
+        s.clear();
+      }
+    } catch (_) {
+      // Cleanup failures are non-fatal in the unmount cycle
+    }
   };
 
   // ── Start camera scanner ────────────────────────────────────────────────
@@ -125,9 +132,12 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, mode, scannerDivId]);
 
-  // Cleanup on unmount
+  // Final unmount cleanup
   useEffect(() => {
-    return () => { mountedRef.current = false; stopScanner(); };
+    return () => {
+      mountedRef.current = false;
+      stopScanner();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
