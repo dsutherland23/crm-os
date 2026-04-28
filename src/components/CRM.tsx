@@ -186,6 +186,7 @@ export default function CRM() {
     photo_url: ""
   });
   const [isSubmittingCustomer, setIsSubmittingCustomer] = useState(false);
+  const [confirmName, setConfirmName] = useState(""); // FIX: Moved from IIFE at line 2550
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -266,8 +267,8 @@ export default function CRM() {
       toast.error("Name is required");
       return;
     }
-    if (!customerFormData.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerFormData.email)) {
-      toast.error("A valid email address is required");
+    if (customerFormData.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerFormData.email)) {
+      toast.error("If provided, the email address must be valid");
       return;
     }
     if (isSubmittingCustomer) return; // idempotency guard
@@ -1250,7 +1251,7 @@ export default function CRM() {
                 </div>
                 {customerFormData.customer_type === "Individual" && (
                   <div className="space-y-2">
-                    <Label className="text-sm font-medium text-zinc-900">Last Name *"</Label>
+                    <Label className="text-sm font-medium text-zinc-900">Last Name *</Label>
                     <Input 
                       placeholder=""
                       value={customerFormData.last_name}
@@ -2546,31 +2547,26 @@ export default function CRM() {
                   This will PERMANENTLY erase <strong>{selectedCustomer?.name}</strong> and all associated records (transactions, invoices, documents). This action <strong>cannot be reversed</strong>.
                 </DialogDescription>
               </DialogHeader>
-              {(() => {
-                const [confirmName, setConfirmName] = React.useState("");
-                return (
-                  <div className="space-y-4 py-2">
-                    <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Type the customer name to confirm:</p>
-                    <Input
-                      placeholder={selectedCustomer?.name}
-                      value={confirmName}
-                      onChange={(e) => setConfirmName(e.target.value)}
-                      className="rounded-xl h-11 border-rose-200 focus:border-rose-500"
-                    />
-                    <DialogFooter className="gap-3 sm:gap-0 mt-2">
-                      <Button variant="outline" className="flex-1 rounded-xl h-12 font-bold" onClick={() => setIsPermanentDeleteOpen(false)}>No, Preserve</Button>
-                      <Button 
-                        className="flex-1 rounded-xl bg-rose-600 text-white h-12 font-bold hover:bg-rose-700 shadow-lg shadow-rose-600/20"
-                        onClick={async () => { await handleDeleteCustomer(); setIsPermanentDeleteOpen(false); }}
-                        disabled={isSubmittingCustomer || confirmName.trim() !== (selectedCustomer?.name || "").trim()}
-                      >
-                        {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
-                        Yes, Purge
-                      </Button>
-                    </DialogFooter>
-                  </div>
-                );
-              })()}
+              <div className="space-y-4 py-2">
+                <p className="text-xs font-bold text-zinc-500 uppercase tracking-wider">Type the customer name to confirm:</p>
+                <Input
+                  placeholder={selectedCustomer?.name}
+                  value={confirmName}
+                  onChange={(e) => setConfirmName(e.target.value)}
+                  className="rounded-xl h-11 border-rose-200 focus:border-rose-500"
+                />
+                <DialogFooter className="gap-3 sm:gap-0 mt-2">
+                  <Button variant="outline" className="flex-1 rounded-xl h-12 font-bold" onClick={() => setIsPermanentDeleteOpen(false)}>No, Preserve</Button>
+                  <Button 
+                    className="flex-1 rounded-xl bg-rose-600 text-white h-12 font-bold hover:bg-rose-700 shadow-lg shadow-rose-600/20"
+                    onClick={async () => { await handleDeleteCustomer(); setIsPermanentDeleteOpen(false); setConfirmName(""); }}
+                    disabled={isSubmittingCustomer || confirmName.trim() !== (selectedCustomer?.name || "").trim()}
+                  >
+                    {isSubmittingCustomer ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4 mr-2" />}
+                    Yes, Purge
+                  </Button>
+                </DialogFooter>
+              </div>
             </DialogContent>
           </Dialog>
 

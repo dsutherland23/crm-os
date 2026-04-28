@@ -263,6 +263,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
   const [transactions, setTransactions] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   // Prevent duplicate subscription triggers
@@ -364,8 +365,8 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     if (canInventory) {
       const invQuery =
         activeBranch === "all"
-          ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(50))
-          : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch), limit(50));
+          ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(1000))
+          : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch), limit(1000));
 
       unsubInv = onSnapshot(
         invQuery,
@@ -379,6 +380,17 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
           setLoadingMap((p) => ({ ...p, inventory: false }));
         }
       );
+
+      // 3b. Products – needed to calculate inventory value (prices are here)
+      const prodQuery = query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(1000));
+      const unsubProd = onSnapshot(
+        prodQuery,
+        (snap) => {
+          setProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        },
+        (err) => console.error("Products listener:", err)
+      );
+      subscriptionRef.current.push(unsubProd);
     } else {
       setLoadingMap((p) => ({ ...p, inventory: false }));
     }
@@ -434,12 +446,13 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     const orders = transactions.length;
     const customerCount = customers.filter((c) => c.status !== "Archived").length;
     // Use price fields already present on inventory items; no products collection needed
-    const inventoryValue = inventory.reduce((acc, item) => {
-      const qty = Number(item.quantity ?? item.stock) || 0;
-      const price = Number(item.retail_price || item.price || item.cost) || 0;
-      return acc + qty * price;
+    const inventoryValue = inventory.reduce((acc, invItem) => {
+      const product = products.find(p => p.id === invItem.product_id);
+      const qty = Number(invItem.quantity ?? invItem.stock) || 0;
+      const price = Number(product?.cost || product?.retail_price || product?.price || 0);
+      return acc + (qty * price);
     }, 0);
-    return { revenue, orders, customers: customerCount, inventory: inventoryValue, _partial: true };
+    return { revenue, orders, customers: customerCount, inventory: inventoryValue, _partial: products.length < 10 };
   }, [dashboardStats, transactions, customers, inventory]);
 
   // ── Chart Data ─────────────────────────────────────────────

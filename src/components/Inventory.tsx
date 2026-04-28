@@ -247,41 +247,45 @@ export default function Inventory() {
 
   useEffect(() => {
     fetchData();
-  }, [activeBranch]);
+  }, [activeBranch, enterpriseId]);
 
   const fetchData = async () => {
     if (!enterpriseId) return;
     try {
       setLoading(true);
-      // FIX: Added limit() caps to all getDocs fetches.
-      // Products and inventory capped at 1000 (warehouse scale),
-      // movements at 500 (most recent is what matters for display).
-      const [pSnap, iSnap, mSnap, bSnap, sSnap, poSnap, stSnap, btSnap] = await Promise.all([
-        getDocs(query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId), limit(1000))),
-        getDocs(query(collection(db, 'inventory'), where('enterprise_id', '==', enterpriseId), limit(1000))),
-        getDocs(query(collection(db, 'inventory_movements'), where('enterprise_id', '==', enterpriseId), orderBy('date', 'desc'), limit(500))),
-        getDocs(query(collection(db, 'branches'), where('enterprise_id', '==', enterpriseId), limit(100))),
-        getDocs(query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId), limit(200))),
-        getDocs(query(collection(db, 'purchase_orders'), where('enterprise_id', '==', enterpriseId), limit(300))),
-        getDocs(query(collection(db, 'stocktakes'), where('enterprise_id', '==', enterpriseId), limit(100))),
-        getDocs(query(collection(db, 'inventory_batches'), where('enterprise_id', '==', enterpriseId), limit(500)))
+      
+      const safeFetch = async (q: any, setter: (data: any[]) => void, errorLabel: string) => {
+        try {
+          const snap = await getDocs(q);
+          setter(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        } catch (error: any) {
+          console.error(`Error fetching ${errorLabel}:`, error);
+          if (error?.message?.includes("requires an index")) {
+            toast.error(`${errorLabel} sync requires a cloud index. Please check your console.`);
+          }
+        }
+      };
+
+      await Promise.all([
+        safeFetch(query(collection(db, 'products'), where('enterprise_id', '==', enterpriseId), limit(1000)), setProducts, "Products"),
+        safeFetch(query(collection(db, 'inventory'), where('enterprise_id', '==', enterpriseId), limit(1000)), setInventory, "Inventory"),
+        safeFetch(query(collection(db, 'inventory_movements'), where('enterprise_id', '==', enterpriseId), orderBy('date', 'desc'), limit(500)), (data) => {
+          setMovements(data.sort((a: any, b: any) => {
+            const dateA = a.date ? new Date(a.date).getTime() : 0;
+            const dateB = b.date ? new Date(b.date).getTime() : 0;
+            return dateB - dateA;
+          }));
+        }, "Movements"),
+        safeFetch(query(collection(db, 'branches'), where('enterprise_id', '==', enterpriseId), limit(100)), setBranches, "Branches"),
+        safeFetch(query(collection(db, 'suppliers'), where('enterprise_id', '==', enterpriseId), limit(200)), setSuppliers, "Suppliers"),
+        safeFetch(query(collection(db, 'purchase_orders'), where('enterprise_id', '==', enterpriseId), limit(300)), setPurchaseOrders, "Purchase Orders"),
+        safeFetch(query(collection(db, 'stocktakes'), where('enterprise_id', '==', enterpriseId), limit(100)), setStocktakes, "Stocktakes"),
+        safeFetch(query(collection(db, 'inventory_batches'), where('enterprise_id', '==', enterpriseId), limit(500)), setInventoryBatches, "Batches")
       ]);
 
-      setProducts(pSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setInventory(iSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setMovements(mSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => {
-        const dateA = a.date ? new Date(a.date).getTime() : 0;
-        const dateB = b.date ? new Date(b.date).getTime() : 0;
-        return dateB - dateA;
-      }));
-      setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setSuppliers(sSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setPurchaseOrders(poSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setStocktakes(stSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setInventoryBatches(btSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (error: any) {
-      console.error('Error fetching inventory:', error);
-      toast.error(`Logistics error: ${error?.message || 'Could not sync assets'}`);
+      console.error('Critical inventory fetch error:', error);
+      toast.error(`System error: ${error?.message || 'Could not sync assets'}`);
     } finally {
       setLoading(false);
     }
