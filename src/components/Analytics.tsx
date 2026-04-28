@@ -639,19 +639,14 @@ export default function Analytics() {
 
       {/* Simulation Engine Dialog */}
       <Dialog open={isSimulating} onOpenChange={(o) => !o && setIsSimulating(false)}>
-        <DialogContent showCloseButton={false} className="w-full sm:max-w-4xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-[2.5rem] border-none">
+        <DialogContent className="w-full sm:max-w-4xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-[2.5rem] border-none">
           <DialogHeader className="p-5 sm:p-8 bg-zinc-900 text-white flex-none relative">
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-amber-400 mb-1">
                 <Brain className="w-4 h-4 md:w-5 md:h-5" />
                 <span className="text-[9px] md:text-[10px] font-black uppercase tracking-[0.3em]">Predictive Growth Engine</span>
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <DialogTitle className="text-xl md:text-3xl font-black text-white font-display tracking-tight leading-tight">Growth Simulator</DialogTitle>
-                <Button variant="ghost" size="icon" onClick={() => setIsSimulating(false)} className="md:hidden text-white/50 hover:text-white">
-                  <XIcon className="w-5 h-5" />
-                </Button>
-              </div>
+              <DialogTitle className="text-xl md:text-3xl font-black text-white font-display tracking-tight leading-tight">Growth Simulator</DialogTitle>
               <DialogDescription className="text-zinc-500 font-medium text-[10px] md:text-sm">
                 Calibrate market variables to project enterprise trajectory.
               </DialogDescription>

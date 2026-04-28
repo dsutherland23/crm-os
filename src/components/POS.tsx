@@ -610,13 +610,22 @@ export default function POS() {
   }, [getProductStock]);
 
   const handleScanResult = useCallback((data: string, type: 'barcode' | 'qr') => {
-    const product = products.find(p => p.barcode === data || p.sku === data || p.id === data);
+    // Physical scanners often append \n or \r — strip them
+    const clean = data.trim().replace(/[\r\n]+$/, '');
+    if (!clean) return;
+    const lower = clean.toLowerCase();
+    const product = products.find(p =>
+      (p.barcode && p.barcode.toLowerCase() === lower) ||
+      (p.sku && p.sku.toLowerCase() === lower) ||
+      p.id === clean
+    );
     if (product) {
       addToCart(product);
-      toast.success(`Added ${product.name} to cart`);
+      toast.success(`✓ Added "${product.name}" to cart`);
       setIsScannerOpen(false);
     } else {
-      toast.error(`No product found for ${type}: ${data}`);
+      setSearchTerm(clean);
+      toast.error(`No product matched ${type === 'qr' ? 'QR' : 'barcode'}: ${clean}`);
     }
   }, [products, addToCart]);
 
@@ -1372,6 +1381,13 @@ Notes: ${closeRegisterNotes || 'None'}
         )}
       </AnimatePresence>
 
+      {/* ── Barcode / QR Scanner ───────────────────────────────────────── */}
+      <BarcodeScanner
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={handleScanResult}
+      />
+
       <Dialog open={isOpeningFloatOpen} onOpenChange={(open) => {
         if (!open) { setIsOpeningFloatOpen(false); setIsAuthorized(false); setSelectedAdmin(null); setPinEntry(""); }
       }}>
@@ -1510,129 +1526,107 @@ Notes: ${closeRegisterNotes || 'None'}
           {/* FIX: POS-specific offline banner — warns cashier not to close tab while offline */}
           <NetworkIndicator isPOS />
           <div className="flex-1 flex flex-col min-w-0 h-full">
-            <div className="p-6 lg:p-8 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-blue-600 mb-1">
-                    <History className="w-4 h-4" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">Branch: {(activeBranch || 'all').toUpperCase()}</span>
-                    {selectedAdmin?.name && (
-                      <>
-                        <span className="text-zinc-300 mx-1">•</span>
-                        <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Operator: {selectedAdmin.name}</span>
-                      </>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-3">
-                      <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-zinc-900 font-display whitespace-nowrap">Terminal</h1>
-                      {isCartCollapsed && (
-                        <Button onClick={() => setIsCartCollapsed(false)} variant="outline" className="hidden md:flex items-center gap-2 rounded-xl h-10 border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all animate-in fade-in slide-in-from-left-2">
-                          <ShoppingCart className="w-4 h-4" />
-                          <span className="text-[10px] font-black uppercase tracking-widest">Show Order ({cart.length})</span>
-                        </Button>
-                      )}
-                      <Button 
-                        onClick={() => setIsCartOpenOnMobile(true)} 
-                        className="md:hidden flex items-center gap-2 rounded-xl h-10 bg-blue-600 text-white shadow-lg shadow-blue-600/20 active:scale-95 transition-all"
-                      >
-                        <ShoppingCart className="w-4 h-4" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">Cart ({cart.length})</span>
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className={cn("flex items-center rounded-xl border p-1 transition-all", isReturnMode ? "bg-rose-50 border-rose-200" : "bg-zinc-100 border-zinc-200")}>
-                        <Button variant="ghost" size="sm" onClick={() => setIsReturnMode(false)} className={cn("rounded-lg h-8 px-4 text-[10px] font-black uppercase tracking-widest transition-all", !isReturnMode ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}>Sale</Button>
-                        <Button variant="ghost" size="sm" onClick={() => setIsReturnMode(true)} className={cn("rounded-lg h-8 px-4 text-[10px] font-black uppercase tracking-widest transition-all", isReturnMode ? "bg-rose-500 text-white shadow-lg shadow-rose-200" : "text-zinc-500 hover:text-zinc-700")}>Return</Button>
-                      </div>
-                      {isReturnMode && (
-                        <div className="flex items-center gap-2 bg-rose-50/50 border border-rose-100 px-3 py-1.5 rounded-xl animate-in zoom-in-95 duration-200">
-                          <span className="text-[10px] font-bold text-rose-600 uppercase tracking-tighter">Restock?</span>
-                          <Switch checked={restockOnReturn} onCheckedChange={setRestockOnReturn} className="data-[state=checked]:bg-rose-500 scale-75" />
-                        </div>
-                      )}
-                    </div>
-                    {posSession?.sessionId && (
-                      <div className="flex items-center gap-3">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger render={<button className={cn("outline-none rounded-xl h-11 px-4 border border-zinc-200 bg-white hover:bg-zinc-50 shadow-sm transition-all flex items-center gap-3 cursor-pointer select-none", (currentSessionData?.status === 'ON_BREAK') && "border-amber-200 bg-amber-50/30 text-amber-600", (currentSessionData?.status === 'ON_LUNCH') && "border-orange-200 bg-orange-50/30 text-orange-600", (currentSessionData?.status === 'IN_MEETING') && "border-indigo-200 bg-indigo-50/30 text-indigo-600")}>
-                              <div className="flex items-center gap-2">
-                                 {(() => {
-                                   const s = currentSessionData?.status || 'ACTIVE';
-                                   if (s === 'ON_BREAK') return <Coffee className="w-4 h-4" />;
-                                   if (s === 'ON_LUNCH') return <Utensils className="w-4 h-4" />;
-                                   if (s === 'IN_MEETING') return <Users className="w-4 h-4" />;
-                                   return <Play className="w-4 h-4 text-emerald-500" />;
-                                 })()}
-                                 <span className="text-xs font-black uppercase tracking-widest">{currentSessionData?.status?.replace('ON_', '').replace('IN_', '') || 'On Duty'}</span>
-                              </div>
-                              <ChevronRight className="w-4 h-4 rotate-90 text-zinc-400" />
-                          </button>}/>
-                          <DropdownMenuContent className="w-64 rounded-2xl p-1 shadow-2xl border-none bg-white/95 backdrop-blur-xl" align="end">
-                            <DropdownMenuGroup>
-                              <DropdownMenuLabel className="px-3 py-3 border-b border-zinc-100 mb-1">
-                                <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Shift Summary</p>
-                                <div className="space-y-2">
-                                   <div className="flex items-center justify-between text-[10px] font-bold">
-                                     <span className="text-zinc-500 uppercase tracking-tighter">Shift Started</span>
-                                     <span className="text-zinc-900 font-black">{new Date(currentSessionData?.startTime || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                   </div>
-                                   <div className="flex items-center justify-between text-[10px] font-bold border-t border-zinc-50 pt-2">
-                                     <span className="text-zinc-500 uppercase tracking-tighter">Opening Float</span>
-                                     <span className="text-blue-600 font-black">{formatCurrency(currentSessionData?.openingFloat || 0)}</span>
-                                   </div>
-                                </div>
-                              </DropdownMenuLabel>
-                            </DropdownMenuGroup>
-                            <DropdownMenuGroup>
-                              <DropdownMenuLabel className="text-[10px] font-black uppercase tracking-widest text-zinc-400 px-3 py-2">Duty Controls</DropdownMenuLabel>
-                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-emerald-50 cursor-pointer group" onClick={() => handleTimeClock('ACTIVE')}>
-                                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Play className="w-4 h-4 text-emerald-600" /></div>
-                                <span className="font-bold text-zinc-700 text-sm">Resume Duty</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-amber-50 cursor-pointer group" onClick={() => handleTimeClock('ON_BREAK')}>
-                                <div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Coffee className="w-4 h-4 text-amber-600" /></div>
-                                <span className="font-bold text-zinc-700 text-sm">On Break</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-orange-50 cursor-pointer group" onClick={() => handleTimeClock('ON_LUNCH')}>
-                                <div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Utensils className="w-4 h-4 text-orange-600" /></div>
-                                <span className="font-bold text-zinc-700 text-sm">On Lunch</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-indigo-50 cursor-pointer group" onClick={() => handleTimeClock('IN_MEETING')}>
-                                <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Users className="w-4 h-4 text-indigo-600" /></div>
-                                <span className="font-bold text-zinc-700 text-sm">In Meeting</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => handleTimeClock('LOCKED')}>
-                                <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Lock className="w-4 h-4 text-zinc-600" /></div>
-                                <span className="font-bold text-zinc-700 text-sm">Lock Terminal</span>
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => setIsShiftHistoryOpen(true)}>
-                                <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><History className="w-4 h-4 text-zinc-600" /></div>
-                                <span className="font-bold text-zinc-700 text-sm">Shift Records</span>
-                              </DropdownMenuItem>
-                            </DropdownMenuGroup>
-                            <DropdownMenuGroup>
-                              <DropdownMenuSeparator className="bg-zinc-100" />
-                              <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-rose-50 cursor-pointer group" onClick={() => setIsClosePromptOpen(true)}>
-                                <div className="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><History className="w-4 h-4 text-rose-600" /></div>
-                                <span className="font-bold text-rose-700 text-sm">End Shift</span>
-                              </DropdownMenuItem>
-                            </DropdownMenuGroup>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs lg:text-sm text-zinc-500">Quick-access product catalog and barcode scanner.</p>
+            <div className="p-4 sm:p-6 lg:p-8 space-y-3 overflow-hidden">
+              {/* Breadcrumb */}
+              <div className="flex items-center gap-2 text-blue-600 mb-1">
+                <History className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest truncate">
+                  Branch: {(activeBranch || 'all').toUpperCase()}
+                  {selectedAdmin?.name && <> · <span className="text-zinc-400">{selectedAdmin.name}</span></>}
+                </span>
+              </div>
+
+              {/* Title row + mobile-only cart/status */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-zinc-900 font-display whitespace-nowrap">Terminal</h1>
+                  {isCartCollapsed && (
+                    <Button onClick={() => setIsCartCollapsed(false)} variant="outline" className="hidden md:flex items-center gap-2 rounded-xl h-9 border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-all animate-in fade-in">
+                      <ShoppingCart className="w-4 h-4" />
+                      <span className="text-[10px] font-black uppercase tracking-widest">Order ({cart.length})</span>
+                    </Button>
+                  )}
                 </div>
-                <div className="relative w-full md:w-96 group flex gap-2">
-                  <div className="relative flex-1">
-                    <Scan className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-500 transition-colors" />
-                    <Input placeholder="Scan or search..." className="pl-10 rounded-xl border-zinc-200 bg-white shadow-sm focus:ring-2 focus:ring-blue-500/20 transition-all h-11 text-xs" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleBarcodeScan} />
-                  </div>
-                  <Button variant="outline" className="h-11 px-4 rounded-xl border-zinc-200 bg-white shadow-sm hover:bg-zinc-50" onClick={() => setIsScannerOpen(true)}><ScanLine className="w-4 h-4" /></Button>
+                <div className="flex items-center gap-2 md:hidden shrink-0">
+                  <Button onClick={() => setIsCartOpenOnMobile(true)} className="flex items-center gap-1.5 rounded-xl h-9 px-3 bg-blue-600 text-white shadow-lg shadow-blue-600/20 active:scale-95">
+                    <ShoppingCart className="w-4 h-4" />
+                    <span className="text-[10px] font-black">{cart.length}</span>
+                  </Button>
+                  {posSession?.sessionId && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={<button className="outline-none rounded-xl h-9 w-9 border border-zinc-200 bg-white hover:bg-zinc-50 flex items-center justify-center">
+                        {(() => { const s = currentSessionData?.status || 'ACTIVE'; if (s === 'ON_BREAK') return <Coffee className="w-4 h-4 text-amber-500" />; if (s === 'ON_LUNCH') return <Utensils className="w-4 h-4 text-orange-500" />; if (s === 'IN_MEETING') return <Users className="w-4 h-4 text-indigo-500" />; return <Play className="w-4 h-4 text-emerald-500" />; })()}
+                      </button>}/>
+                      <DropdownMenuContent className="w-52 rounded-2xl p-1 shadow-2xl" align="end">
+                        <DropdownMenuItem className="rounded-xl h-11 px-3 cursor-pointer" onClick={() => handleTimeClock('ACTIVE')}><Play className="w-4 h-4 mr-2 text-emerald-500" /><span className="font-bold text-sm">Resume Duty</span></DropdownMenuItem>
+                        <DropdownMenuItem className="rounded-xl h-11 px-3 cursor-pointer" onClick={() => handleTimeClock('ON_BREAK')}><Coffee className="w-4 h-4 mr-2 text-amber-500" /><span className="font-bold text-sm">On Break</span></DropdownMenuItem>
+                        <DropdownMenuItem className="rounded-xl h-11 px-3 cursor-pointer" onClick={() => handleTimeClock('ON_LUNCH')}><Utensils className="w-4 h-4 mr-2 text-orange-500" /><span className="font-bold text-sm">On Lunch</span></DropdownMenuItem>
+                        <DropdownMenuItem className="rounded-xl h-11 px-3 cursor-pointer" onClick={() => handleTimeClock('IN_MEETING')}><Users className="w-4 h-4 mr-2 text-indigo-500" /><span className="font-bold text-sm">In Meeting</span></DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem className="rounded-xl h-11 px-3 cursor-pointer" onClick={() => setIsClosePromptOpen(true)}><History className="w-4 h-4 mr-2 text-rose-500" /><span className="font-bold text-sm text-rose-600">End Shift</span></DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </div>
+
+              {/* Controls — Sale/Return toggle + desktop status dropdown — wraps on mobile */}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className={cn("flex items-center rounded-xl border p-1 transition-all shrink-0", isReturnMode ? "bg-rose-50 border-rose-200" : "bg-zinc-100 border-zinc-200")}>
+                  <Button variant="ghost" size="sm" onClick={() => setIsReturnMode(false)} className={cn("rounded-lg h-8 px-3 text-[10px] font-black uppercase tracking-widest transition-all", !isReturnMode ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}>Sale</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setIsReturnMode(true)} className={cn("rounded-lg h-8 px-3 text-[10px] font-black uppercase tracking-widest transition-all", isReturnMode ? "bg-rose-500 text-white shadow-lg shadow-rose-200" : "text-zinc-500 hover:text-zinc-700")}>Return</Button>
+                </div>
+                {isReturnMode && (
+                  <div className="flex items-center gap-2 bg-rose-50/50 border border-rose-100 px-3 py-1.5 rounded-xl shrink-0">
+                    <span className="text-[10px] font-bold text-rose-600 uppercase tracking-tighter">Restock?</span>
+                    <Switch checked={restockOnReturn} onCheckedChange={setRestockOnReturn} className="data-[state=checked]:bg-rose-500 scale-75" />
+                  </div>
+                )}
+                {posSession?.sessionId && (
+                  <div className="hidden md:flex">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger render={<button className={cn("outline-none rounded-xl h-10 px-4 border border-zinc-200 bg-white hover:bg-zinc-50 shadow-sm transition-all flex items-center gap-3 cursor-pointer select-none", (currentSessionData?.status === 'ON_BREAK') && "border-amber-200 bg-amber-50/30 text-amber-600", (currentSessionData?.status === 'ON_LUNCH') && "border-orange-200 bg-orange-50/30 text-orange-600", (currentSessionData?.status === 'IN_MEETING') && "border-indigo-200 bg-indigo-50/30 text-indigo-600")}>
+                          {(() => { const s = currentSessionData?.status || 'ACTIVE'; if (s === 'ON_BREAK') return <Coffee className="w-4 h-4" />; if (s === 'ON_LUNCH') return <Utensils className="w-4 h-4" />; if (s === 'IN_MEETING') return <Users className="w-4 h-4" />; return <Play className="w-4 h-4 text-emerald-500" />; })()}
+                          <span className="text-xs font-black uppercase tracking-widest">{currentSessionData?.status?.replace('ON_', '').replace('IN_', '') || 'On Duty'}</span>
+                          <ChevronRight className="w-4 h-4 rotate-90 text-zinc-400" />
+                      </button>}/>
+                      <DropdownMenuContent className="w-64 rounded-2xl p-1 shadow-2xl border-none bg-white/95 backdrop-blur-xl" align="end">
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="px-3 py-3 border-b border-zinc-100 mb-1">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-2">Shift Summary</p>
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-[10px] font-bold"><span className="text-zinc-500 uppercase tracking-tighter">Shift Started</span><span className="text-zinc-900 font-black">{new Date(currentSessionData?.startTime || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+                              <div className="flex items-center justify-between text-[10px] font-bold border-t border-zinc-50 pt-2"><span className="text-zinc-500 uppercase tracking-tighter">Opening Float</span><span className="text-blue-600 font-black">{formatCurrency(currentSessionData?.openingFloat || 0)}</span></div>
+                            </div>
+                          </DropdownMenuLabel>
+                        </DropdownMenuGroup>
+                        <DropdownMenuGroup>
+                          <DropdownMenuLabel className="text-[10px] font-black uppercase tracking-widest text-zinc-400 px-3 py-2">Duty Controls</DropdownMenuLabel>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-emerald-50 cursor-pointer group" onClick={() => handleTimeClock('ACTIVE')}><div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Play className="w-4 h-4 text-emerald-600" /></div><span className="font-bold text-zinc-700 text-sm">Resume Duty</span></DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-amber-50 cursor-pointer group" onClick={() => handleTimeClock('ON_BREAK')}><div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Coffee className="w-4 h-4 text-amber-600" /></div><span className="font-bold text-zinc-700 text-sm">On Break</span></DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-orange-50 cursor-pointer group" onClick={() => handleTimeClock('ON_LUNCH')}><div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Utensils className="w-4 h-4 text-orange-600" /></div><span className="font-bold text-zinc-700 text-sm">On Lunch</span></DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => handleTimeClock('LOCKED')}><div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Lock className="w-4 h-4 text-zinc-600" /></div><span className="font-bold text-zinc-700 text-sm">Lock Terminal</span></DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => setIsShiftHistoryOpen(true)}><div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><History className="w-4 h-4 text-zinc-600" /></div><span className="font-bold text-zinc-700 text-sm">Shift Records</span></DropdownMenuItem>
+                        </DropdownMenuGroup>
+                        <DropdownMenuGroup>
+                          <DropdownMenuSeparator className="bg-zinc-100" />
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-rose-50 cursor-pointer group" onClick={() => setIsClosePromptOpen(true)}><div className="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><History className="w-4 h-4 text-rose-600" /></div><span className="font-bold text-rose-700 text-sm">End Shift</span></DropdownMenuItem>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
+              </div>
+
+              {/* Search bar — always full width */}
+              <div className="relative w-full flex gap-2">
+                <div className="relative flex-1">
+                  <Scan className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                  <Input placeholder="Scan or search..." className="pl-10 rounded-xl border-zinc-200 bg-white shadow-sm h-10 text-xs w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleBarcodeScan} />
+                </div>
+                <Button variant="outline" className="h-10 px-3 rounded-xl border-zinc-200 bg-white shadow-sm hover:bg-zinc-50 shrink-0" onClick={() => setIsScannerOpen(true)}><ScanLine className="w-4 h-4" /></Button>
+              </div>
+
 
               <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
                 {["All Items", "General", ...Array.from(new Set(products.map(p => p.category).filter(c => c && c !== "General")))].map((cat) => (
@@ -2143,29 +2137,33 @@ Date: ${lastTransaction?.date}
       </Dialog>
 
        <Dialog open={isClosePromptOpen} onOpenChange={setIsClosePromptOpen}>
-         <DialogContent className="sm:max-w-2xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden max-h-[90vh]">
-           <div className="p-8 pb-4 border-b border-zinc-100 bg-zinc-50/50">
+         <DialogContent className="w-full max-w-full sm:max-w-2xl rounded-none sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden max-h-[100dvh] sm:max-h-[90vh] flex flex-col">
+           <div className="p-5 sm:p-8 pb-4 border-b border-zinc-100 bg-zinc-50/50 flex-none">
              <DialogHeader>
-               <div className="flex items-center justify-between">
-                 <div className="flex items-center gap-4">
-                   <div className="w-12 h-12 bg-zinc-900 rounded-2xl flex items-center justify-center text-white shadow-xl">
-                     <Lock className="w-6 h-6" />
+               <div className="flex flex-col gap-3">
+                 <div className="flex items-center justify-between">
+                   <div className="flex items-center gap-3">
+                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-zinc-900 rounded-2xl flex items-center justify-center text-white shadow-xl shrink-0">
+                       <Lock className="w-5 h-5 sm:w-6 sm:h-6" />
+                     </div>
+                     <div>
+                       <DialogTitle className="text-lg sm:text-2xl font-black text-zinc-900 tracking-tight">Shift Settlement</DialogTitle>
+                       <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[9px] sm:text-[10px]">End of Day Audit & Registry Closure</DialogDescription>
+                     </div>
                    </div>
-                   <div>
-                     <DialogTitle className="text-2xl font-black text-zinc-900 tracking-tight">Shift Settlement</DialogTitle>
-                     <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">End of Day Audit & Registry Closure</DialogDescription>
-                   </div>
+                   {/* X close is auto-injected by DialogContent */}
                  </div>
+                 {/* Action buttons always visible, wrap on mobile */}
                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" className="rounded-xl border-zinc-200 h-9 font-bold text-[10px] uppercase tracking-wider" onClick={() => window.print()}><Printer className="w-3.5 h-3.5 mr-2" />Print Z-Report</Button>
-                    <Button variant="outline" size="sm" className="rounded-xl border-zinc-200 h-9 font-bold text-[10px] uppercase tracking-wider" onClick={handleShareZReport}><Share2 className="w-3.5 h-3.5 mr-2" />Share</Button>
+                   <Button variant="outline" size="sm" className="flex-1 sm:flex-none rounded-xl border-zinc-200 h-9 font-bold text-[10px] uppercase tracking-wider" onClick={() => window.print()}><Printer className="w-3.5 h-3.5 mr-1.5" /><span className="hidden xs:inline">Print </span>Z-Report</Button>
+                   <Button variant="outline" size="sm" className="flex-1 sm:flex-none rounded-xl border-zinc-200 h-9 font-bold text-[10px] uppercase tracking-wider" onClick={handleShareZReport}><Share2 className="w-3.5 h-3.5 mr-1.5" />Share</Button>
                  </div>
                </div>
              </DialogHeader>
            </div>
 
-           <ScrollArea className="max-h-[60vh]">
-             <div className="p-8 space-y-8">
+           <ScrollArea className="flex-1 min-h-0">
+             <div className="p-5 sm:p-8 space-y-6 sm:space-y-8">
                {/* Print Only Z-Report (Hidden in UI) */}
                <POSZReport 
                  branding={branding}
@@ -2184,18 +2182,18 @@ Date: ${lastTransaction?.date}
                  formatCurrency={formatCurrency}
                />
                {/* Sales Breakdown */}
-               <div className="grid grid-cols-3 gap-4">
+               <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-3">
                  <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-100 space-y-1">
                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Gross Sales</p>
-                   <p className="text-xl font-black text-zinc-900">{formatCurrency(sessionStats.sales)}</p>
+                   <p className="text-base sm:text-xl font-black text-zinc-900">{formatCurrency(sessionStats.sales)}</p>
                  </div>
                  <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-100 space-y-1">
                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Total Tax</p>
-                   <p className="text-xl font-black text-zinc-900">{formatCurrency(sessionStats.tax)}</p>
+                   <p className="text-base sm:text-xl font-black text-zinc-900">{formatCurrency(sessionStats.tax)}</p>
                  </div>
                  <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-100 space-y-1">
                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Discounts</p>
-                   <p className="text-xl font-black text-rose-600">{formatCurrency(sessionStats.discounts)}</p>
+                   <p className="text-base sm:text-xl font-black text-rose-600">{formatCurrency(sessionStats.discounts)}</p>
                  </div>
                </div>
 
@@ -2203,23 +2201,23 @@ Date: ${lastTransaction?.date}
                <div className="p-6 rounded-3xl bg-zinc-900 text-white space-y-6 shadow-2xl relative overflow-hidden group">
                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent opacity-50" />
                  
-                 <div className="relative z-10 flex justify-between items-center">
+                 <div className="relative z-10 flex flex-col sm:flex-row sm:items-center gap-3 justify-between">
                    <div className="space-y-1">
                      <p className="text-[10px] font-black uppercase tracking-widest text-zinc-400">Expected Registry Total</p>
-                     <p className="text-3xl font-black text-white">{formatCurrency(sessionExpectedCash)}</p>
+                     <p className="text-2xl sm:text-3xl font-black text-white">{formatCurrency(sessionExpectedCash)}</p>
                    </div>
-                   <div className="flex bg-white/10 p-1 rounded-xl gap-1">
+                   <div className="flex bg-white/10 p-1 rounded-xl gap-1 self-start sm:self-auto">
                      <button 
-                       className={cn("px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", !isCountingBillsClose ? "bg-white text-zinc-900" : "text-zinc-400 hover:text-white")}
+                       className={cn("px-3 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", !isCountingBillsClose ? "bg-white text-zinc-900" : "text-zinc-400 hover:text-white")}
                        onClick={() => setIsCountingBillsClose(false)}
                      >
                        Simple
                      </button>
                      <button 
-                       className={cn("px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", isCountingBillsClose ? "bg-white text-zinc-900" : "text-zinc-400 hover:text-white")}
+                       className={cn("px-3 sm:px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all", isCountingBillsClose ? "bg-white text-zinc-900" : "text-zinc-400 hover:text-white")}
                        onClick={() => setIsCountingBillsClose(true)}
                      >
-                       Denominated
+                       Denom.
                      </button>
                    </div>
                  </div>
@@ -2275,11 +2273,11 @@ Date: ${lastTransaction?.date}
                         : "bg-rose-500/20 border-rose-500/50 text-rose-400"
                     )}
                    >
-                     <div className="flex items-center gap-3">
-                       <div className={cn("w-3 h-3 rounded-full animate-pulse", Math.abs(parseFloat(countedCash) - sessionExpectedCash) < 1 ? "bg-emerald-400" : "bg-rose-400")} />
-                       <span className="text-[10px] uppercase tracking-widest">Audit Variance:</span>
+                     <div className="flex items-center gap-2">
+                       <div className={cn("w-2.5 h-2.5 rounded-full animate-pulse shrink-0", Math.abs(parseFloat(countedCash) - sessionExpectedCash) < 1 ? "bg-emerald-400" : "bg-rose-400")} />
+                       <span className="text-[9px] sm:text-[10px] uppercase tracking-widest">Audit Variance:</span>
                      </div>
-                     <span className="text-2xl">{formatCurrency(parseFloat(countedCash) - sessionExpectedCash)}</span>
+                     <span className="text-lg sm:text-2xl font-black">{formatCurrency(parseFloat(countedCash) - sessionExpectedCash)}</span>
                    </motion.div>
                  )}
                </div>
@@ -2306,20 +2304,20 @@ Date: ${lastTransaction?.date}
                    />
                  </div>
 
-                 <div className="p-6 rounded-3xl border-2 border-dashed border-zinc-200 flex items-center justify-between group hover:border-blue-500/50 transition-all">
-                   <div className="flex items-center gap-4">
-                     <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center transition-all", isStockSynced ? "bg-emerald-100 text-emerald-600" : "bg-blue-50 text-blue-600")}>
-                       {isStockSynced ? <CheckCircle2 className="w-6 h-6" /> : <RefreshCw className={cn("w-6 h-6", !isStockSynced && "animate-spin-slow")} />}
+                 <div className="p-4 sm:p-6 rounded-3xl border-2 border-dashed border-zinc-200 flex flex-col xs:flex-row xs:items-center gap-4 justify-between group hover:border-blue-500/50 transition-all">
+                   <div className="flex items-center gap-3">
+                     <div className={cn("w-10 h-10 sm:w-12 sm:h-12 rounded-2xl flex items-center justify-center transition-all shrink-0", isStockSynced ? "bg-emerald-100 text-emerald-600" : "bg-blue-50 text-blue-600")}>
+                       {isStockSynced ? <CheckCircle2 className="w-5 h-5" /> : <RefreshCw className={cn("w-5 h-5", !isStockSynced && "animate-spin-slow")} />}
                      </div>
                      <div>
                        <p className="text-sm font-black text-zinc-900">Inventory Reconciliation</p>
-                       <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{isStockSynced ? "Global ledger synchronized" : "Click to sync terminal movements"}</p>
+                       <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{isStockSynced ? "Ledger synchronized" : "Tap to sync terminal movements"}</p>
                      </div>
                    </div>
                    {!isStockSynced && (
                      <Button 
                        variant="outline" 
-                       className="rounded-xl border-blue-200 text-blue-600 font-black text-[10px] uppercase tracking-widest hover:bg-blue-50"
+                       className="w-full xs:w-auto rounded-xl border-blue-200 text-blue-600 font-black text-[10px] uppercase tracking-widest hover:bg-blue-50"
                        onClick={() => {
                          const t = toast.loading("Synchronizing ledger...");
                          setTimeout(() => {
@@ -2336,17 +2334,17 @@ Date: ${lastTransaction?.date}
              </div>
            </ScrollArea>
 
-           <div className="p-8 bg-zinc-50 border-t border-zinc-100 flex gap-4">
+           <div className="p-4 sm:p-8 bg-zinc-50 border-t border-zinc-100 flex flex-col xs:flex-row gap-3 flex-none">
              <Button 
                variant="ghost" 
-               className="flex-1 h-14 rounded-2xl font-bold text-zinc-500 hover:bg-white"
+               className="xs:flex-1 h-12 sm:h-14 rounded-2xl font-bold text-zinc-500 hover:bg-white order-2 xs:order-1"
                onClick={() => setIsClosePromptOpen(false)}
              >
-               Cancel Settlement
+               Cancel
              </Button>
              <Button 
                className={cn(
-                 "flex-[2] h-14 rounded-2xl font-black text-lg shadow-2xl transition-all active:scale-95",
+                 "xs:flex-[2] h-12 sm:h-14 rounded-2xl font-black text-sm sm:text-base shadow-2xl transition-all active:scale-95 order-1 xs:order-2",
                  (!isStockSynced || (countedCash.trim() !== "" && Math.abs(parseFloat(countedCash) - sessionExpectedCash) >= 1 && !closeRegisterNotes.trim()))
                    ? "bg-zinc-200 text-zinc-400 cursor-not-allowed"
                    : "bg-zinc-900 text-white hover:bg-zinc-800 shadow-zinc-900/20"

@@ -1181,8 +1181,8 @@ export default function CRM() {
 
   const AddCustomerDialog = (
     <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
-      <DialogContent showCloseButton={false} className="w-full sm:max-w-4xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-3xl border-none">
-        <DialogHeader className="px-6 py-4 sm:px-8 sm:py-6 border-b border-zinc-100 flex flex-row items-center justify-between sticky top-0 bg-white z-10 w-full relative flex-none">
+      <DialogContent className="w-full sm:max-w-4xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-3xl border-none">
+        <DialogHeader className="px-6 py-4 sm:px-8 sm:py-6 border-b border-zinc-100 flex flex-row items-center sticky top-0 bg-white z-10 w-full relative flex-none">
           <div className="flex items-center gap-3">
             <UserPlus className="w-5 h-5 md:w-6 md:h-6 text-zinc-900" />
             <div>
@@ -1190,9 +1190,6 @@ export default function CRM() {
               <DialogDescription className="text-[10px] md:text-sm hidden sm:block">Register a new client into the directory.</DialogDescription>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => setIsAddCustomerOpen(false)} className="rounded-full h-10 w-10 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100">
-            <XIcon className="w-5 h-5" />
-          </Button>
         </DialogHeader>
         <div className="flex-1 overflow-y-auto min-h-0 bg-zinc-50/10">
           <div className="p-6 sm:p-8 space-y-6 sm:space-y-8">
@@ -2579,8 +2576,8 @@ export default function CRM() {
 
           {/* Create Invoice Dialog */}
           <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
-            <DialogContent showCloseButton={false} className="p-0 border-none bg-zinc-50 rounded-[2.5rem] sm:rounded-3xl w-full sm:max-w-[500px] h-[100dvh] sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col shadow-2xl top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
-              <div className="bg-white px-6 py-4 border-b border-zinc-100 flex items-center justify-between flex-none">
+            <DialogContent className="p-0 border-none bg-zinc-50 rounded-[2.5rem] sm:rounded-3xl w-full sm:max-w-[500px] h-[100dvh] sm:h-auto sm:max-h-[85vh] overflow-hidden flex flex-col shadow-2xl top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
+              <div className="bg-white px-6 py-4 border-b border-zinc-100 flex items-center sticky top-0 z-10 w-full flex-none">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-emerald-50 rounded-xl">
                     <FileText className="w-5 h-5 text-emerald-600" />
@@ -2590,9 +2587,6 @@ export default function CRM() {
                     <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-1">{selectedCustomer.name}</p>
                   </div>
                 </div>
-                <Button variant="ghost" size="icon" onClick={() => setIsInvoiceDialogOpen(false)} className="rounded-full text-zinc-400 hover:text-zinc-900 hover:bg-zinc-100">
-                  <XIcon className="w-5 h-5" />
-                </Button>
               </div>
 
               <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 scrollbar-hide">

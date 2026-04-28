@@ -3068,22 +3068,17 @@ export default function Revenue() {
 
       {/* Create New Invoice Dialog */}
       <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
-          <DialogContent showCloseButton={false} className="sm:max-w-6xl w-full sm:w-[95vw] h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-hidden flex flex-col p-0 border-none bg-white rounded-none sm:rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
-            <DialogHeader className="p-4 sm:p-8 bg-zinc-900 text-white flex-none">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 text-blue-400 mb-0.5">
-                    <Receipt className="w-4 h-4 md:w-5 md:h-5" />
-                    <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em]">Billing & Revenue</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <DialogTitle className="text-lg md:text-3xl font-bold font-display tracking-tight text-white uppercase italic">Issue Invoice</DialogTitle>
-                    <Button variant="ghost" size="icon" onClick={() => setIsInvoiceDialogOpen(false)} className="md:hidden text-white/50 hover:text-white">
-                      <XIcon className="w-5 h-5" />
-                    </Button>
-                  </div>
-                  <DialogDescription className="text-zinc-500 text-[10px] md:text-sm hidden sm:block">Authorize professional tax documentation.</DialogDescription>
+        <DialogContent className="sm:max-w-6xl w-full sm:w-[95vw] h-[100dvh] sm:h-auto sm:max-h-[92vh] overflow-hidden flex flex-col p-0 border-none bg-white rounded-none sm:rounded-3xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)] top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2">
+          <DialogHeader className="p-4 sm:p-8 bg-zinc-900 text-white flex-none">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 md:gap-6">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-blue-400 mb-0.5">
+                  <Receipt className="w-4 h-4 md:w-5 md:h-5" />
+                  <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em]">Billing & Revenue</span>
                 </div>
+                <DialogTitle className="text-lg md:text-3xl font-bold font-display tracking-tight text-white uppercase italic">Issue Invoice</DialogTitle>
+                <DialogDescription className="text-zinc-500 text-[10px] md:text-sm hidden sm:block">Authorize professional tax documentation.</DialogDescription>
+              </div>
                 
                 <div className="flex items-center gap-2 md:gap-3">
                   <Button 

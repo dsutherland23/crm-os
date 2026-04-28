@@ -431,3 +431,19 @@
     transform: rotateX(-180deg);
   }
 }
+
+/* Barcode Scanner — scan line sweep animation */
+@keyframes scan-line {
+  0%   { top: 8px;   opacity: 1; }
+  48%  { top: calc(100% - 8px); opacity: 1; }
+  50%  { top: calc(100% - 8px); opacity: 0; }
+  52%  { top: 8px;   opacity: 0; }
+  54%  { top: 8px;   opacity: 1; }
+  100% { top: 8px;   opacity: 1; }
+}
+.animate-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  animation: scan-line 2s ease-in-out infinite;
+}

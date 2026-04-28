@@ -217,9 +217,8 @@ function GroupBuilderDialog({ open, onClose, editing }: BuilderProps) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent showCloseButton={false} className="w-full sm:max-w-3xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-[2.5rem] border-none">
-        <DialogHeader className="p-5 sm:p-8 bg-zinc-900 text-white flex-none">
-          <div className="flex items-center justify-between gap-4">
+        <DialogContent className="w-full sm:max-w-3xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-[2.5rem] border-none">
+          <DialogHeader className="p-5 sm:p-8 bg-zinc-900 text-white flex-none">
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-blue-400 mb-1">
                 <Users className="w-4 h-4" />
@@ -232,11 +231,7 @@ function GroupBuilderDialog({ open, onClose, editing }: BuilderProps) {
                 {editing ? "Update rules or metadata for this segment." : "Define rule-based segmentation or manual collections."}
               </DialogDescription>
             </div>
-            <Button variant="ghost" size="icon" onClick={onClose} className="text-white/50 hover:text-white">
-              <XIcon className="w-5 h-5" />
-            </Button>
-          </div>
-        </DialogHeader>
+          </DialogHeader>
 
         <div className="flex-1 overflow-y-auto">
           <div className="p-5 sm:p-8 space-y-6">
