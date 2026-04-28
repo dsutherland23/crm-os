@@ -174,6 +174,7 @@ export default function POS() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [paidAmount, setPaidAmount] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<any>(null);
@@ -836,6 +837,13 @@ export default function POS() {
     setIsProcessing(true);
     try {
       const resolvedBranch = activeBranch === "all" ? "main" : activeBranch;
+      const actualPaid = paymentMethod === "SPLIT" 
+        ? (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0)
+        : (parseFloat(paidAmount) || total);
+      
+      const balanceDue = Math.max(0, total - actualPaid);
+      const isPartial = balanceDue > 0.01;
+
       const txRef = await addDoc(collection(db, "transactions"), {
         items: cart.map(item => {
           const basePrice = item.product.retail_price || item.product.price || 0;
@@ -868,7 +876,9 @@ export default function POS() {
         tax_enabled: isTaxEnabled,
         tax,
         total,
-        status: "COMPLETED",
+        paid_amount: actualPaid,
+        balance_due: balanceDue,
+        status: isPartial ? "PARTIAL" : "COMPLETED",
         cashier_id: selectedAdmin?.id || null,
         cashier_name: selectedAdmin?.name || null,
         sessionId: currentSessionId || null,
@@ -966,6 +976,7 @@ export default function POS() {
         await updateDoc(doc(db, "customers", selectedCustomer.id), {
           spend: increment(isReturnMode ? -total : total),
           points: increment(pointAdjustment),
+          balance: increment(isReturnMode ? 0 : balanceDue), // Track debt in CRM
           last_purchase_date: serverTimestamp(),
           lastContact: new Date().toISOString()
         });
@@ -1876,11 +1887,40 @@ Notes: ${closeRegisterNotes || 'None'}
                 </div>
                 <div className="flex justify-between text-2xl font-black pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => setPaymentMethod("CARD")}><CreditCard className="w-4 h-4 mr-2" />Card</Button>
-                <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => setPaymentMethod("CASH")}><Banknote className="w-4 h-4 mr-2" />Cash</Button>
-                <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => setPaymentMethod("SPLIT")}><Split className="w-4 h-4 mr-2" />Split</Button>
+              <div className="grid grid-cols-4 gap-2">
+                <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CARD"); setPaidAmount(""); }}><CreditCard className="w-4 h-4 mr-2" />Card</Button>
+                <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CASH"); setPaidAmount(""); }}><Banknote className="w-4 h-4 mr-2" />Cash</Button>
+                <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => { setPaymentMethod("SPLIT"); setPaidAmount(""); }}><Split className="w-4 h-4 mr-2" />Split</Button>
+                <Button 
+                  variant={paymentMethod === "DEBT" ? "default" : "outline"} 
+                  className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "DEBT" && "bg-blue-600")} 
+                  disabled={!selectedCustomer}
+                  onClick={() => { setPaymentMethod("DEBT"); setPaidAmount("0"); }}
+                >
+                  <Clock className="w-4 h-4 mr-2" />Account
+                </Button>
               </div>
+
+              {paymentMethod !== "SPLIT" && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Amount Received</Label>
+                    {selectedCustomer && (parseFloat(paidAmount) < total) && (
+                      <Badge variant="outline" className="text-[9px] font-black text-blue-600 bg-blue-50 border-blue-100 uppercase">Adding to Balance</Badge>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
+                    <Input 
+                      type="number"
+                      placeholder={total.toFixed(2)}
+                      value={paidAmount}
+                      onChange={(e) => setPaidAmount(e.target.value)}
+                      className="h-12 pl-8 rounded-xl border-zinc-200 bg-white font-black text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
+                    />
+                  </div>
+                </div>
+              )}
               {paymentMethod === "CASH" && (
                 <div className="space-y-3">
                   <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Quick Tender</p>
@@ -1898,19 +1938,29 @@ Notes: ${closeRegisterNotes || 'None'}
                 </div>
               )}
               <Button 
-                className="w-full rounded-xl h-14 bg-blue-600 text-white hover:bg-blue-700 font-bold text-lg shadow-xl shadow-blue-600/20 disabled:opacity-50" 
+                className={cn(
+                  "w-full rounded-xl h-14 font-bold text-lg shadow-xl transition-all active:scale-95",
+                  (selectedCustomer && (parseFloat(paidAmount) || total) < total) 
+                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20" 
+                    : "bg-zinc-900 hover:bg-zinc-800 text-white shadow-zinc-900/20"
+                )} 
                 onClick={() => {
                   if (paymentMethod === "SPLIT") {
                     setSplitCashAmount("");
                     setSplitCardAmount("");
                     setIsSplitPaymentDialogOpen(true);
                   } else {
+                    const received = parseFloat(paidAmount) || total;
+                    if (!selectedCustomer && received < total) {
+                      toast.error("Partial payments require a linked customer account.");
+                      return;
+                    }
                     handleCompleteTransaction();
                   }
                 }} 
                 disabled={isProcessing || cart.length === 0}
               >
-                {isProcessing ? "Processing..." : "Complete Transaction"}
+                {isProcessing ? "Processing..." : (selectedCustomer && (parseFloat(paidAmount) || total) < total) ? "Charge Remainder to Account" : "Complete Transaction"}
               </Button>
             </div>
           </div>
