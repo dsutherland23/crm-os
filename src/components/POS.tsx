@@ -835,13 +835,19 @@ export default function POS() {
       return;
     }
     setIsProcessing(true);
-    try {
       const resolvedBranch = activeBranch === "all" ? "main" : activeBranch;
-      const actualPaid = paymentMethod === "SPLIT" 
-        ? (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0)
-        : (parseFloat(paidAmount) || total);
       
+      // MODERN CRM PAYMENT LOGIC
+      const tendered = paymentMethod === "SPLIT" 
+        ? (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0)
+        : (parseFloat(paidAmount) || (paymentMethod === "DEBT" ? 0 : total));
+      
+      // If they pay more than total (Cash Change), we only record payment up to the total.
+      // If they pay less than total, the remainder is debt.
+      const actualPaid = Math.min(total, tendered);
+      const changeDue = paymentMethod === "CASH" ? Math.max(0, tendered - total) : 0;
       const balanceDue = Math.max(0, total - actualPaid);
+      
       const isPartial = balanceDue > 0.01;
 
       const txRef = await addDoc(collection(db, "transactions"), {
@@ -876,7 +882,9 @@ export default function POS() {
         tax_enabled: isTaxEnabled,
         tax,
         total,
+        tendered_amount: tendered,
         paid_amount: actualPaid,
+        change_due: changeDue,
         balance_due: balanceDue,
         status: isPartial ? "PARTIAL" : "COMPLETED",
         cashier_id: selectedAdmin?.id || null,
@@ -891,11 +899,19 @@ export default function POS() {
 
       await recordFinancialEvent({
         enterpriseId,
-        amount: total,
+        amount: actualPaid, // Only record what we actually KEPT (total - change)
         sourceId: txRef.id,
         sourceType: isReturnMode ? "RETURN" : "POS_TRANSACTION",
-        description: `${isReturnMode ? 'RETURN' : 'POS Sale'} - ${cart.length} items`,
-        metadata: { cashier: selectedAdmin?.name || null, customer: selectedCustomer?.name || null, tax: tax, isRefund: isReturnMode }
+        description: `${isReturnMode ? 'RETURN' : 'POS Sale'} - ${cart.length} items (${paymentMethod})`,
+        metadata: { 
+          cashier: selectedAdmin?.name || null, 
+          customer: selectedCustomer?.name || null, 
+          tax: tax, 
+          isRefund: isReturnMode,
+          tendered: tendered,
+          change: changeDue,
+          debt: balanceDue
+        }
       });
 
       const evaluateReplenishment = async (productId: string, currentQty: number) => {
@@ -1030,7 +1046,9 @@ export default function POS() {
         discountAmount,
         subtotal,
         paymentMethod,
-        change: paymentMethod === "CASH" && smartCashTendered ? Math.max(0, smartCashTendered - total) : 0,
+        tendered: tendered,
+        change: changeDue,
+        balanceDue: balanceDue,
         customerName: selectedCustomer?.name || "Guest Customer",
         date: new Date().toLocaleString()
       });
@@ -1902,22 +1920,52 @@ Notes: ${closeRegisterNotes || 'None'}
               </div>
 
               {paymentMethod !== "SPLIT" && (
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Amount Received</Label>
-                    {selectedCustomer && (parseFloat(paidAmount) < total) && (
-                      <Badge variant="outline" className="text-[9px] font-black text-blue-600 bg-blue-50 border-blue-100 uppercase">Adding to Balance</Badge>
-                    )}
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Amount Tendered</Label>
+                      {selectedCustomer && (parseFloat(paidAmount) < total) && (
+                        <Badge variant="outline" className="text-[9px] font-black text-blue-600 bg-blue-50 border-blue-100 uppercase">Partial Payment</Badge>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
+                      <Input 
+                        type="number"
+                        placeholder={total.toFixed(2)}
+                        value={paidAmount}
+                        onChange={(e) => setPaidAmount(e.target.value)}
+                        className="h-12 pl-8 rounded-xl border-zinc-200 bg-white font-black text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
+                      />
+                    </div>
                   </div>
-                  <div className="relative">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
-                    <Input 
-                      type="number"
-                      placeholder={total.toFixed(2)}
-                      value={paidAmount}
-                      onChange={(e) => setPaidAmount(e.target.value)}
-                      className="h-12 pl-8 rounded-xl border-zinc-200 bg-white font-black text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
-                    />
+
+                  {/* MODERN RECONCILIATION SUMMARY */}
+                  <div className="bg-zinc-100/50 rounded-2xl p-4 space-y-2 border border-zinc-200/50">
+                    <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-500">
+                      <span>Payment Summary</span>
+                      <span>{paymentMethod}</span>
+                    </div>
+                    <div className="flex justify-between items-center py-1">
+                      <span className="text-xs text-zinc-600">Amount Tendered</span>
+                      <span className="text-xs font-bold text-zinc-900">{formatCurrency(parseFloat(paidAmount) || 0)}</span>
+                    </div>
+                    {parseFloat(paidAmount) > total && (
+                      <div className="flex justify-between items-center py-1 text-emerald-600">
+                        <span className="text-xs font-bold">Change to Customer</span>
+                        <span className="text-sm font-black">{formatCurrency(parseFloat(paidAmount) - total)}</span>
+                      </div>
+                    )}
+                    {selectedCustomer && parseFloat(paidAmount) < total && (
+                      <div className="flex justify-between items-center py-1 text-blue-600">
+                        <span className="text-xs font-bold">Charge to Account</span>
+                        <span className="text-sm font-black">{formatCurrency(total - (parseFloat(paidAmount) || 0))}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-center pt-2 border-t border-zinc-200">
+                      <span className="text-xs font-bold text-zinc-900">Total Applied</span>
+                      <span className="text-sm font-black text-zinc-900">{formatCurrency(Math.min(total, parseFloat(paidAmount) || total))}</span>
+                    </div>
                   </div>
                 </div>
               )}

@@ -19,6 +19,9 @@ interface POSReceiptProps {
     discountAmount?: number;
     total: number;
     paymentMethod: string;
+    tendered?: number;
+    change?: number;
+    balanceDue?: number;
   };
   formatCurrency: (amount: number) => string;
 }
@@ -97,10 +100,23 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
       <div className="border-b border-dashed border-black my-2" />
 
       {/* Payment */}
-      <div className="text-center space-y-1 mb-4">
-        <p className="uppercase">Paid via {order.paymentMethod}</p>
-        <p className="text-[10px]">Tendered: {formatCurrency(order.total)}</p>
-        <p className="text-[10px]">Change: {formatCurrency(order.change || 0)}</p>
+      <div className="text-left space-y-1 mb-4">
+        <div className="flex justify-between uppercase font-bold">
+          <span>PAID VIA {order.paymentMethod}:</span>
+          <span>{formatCurrency(order.tendered || order.total)}</span>
+        </div>
+        {order.change > 0 && (
+          <div className="flex justify-between text-[10px]">
+            <span>CHANGE GIVEN:</span>
+            <span>{formatCurrency(order.change)}</span>
+          </div>
+        )}
+        {order.balanceDue > 0 && (
+          <div className="flex justify-between text-rose-600 font-bold bg-rose-50 px-1 py-0.5">
+            <span>REMAINING DEBT:</span>
+            <span>{formatCurrency(order.balanceDue)}</span>
+          </div>
+        )}
       </div>
 
       <div className="border-b border-dashed border-black my-4" />
