@@ -35,7 +35,8 @@ import {
   Clock,
   Share2,
   PauseCircle,
-  RefreshCw
+  RefreshCw,
+  Star
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -167,12 +168,47 @@ export default function POS() {
     setHasActiveTransaction(cart.length > 0);
   }, [cart, setHasActiveTransaction]);
 
-  // Clean up on unmount just in case
-  useEffect(() => {
-    return () => setHasActiveTransaction(false);
-  }, [setHasActiveTransaction]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState("All Items");
+  const [loading, setLoading] = useState(true);
 
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 150);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  const productStockMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    products.forEach(p => {
+      if (activeBranch === "all") {
+        map[p.id] = inventory
+          .filter(i => i.product_id === p.id)
+          .reduce((acc, curr) => acc + (curr.quantity || 0), 0);
+      } else {
+        const item = inventory.find(i => i.product_id === p.id && i.branch_id === activeBranch);
+        map[p.id] = item ? (item.quantity || 0) : 0;
+      }
+    });
+    return map;
+  }, [products, inventory, activeBranch]);
+
+  const filteredProducts = useMemo(() => {
+    const term = debouncedSearch.toLowerCase();
+    return products.filter(p => {
+      const name = (p.name || "").toLowerCase();
+      const category = (p.category || "").toLowerCase();
+      const matchesSearch = !term || name.includes(term) || category.includes(term);
+      const matchesCategory = selectedCategory === "All Items" || (p.category || "General") === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, debouncedSearch, selectedCategory]);
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [paidAmount, setPaidAmount] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -189,13 +225,7 @@ export default function POS() {
   const [smartCashTendered, setSmartCashTendered] = useState<number | null>(null);
   const [numpadTarget, setNumpadTarget] = useState<string | null>(null); // product id for qty numpad
   const [numpadValue, setNumpadValue] = useState("");
-  const [products, setProducts] = useState<any[]>([]);
-  const [inventory, setInventory] = useState<any[]>([]);
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [isCartOpenOnMobile, setIsCartOpenOnMobile] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState("All Items");
   const [customerSearch, setCustomerSearch] = useState("");
 
   // Discount State
@@ -204,7 +234,6 @@ export default function POS() {
   const [discountContext, setDiscountContext] = useState<"Manual" | "Campaign">("Campaign");
   const [manualDiscount, setManualDiscount] = useState({ name: "Manual Discount", type: "Percentage", value: "", reason: "" });
   const [customerUsage, setCustomerUsage] = useState<any[]>([]);
-  const [branches, setBranches] = useState<any[]>([]);
   const [isReturnMode, setIsReturnMode] = useState(false);
   const [restockOnReturn, setRestockOnReturn] = useState(true);
 
@@ -835,6 +864,7 @@ export default function POS() {
       return;
     }
     setIsProcessing(true);
+    try {
       const resolvedBranch = activeBranch === "all" ? "main" : activeBranch;
       
       // MODERN CRM PAYMENT LOGIC
@@ -1076,6 +1106,8 @@ export default function POS() {
     setCartDiscount(null);
     setSelectedCustomer(null);
     setSmartCashTendered(null);
+    setPaidAmount("");
+    setPaymentMethod("CARD");
     setSearchTerm("");
     setSelectedCategory("All Items");
     if (cartKey) localStorage.removeItem(cartKey);
@@ -1688,15 +1720,8 @@ Notes: ${closeRegisterNotes || 'None'}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6">
-                    {products.filter(p => {
-                      const name = (p.name || "").toLowerCase();
-                      const category = (p.category || "").toLowerCase();
-                      const term = searchTerm.toLowerCase();
-                      const matchesSearch = !term || name.includes(term) || category.includes(term);
-                      const matchesCategory = selectedCategory === "All Items" || (p.category || "General") === selectedCategory;
-                      return matchesSearch && matchesCategory;
-                    }).map((product) => {
-                      const stock = getProductStock(product.id);
+                    {filteredProducts.map((product) => {
+                      const stock = productStockMap[product.id] || 0;
                       return (
                         <motion.div key={product.id} layout initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }}>
                           <Card className="card-modern group cursor-pointer overflow-hidden border-zinc-200 hover:border-blue-500/50 transition-all" onClick={() => addToCart(product)}>
@@ -1906,9 +1931,9 @@ Notes: ${closeRegisterNotes || 'None'}
                 <div className="flex justify-between text-2xl font-black pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
               </div>
               <div className="grid grid-cols-4 gap-2">
-                <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CARD"); setPaidAmount(""); }}><CreditCard className="w-4 h-4 mr-2" />Card</Button>
-                <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CASH"); setPaidAmount(""); }}><Banknote className="w-4 h-4 mr-2" />Cash</Button>
-                <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => { setPaymentMethod("SPLIT"); setPaidAmount(""); }}><Split className="w-4 h-4 mr-2" />Split</Button>
+                <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CARD"); }}><CreditCard className="w-4 h-4 mr-2" />Card</Button>
+                <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CASH"); }}><Banknote className="w-4 h-4 mr-2" />Cash</Button>
+                <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => { setPaymentMethod("SPLIT"); }}><Split className="w-4 h-4 mr-2" />Split</Button>
                 <Button 
                   variant={paymentMethod === "DEBT" ? "default" : "outline"} 
                   className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "DEBT" && "bg-blue-600")} 
@@ -2154,25 +2179,53 @@ Notes: ${closeRegisterNotes || 'None'}
             </motion.div>
             
             <div className="space-y-2">
-              <h2 className="text-3xl font-black text-zinc-900 tracking-tight">Payment Complete</h2>
-              <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Transaction linked to account #{lastTransaction?.id.substring(0,8).toUpperCase()}</p>
+              <h2 className={cn(
+                "text-3xl font-black tracking-tight",
+                lastTransaction?.balanceDue > 0.01 ? "text-blue-600" : "text-zinc-900"
+              )}>
+                {lastTransaction?.balanceDue > 0.01 ? "Partial Payment" : "Payment Complete"}
+              </h2>
+              <div className="flex flex-col items-center gap-1">
+                <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
+                  {lastTransaction?.balanceDue > 0.01 ? "Debt added to customer account" : "Transaction fully resolved"}
+                </p>
+                {selectedCustomer && (
+                  <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200 text-[9px] font-black uppercase">
+                    <Star className="w-2.5 h-2.5 mr-1 fill-amber-600" />
+                    +{Math.floor(lastTransaction?.total || 0)} Points Earned
+                  </Badge>
+                )}
+              </div>
             </div>
 
             <div className="w-full bg-zinc-50 rounded-3xl p-6 space-y-4 border border-zinc-100">
               <div className="flex justify-between items-center text-sm font-bold">
-                <span className="text-zinc-400">Total Paid</span>
-                <span className="text-2xl font-black text-zinc-900">{formatCurrency(lastTransaction?.total || 0)}</span>
+                <span className="text-zinc-400">Total Bill</span>
+                <span className="text-lg font-black text-zinc-900">{formatCurrency(lastTransaction?.total || 0)}</span>
               </div>
-              <div className="flex justify-between items-center text-sm font-bold">
-                <span className="text-zinc-400">Payment Method</span>
-                <span className="text-zinc-900">{lastTransaction?.paymentMethod}</span>
+              <div className="flex justify-between items-center text-sm font-bold pt-4 border-t border-zinc-100">
+                <span className="text-zinc-400">Amount Received</span>
+                <span className="text-xl font-black text-emerald-600">{formatCurrency(lastTransaction?.tendered || 0)}</span>
               </div>
-              {lastTransaction?.paymentMethod === "CASH" && smartCashTendered && (
-                <div className="flex justify-between items-center text-sm font-bold pt-4 border-t border-zinc-200">
-                  <span className="text-emerald-600">Change Due</span>
-                  <span className="text-xl font-black text-emerald-600">{formatCurrency(Math.max(0, smartCashTendered - (lastTransaction?.total || 0)))}</span>
+              
+              {lastTransaction?.change > 0 && (
+                <div className="flex justify-between items-center text-sm font-bold text-emerald-600">
+                  <span>Change Given</span>
+                  <span>{formatCurrency(lastTransaction?.change)}</span>
                 </div>
               )}
+
+              {lastTransaction?.balanceDue > 0.01 && (
+                <div className="flex justify-between items-center text-sm font-bold text-blue-600 bg-blue-50/50 p-3 rounded-xl border border-blue-100/50 mt-2">
+                  <span>Remaining Debt</span>
+                  <span className="text-lg font-black">{formatCurrency(lastTransaction?.balanceDue)}</span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-center text-[10px] font-black text-zinc-400 uppercase tracking-widest pt-2">
+                <span>Method</span>
+                <span>{lastTransaction?.paymentMethod}</span>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 w-full">
@@ -2193,7 +2246,10 @@ Notes: ${closeRegisterNotes || 'None'}
                   const text = `
 RECEIPT - ${branding.name}
 ID: #${lastTransaction?.id.substring(0,8).toUpperCase()}
-Total: ${formatCurrency(lastTransaction?.total || 0)}
+---------------------------
+Total Bill: ${formatCurrency(lastTransaction?.total || 0)}
+Paid Today: ${formatCurrency(lastTransaction?.tendered || 0)}
+${lastTransaction?.change > 0 ? `Change: ${formatCurrency(lastTransaction?.change)}\n` : ''}${lastTransaction?.balanceDue > 0 ? `REMAINING DEBT: ${formatCurrency(lastTransaction?.balanceDue)}\n` : ''}---------------------------
 Date: ${lastTransaction?.date}
                   `.trim();
                   

@@ -2085,9 +2085,16 @@ export default function CRM() {
                             {tx.timestamp?.toDate ? tx.timestamp.toDate().toLocaleDateString() : new Date(tx.timestamp || 0).toLocaleDateString()}
                           </TableCell>
                           <TableCell className="py-4">
-                            <Badge variant="outline" className="text-[10px] uppercase font-bold text-zinc-500 border-zinc-200">
-                              {tx.payment_method || tx.paymentMethod || "CASH"}
-                            </Badge>
+                            <div className="flex flex-col gap-1">
+                              <Badge variant="outline" className="text-[10px] uppercase font-bold text-zinc-500 border-zinc-200 w-fit">
+                                {tx.payment_method || tx.paymentMethod || "CASH"}
+                              </Badge>
+                              {tx.status === "PARTIAL" && (
+                                <Badge variant="outline" className="text-[8px] uppercase font-black bg-blue-50 text-blue-600 border-blue-100 w-fit">
+                                  Partial (${(tx.balance_due || 0).toFixed(2)} due)
+                                </Badge>
+                              )}
+                            </div>
                           </TableCell>
                           <TableCell className="text-right py-4">
                             <Button variant="ghost" size="sm" className="rounded-lg font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50">
