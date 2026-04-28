@@ -40,7 +40,9 @@ import {
   Download,
   Camera,
   Crown,
-  Share2
+  Share2,
+  Banknote,
+  ChevronDown
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -165,6 +167,14 @@ export default function CRM() {
   const [selectedTransaction, setSelectedTransaction] = useState<any>(null);
   const [isTransactionDialogOpen, setIsTransactionDialogOpen] = useState(false);
 
+  const [isCollectPaymentOpen, setIsCollectPaymentOpen] = useState(false);
+  const [collectionData, setCollectionData] = useState({
+    amount: "",
+    method: "CASH",
+    reference: ""
+  });
+  const [isSubmittingCollection, setIsSubmittingCollection] = useState(false);
+
   // New Management State
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
   const [isEditCustomerOpen, setIsEditCustomerOpen] = useState(false);
@@ -255,6 +265,88 @@ export default function CRM() {
     } catch (error: any) {
       console.error(error);
       toast.error(error.message === 'Sync Timeout' ? 'Cloud sync delayed - try again' : "Process failed: " + error.message, { id: tid });
+    }
+  };
+
+  const handleCollectPayment = async () => {
+    if (!selectedCustomer || !collectionData.amount || parseFloat(collectionData.amount) <= 0) {
+      toast.error("Please enter a valid amount");
+      return;
+    }
+
+    setIsSubmittingCollection(true);
+    const tid = toast.loading("Recording payment...");
+
+    try {
+      const amountPaid = parseFloat(collectionData.amount);
+      const newBalance = Math.max(0, (selectedCustomer.balance || 0) - amountPaid);
+
+      // 1. Update Customer Balance & Metrics
+      await updateDoc(doc(db, "customers", selectedCustomer.id), {
+        balance: newBalance,
+        total_paid: increment(amountPaid),
+        last_payment_date: serverTimestamp(),
+        last_payment_amount: amountPaid,
+        status: newBalance <= 0 ? "ACTIVE" : "OWING"
+      });
+
+      // 2. Create a Permanent Payment Transaction
+      const paymentTx = {
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.name,
+        enterprise_id: enterpriseId,
+        type: "PAYMENT",
+        payment_method: collectionData.method,
+        total: amountPaid,
+        amount_tendered: amountPaid,
+        amount_applied: amountPaid,
+        change_due: 0,
+        reference_number: collectionData.reference,
+        description: `Account Debt Settlement`,
+        timestamp: serverTimestamp(),
+        status: "COMPLETED",
+        branch_id: activeBranch,
+        staff_id: selectedAdmin?.id || "System",
+        staff_name: selectedAdmin?.name || "System"
+      };
+      await addDoc(collection(db, "transactions"), paymentTx);
+
+      // 3. Record Financial Event (for global ledger)
+      await recordFinancialEvent({
+        enterpriseId,
+        amount: amountPaid,
+        sourceId: selectedCustomer.id,
+        sourceType: "DEBT_COLLECTION",
+        description: `Debt Payment - ${selectedCustomer.name}`,
+        metadata: {
+          method: collectionData.method,
+          reference: collectionData.reference,
+          previous_balance: selectedCustomer.balance,
+          new_balance: newBalance
+        }
+      });
+
+      // 4. Log Audit
+      await addDoc(collection(db, "audit_logs"), {
+        action: "Payment Collected",
+        details: `Collected ${formatCurrency(amountPaid)} from ${selectedCustomer.name} via ${collectionData.method}. Remaining: ${formatCurrency(newBalance)}`,
+        enterprise_id: enterpriseId,
+        timestamp: serverTimestamp(),
+        user: selectedAdmin?.name || "System",
+        severity: "INFO"
+      });
+
+      toast.success("Payment recorded successfully", { id: tid });
+      setIsCollectPaymentOpen(false);
+      setCollectionData({ amount: "", method: "CASH", reference: "" });
+      
+      // Update local state for immediate UI feedback
+      setSelectedCustomer(prev => prev ? { ...prev, balance: newBalance } : null);
+    } catch (error) {
+      console.error("Collection error:", error);
+      toast.error("Failed to record payment", { id: tid });
+    } finally {
+      setIsSubmittingCollection(false);
     }
   };
 
@@ -624,8 +716,8 @@ export default function CRM() {
       const segment = selectedSegment.toUpperCase();
 
       if (segment === "ALL") matchesSegment = true;
+      else if (segment === "WITH BALANCE") matchesSegment = (c.balance || 0) > 0;
       else if (segment === "VIP") matchesSegment = c.segment === "VIP";
-      else if (segment === "PROSPECTS") matchesSegment = c.segment === "Prospects" || (Number(c.total_spent || c.spend || 0) === 0);
       else if (segment === "INACTIVE") {
         const lastContact = new Date(c.lastContact || 0);
         const diffDays = Math.floor((Date.now() - lastContact.getTime()) / 86400000);
@@ -1180,6 +1272,82 @@ export default function CRM() {
     );
   }
 
+  const CollectPaymentDialog = (
+    <Dialog open={isCollectPaymentOpen} onOpenChange={setIsCollectPaymentOpen}>
+      <DialogContent className="sm:max-w-md rounded-[2.5rem] p-8 border-none shadow-2xl bg-white overflow-hidden">
+        <DialogHeader>
+          <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-600 mb-4 shadow-inner">
+            <Banknote className="w-6 h-6" />
+          </div>
+          <DialogTitle className="text-2xl font-black text-zinc-900">Collect Payment</DialogTitle>
+          <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
+            Settle outstanding balance for {selectedCustomer?.name}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-6 py-6">
+          <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex justify-between items-center">
+            <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest">Total Debt</span>
+            <span className="text-lg font-black text-rose-600">{formatCurrency(selectedCustomer?.balance || 0)}</span>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Amount to Collect</Label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
+              <Input 
+                type="number"
+                placeholder="0.00"
+                value={collectionData.amount}
+                onChange={(e) => setCollectionData({ ...collectionData, amount: e.target.value })}
+                className="h-16 pl-8 rounded-2xl border-none bg-zinc-50 font-black text-2xl focus:ring-4 focus:ring-blue-500/10 transition-all"
+              />
+              <button 
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-blue-600 uppercase bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors"
+                onClick={() => setCollectionData({ ...collectionData, amount: String(selectedCustomer?.balance || 0) })}
+              >
+                Pay Full
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+             <div className="space-y-2">
+               <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Method</Label>
+               <select 
+                 className="w-full h-12 rounded-xl bg-zinc-50 border-none px-4 font-bold text-xs"
+                 value={collectionData.method}
+                 onChange={(e) => setCollectionData({ ...collectionData, method: e.target.value })}
+               >
+                 <option value="CASH">Cash</option>
+                 <option value="CARD">Card</option>
+                 <option value="TRANSFER">Transfer</option>
+                 <option value="CHEQUE">Cheque</option>
+               </select>
+             </div>
+             <div className="space-y-2">
+               <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Reference #</Label>
+               <Input 
+                 placeholder="Optional"
+                 value={collectionData.reference}
+                 onChange={(e) => setCollectionData({ ...collectionData, reference: e.target.value })}
+                 className="h-12 rounded-xl border-none bg-zinc-50 font-bold text-xs"
+               />
+             </div>
+          </div>
+
+          <Button 
+            className="w-full h-14 rounded-2xl bg-zinc-900 text-white hover:bg-zinc-800 font-bold text-lg shadow-xl shadow-zinc-900/20 disabled:opacity-50"
+            onClick={handleCollectPayment}
+            disabled={isSubmittingCollection || !collectionData.amount}
+          >
+            {isSubmittingCollection ? "Processing..." : `Record ${formatCurrency(parseFloat(collectionData.amount) || 0)} Payment`}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+
   const AddCustomerDialog = (
     <Dialog open={isAddCustomerOpen} onOpenChange={setIsAddCustomerOpen}>
       <DialogContent className="w-full sm:max-w-4xl p-0 shadow-2xl flex flex-col bg-white overflow-hidden top-0 sm:top-1/2 translate-y-0 sm:-translate-y-1/2 h-[100dvh] sm:h-auto sm:max-h-[90vh] rounded-none sm:rounded-3xl border-none">
@@ -1450,6 +1618,7 @@ export default function CRM() {
     <div className="flex flex-col h-full overflow-hidden bg-zinc-50/50 relative">
       {/* Global Header Metrics */}
       {AddCustomerDialog}
+      {CollectPaymentDialog}
       <div className="flex-none p-4 lg:p-6 pb-0 w-full hidden lg:block">
         <div className="grid grid-cols-4 gap-4 mb-4">
           <Card className="p-5 flex items-center justify-between border-none shadow-sm bg-white/50 backdrop-blur-sm">
@@ -1516,20 +1685,49 @@ export default function CRM() {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-            {["All", "Customers", "Leads", "VIP", "At Risk", "Prospects", "Inactive"].map(seg => (
-              <Badge 
-                key={seg} 
-                variant="secondary" 
-                className={cn(
-                  "cursor-pointer rounded-lg px-3 py-1 text-[10px] font-bold uppercase tracking-wider transition-colors shrink-0",
-                  selectedSegment === seg ? "bg-zinc-900 text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-                )}
-                onClick={() => setSelectedSegment(seg)}
-              >
-                {seg}
+          <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="rounded-xl border-zinc-200 h-10 px-4 font-bold text-[10px] uppercase tracking-widest bg-white shadow-sm hover:bg-zinc-50 flex items-center gap-2">
+                  <Filter className="w-3.5 h-3.5 text-zinc-400" />
+                  <span className="text-zinc-500">View:</span>
+                  <span className="text-zinc-900">{selectedSegment}</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-zinc-400 ml-1" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56 rounded-2xl border-zinc-200 p-2 shadow-xl bg-white/95 backdrop-blur-sm">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-3 py-2">Quick Filters</DropdownMenuLabel>
+                  <DropdownMenuSeparator className="bg-zinc-100 mx-2 mb-1" />
+                  {[
+                    { name: "All", icon: Users },
+                    { name: "With Balance", icon: Banknote },
+                    { name: "VIP", icon: Crown },
+                    { name: "At Risk", icon: AlertCircle },
+                    { name: "Inactive", icon: Clock }
+                  ].map((seg) => (
+                    <DropdownMenuItem 
+                      key={seg.name} 
+                      className={cn(
+                        "rounded-xl py-2.5 px-3 cursor-pointer flex items-center gap-3 transition-colors",
+                        selectedSegment === seg.name ? "bg-zinc-900 text-white hover:bg-zinc-900" : "hover:bg-zinc-50 text-zinc-600"
+                      )}
+                      onClick={() => setSelectedSegment(seg.name)}
+                    >
+                      <seg.icon className={cn("w-4 h-4", selectedSegment === seg.name ? "text-white" : "text-zinc-400")} />
+                      <span className="font-bold text-xs">{seg.name}</span>
+                      {selectedSegment === seg.name && <CheckCircle2 className="w-3.5 h-3.5 ml-auto text-white" />}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {searchTerm && (
+              <Badge variant="outline" className="rounded-lg bg-blue-50 text-blue-600 border-blue-100 text-[9px] font-black uppercase px-2 h-6">
+                Searching...
               </Badge>
-            ))}
+            )}
           </div>
         </div>
 
@@ -1772,7 +1970,7 @@ export default function CRM() {
               <h3 className="text-2xl font-bold text-zinc-900">{selectedCustomer.loyalty} pts</h3>
               <p className="text-[10px] text-zinc-500 font-medium">Gold Tier Member</p>
             </Card>
-            <Card className="card-modern p-6 space-y-2 group hover:border-blue-500/50 transition-all">
+            <Card className="card-modern p-6 space-y-2 group hover:border-blue-500/50 transition-all relative overflow-hidden">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Account Balance</p>
                 <CreditCard className="w-4 h-4 text-rose-500" />
@@ -1780,7 +1978,14 @@ export default function CRM() {
               <h3 className={cn("text-2xl font-bold", selectedCustomer.balance > 0 ? "text-rose-600" : "text-zinc-900")}>
                 {formatCurrency(selectedCustomer.balance)}
               </h3>
-              <p className="text-[10px] text-zinc-500 font-medium">{selectedCustomer.balance > 0 ? "Outstanding Payment" : "No debt"}</p>
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-zinc-500 font-medium">{selectedCustomer.balance > 0 ? "Outstanding Payment" : "No debt"}</p>
+                {selectedCustomer.balance > 0 && (
+                  <Button variant="ghost" size="sm" className="h-6 px-2 rounded-lg text-blue-600 hover:bg-blue-50 text-[10px] font-black uppercase" onClick={() => setIsCollectPaymentOpen(true)}>
+                    Collect
+                  </Button>
+                )}
+              </div>
             </Card>
             <Card className="card-modern p-6 space-y-2 group hover:border-blue-500/50 transition-all">
               <div className="flex items-center justify-between">
