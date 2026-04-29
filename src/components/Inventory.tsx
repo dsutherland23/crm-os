@@ -91,6 +91,7 @@ export default function Inventory() {
   const [isTransferDialogOpen, setIsTransferDialogOpen] = useState(false);
   const [isPurchaseOrderOpen, setIsPurchaseOrderOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [updateExistingOnImport, setUpdateExistingOnImport] = useState(true);
   const [isStocktakeDialogOpen, setIsStocktakeDialogOpen] = useState(false);
   const [purchaseOrders, setPurchaseOrders] = useState<any[]>([]);
   const [stocktakes, setStocktakes] = useState<any[]>([]);
@@ -417,30 +418,51 @@ export default function Inventory() {
             if (!name) { skippedCount++; continue; }
 
             let sku = getVal(['SKU', 'CODE', 'PART_NUMBER', 'PART_NO', 'ID', 'SERIAL', 'ITEM_CODE']);
+            
+            // Duplicate Prevention Logic
+            let existingProduct = null;
+            if (updateExistingOnImport) {
+              existingProduct = products.find(p => 
+                (sku && p.sku === String(sku)) || 
+                (p.name.toLowerCase() === String(name).toLowerCase())
+              );
+            }
+
             if (!sku) {
-              const prefix = String(name).replace(/[^A-Za-z0-9]/g, '').substring(0, 4).toUpperCase();
-              sku = `${prefix}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+              if (existingProduct) {
+                sku = existingProduct.sku;
+              } else {
+                const prefix = String(name).replace(/[^A-Za-z0-9]/g, '').substring(0, 4).toUpperCase();
+                sku = `${prefix}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+              }
             }
 
             const price  = parseNumber(getVal(['RETAIL', 'PRICE', 'RETAIL_PRICE', 'SELLING_PRICE', 'SALE_PRICE', 'LIST_PRICE']));
             const cost   = parseNumber(getVal(['COST', 'UNIT_COST', 'COST_PRICE', 'PURCHASE_PRICE', 'BUY_PRICE']));
 
-            const productRef = doc(collection(db, 'products'));
-
-            batch.set(productRef, {
+            const productRef = existingProduct ? doc(db, 'products', existingProduct.id) : doc(collection(db, 'products'));
+            const productData = {
               name: String(name),
               sku: String(sku),
-              price,
-              retail_price: price,
-              cost,
-              category: getVal(['CATEGORY', 'DEPARTMENT', 'GROUP', 'TYPE', 'CLASS']) || 'General',
-              barcode:  getVal(['BARCODE', 'UPC', 'EAN', 'GTIN']) || '',
-              unit:     getVal(['UNIT', 'UOM', 'MEASURE', 'UNIT_OF_MEASURE']) || 'pcs',
-              min_stock_level: parseNumber(getVal(['MIN_STOCK', 'REORDER_POINT', 'SAFETY_STOCK', 'MINIMUM']) || 10),
+              price: price || (existingProduct?.price || 0),
+              retail_price: price || (existingProduct?.retail_price || 0),
+              cost: cost || (existingProduct?.cost || 0),
+              category: getVal(['CATEGORY', 'DEPARTMENT', 'GROUP', 'TYPE', 'CLASS']) || existingProduct?.category || 'General',
+              barcode:  getVal(['BARCODE', 'UPC', 'EAN', 'GTIN']) || existingProduct?.barcode || '',
+              unit:     getVal(['UNIT', 'UOM', 'MEASURE', 'UNIT_OF_MEASURE']) || existingProduct?.unit || 'pcs',
+              min_stock_level: parseNumber(getVal(['MIN_STOCK', 'REORDER_POINT', 'SAFETY_STOCK', 'MINIMUM']) || existingProduct?.min_stock_level || 10),
               enterprise_id: enterpriseId,
-              created_at: serverTimestamp(),
               updated_at: serverTimestamp()
-            });
+            };
+
+            if (!existingProduct) {
+              (productData as any).created_at = serverTimestamp();
+              batch.set(productRef, productData);
+            } else {
+              batch.update(productRef, productData);
+            }
+
+            const productId = existingProduct ? existingProduct.id : productRef.id;
 
             // Quantity — write to resolved branch (never silently skip)
             const qtyKey = Object.keys(normalizedRow).find(k =>
@@ -450,14 +472,23 @@ export default function Inventory() {
             const qty = qtyKey ? parseNumber(normalizedRow[qtyKey]) : 0;
 
             if (qty > 0 && targetBranch) {
-              const invRef = doc(collection(db, 'inventory'));
-              batch.set(invRef, {
-                product_id: productRef.id,
-                branch_id:  targetBranch,
-                enterprise_id: enterpriseId,
-                quantity:   qty,
-                last_updated: serverTimestamp()
-              });
+              // Find existing inventory record for this product + branch
+              const existingInv = inventory.find(i => i.product_id === productId && i.branch_id === targetBranch);
+              if (existingInv && updateExistingOnImport) {
+                batch.update(doc(db, 'inventory', existingInv.id), {
+                  quantity: qty,
+                  last_updated: serverTimestamp()
+                });
+              } else {
+                const invRef = doc(collection(db, 'inventory'));
+                batch.set(invRef, {
+                  product_id: productId,
+                  branch_id:  targetBranch,
+                  enterprise_id: enterpriseId,
+                  quantity:   qty,
+                  last_updated: serverTimestamp()
+                });
+              }
             }
 
             importedCount++;
@@ -4054,8 +4085,20 @@ export default function Inventory() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="py-8">
-          <div className="border-2 border-dashed border-zinc-100 rounded-[2rem] p-10 text-center hover:border-blue-500/30 hover:bg-blue-50/50 transition-all group relative cursor-pointer">
+        <div className="py-6 space-y-6">
+          <div className="flex items-center justify-between p-4 rounded-2xl bg-zinc-50 border border-zinc-100">
+            <div className="space-y-1">
+              <p className="text-xs font-black text-zinc-900 uppercase tracking-tight">Duplicate Protection</p>
+              <p className="text-[10px] text-zinc-500 font-medium">Update existing records if SKU/Name matches</p>
+            </div>
+            <Switch 
+              checked={updateExistingOnImport} 
+              onCheckedChange={setUpdateExistingOnImport}
+              className="data-[state=checked]:bg-zinc-900"
+            />
+          </div>
+
+          <div className="border-2 border-dashed border-zinc-100 rounded-[2.5rem] p-10 text-center hover:border-blue-500/30 hover:bg-blue-50/50 transition-all group relative cursor-pointer">
             <input 
               type="file" 
               accept=".csv,.tsv,.xlsx,.xls,.ods,.json" 
@@ -4067,7 +4110,7 @@ export default function Inventory() {
                 <Plus className="w-8 h-8 text-zinc-300 group-hover:text-blue-600 transition-colors" />
               </div>
               <p className="text-sm font-black text-zinc-900 uppercase tracking-widest">Select Database Source</p>
-              <p className="text-xs text-zinc-400 mt-2">CSV · TSV · XLSX · XLS · ODS · JSON — 50MB max</p>
+              <p className="text-xs text-zinc-400 mt-2">CSV · TSV · XLSX · XLS · ODS · JSON</p>
             </div>
           </div>
         </div>
