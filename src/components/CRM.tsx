@@ -104,11 +104,12 @@ import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
 import { motion, AnimatePresence } from "motion/react";
 
-import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, where, addDoc, serverTimestamp, deleteDoc, writeBatch, getStorage, ref, uploadBytes, getDownloadURL, limit } from "@/lib/firebase";
+import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, where, addDoc, serverTimestamp, deleteDoc, writeBatch, getStorage, ref, uploadBytes, getDownloadURL, limit, increment as fStoreIncrement } from "@/lib/firebase";
+import { recordFinancialEvent } from "@/lib/ledger";
 import { usePendingAction } from "@/context/PendingActionContext";
 
 export default function CRM() {
-  const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId, branding, hasPermission, userRole } = useModules();
+  const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId, branding, hasPermission, userRole, posSession } = useModules();
   const isAdmin   = userRole === "admin"  || userRole === "owner";
   const isManager = isAdmin || userRole === "manager";
   const canEdit   = isManager || hasPermission("crm", "editor");
@@ -284,13 +285,14 @@ export default function CRM() {
       // 1. Update Customer Balance & Metrics
       await updateDoc(doc(db, "customers", selectedCustomer.id), {
         balance: newBalance,
-        total_paid: increment(amountPaid),
+        total_paid: fStoreIncrement(amountPaid),
         last_payment_date: serverTimestamp(),
         last_payment_amount: amountPaid,
         status: newBalance <= 0 ? "ACTIVE" : "OWING"
       });
 
       // 2. Create a Permanent Payment Transaction
+      const receiptId = `RCPT-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
       const paymentTx = {
         customer_id: selectedCustomer.id,
         customer_name: selectedCustomer.name,
@@ -301,13 +303,14 @@ export default function CRM() {
         amount_tendered: amountPaid,
         amount_applied: amountPaid,
         change_due: 0,
-        reference_number: collectionData.reference,
-        description: `Account Debt Settlement`,
+        receipt_id: receiptId,
+        reference_number: collectionData.reference || receiptId,
+        description: `Account Debt Settlement (${receiptId})`,
         timestamp: serverTimestamp(),
         status: "COMPLETED",
         branch_id: activeBranch,
-        staff_id: selectedAdmin?.id || "System",
-        staff_name: selectedAdmin?.name || "System"
+        staff_id: posSession?.staffId || "System",
+        staff_name: posSession?.staffName || "System"
       };
       await addDoc(collection(db, "transactions"), paymentTx);
 
@@ -316,7 +319,7 @@ export default function CRM() {
         enterpriseId,
         amount: amountPaid,
         sourceId: selectedCustomer.id,
-        sourceType: "DEBT_COLLECTION",
+        sourceType: "PAYMENT_RECEIVED",
         description: `Debt Payment - ${selectedCustomer.name}`,
         metadata: {
           method: collectionData.method,
@@ -332,11 +335,11 @@ export default function CRM() {
         details: `Collected ${formatCurrency(amountPaid)} from ${selectedCustomer.name} via ${collectionData.method}. Remaining: ${formatCurrency(newBalance)}`,
         enterprise_id: enterpriseId,
         timestamp: serverTimestamp(),
-        user: selectedAdmin?.name || "System",
+        user: posSession?.staffName || "System",
         severity: "INFO"
       });
 
-      toast.success("Payment recorded successfully", { id: tid });
+      toast.success(`Payment recorded: ${receiptId}`, { id: tid });
       setIsCollectPaymentOpen(false);
       setCollectionData({ amount: "", method: "CASH", reference: "" });
       
