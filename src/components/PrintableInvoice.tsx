@@ -16,12 +16,16 @@ interface PrintableInvoiceProps {
   enterpriseId: string | null;
   order: {
     id: string;
+    type?: "SALE" | "PAYMENT";
     customerName: string;
     customerAddress?: string;
     customerPhone?: string;
     customerEmail?: string;
     date: string;
-    items: Array<{
+    paymentMethod?: string;
+    receipt_id?: string;
+    reference_number?: string;
+    items?: Array<{
       id: string;
       name: string;
       price: number;
@@ -30,13 +34,17 @@ interface PrintableInvoiceProps {
     subtotal: number;
     tax: number;
     total: number;
+    balance_due?: number; // For Sales
+    previous_balance?: number; // For Payments
+    new_balance?: number; // For Payments
   };
 }
 
 export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, enterpriseId, order }) => {
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(window.location.origin + '/connect?id=' + (enterpriseId || 'master-all'))}`;
   return (
-    <div className="w-full max-w-[800px] mx-auto bg-white p-0 shadow-2xl overflow-hidden font-sans text-zinc-900 border border-zinc-100 print:shadow-none print:border-0" id="printable-invoice">
+    <div className="w-[210mm] min-h-[297mm] mx-auto bg-white p-12 font-sans text-zinc-900 relative print:m-0 print:p-12" id="printable-invoice">
+      <div className="absolute top-0 left-0 right-0 h-4 bg-white z-[10]" /> {/* Print Safety Margin */}
       {/* Top Accent Graphics */}
       <div className="relative h-24 overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600 -rotate-12 translate-x-20 -translate-y-20 transform origin-bottom-left skew-x-12 opacity-90" />
@@ -59,10 +67,12 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, en
             </div>
           </div>
           <div className="text-right relative min-w-[200px]">
-            <h1 className="text-7xl font-black italic text-blue-900/10 tracking-tighter leading-none mb-2 select-none uppercase absolute -top-4 right-8 pointer-events-none">INVOICE</h1>
+            <h1 className="text-7xl font-black italic text-blue-900/10 tracking-tighter leading-none mb-2 select-none uppercase absolute -top-4 right-8 pointer-events-none">
+              {order.type === "PAYMENT" ? "RECEIPT" : "INVOICE"}
+            </h1>
             <div className="relative z-10 space-y-1 pt-12 pr-4">
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Invoice Number</p>
-              <p className="text-lg font-black text-zinc-900">#{order.id.split('-')[0].toUpperCase()}</p>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{order.type === "PAYMENT" ? "Receipt Number" : "Invoice Number"}</p>
+              <p className="text-lg font-black text-zinc-900">#{order.receipt_id || order.id.split('-')[0].toUpperCase()}</p>
             </div>
           </div>
         </div>
@@ -77,35 +87,61 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, en
               <p>{order.customerEmail}</p>
             </div>
           </div>
-          <div className="flex flex-col justify-end items-end space-y-4">
-            {/* Can add more metadata here like due date etc */}
+          <div className="flex flex-col justify-end items-end space-y-2 text-right">
+             <div className="space-y-1">
+               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Date Issued</p>
+               <p className="text-sm font-black text-zinc-900">{order.date}</p>
+             </div>
+             {order.paymentMethod && (
+               <div className="space-y-1">
+                 <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Payment Method</p>
+                 <p className="text-sm font-black text-zinc-900">{order.paymentMethod}</p>
+               </div>
+             )}
           </div>
         </div>
 
-        {/* Items Table */}
+        {/* Items/Payment Details Table */}
         <div className="mb-12">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-blue-700 text-white overflow-hidden">
-                <th className="py-4 px-6 text-left text-xs font-black uppercase tracking-widest rounded-l-xl">No</th>
-                <th className="py-4 px-4 text-left text-xs font-black uppercase tracking-widest">Product</th>
-                <th className="py-4 px-4 text-right text-xs font-black uppercase tracking-widest">Price</th>
-                <th className="py-4 px-4 text-center text-xs font-black uppercase tracking-widest">Qty</th>
-                <th className="py-4 px-6 text-right text-xs font-black uppercase tracking-widest rounded-r-xl">Total</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {order.items.map((item, index) => (
-                <tr key={item.id} className={index % 2 === 0 ? "bg-white" : "bg-zinc-50/50"}>
-                  <td className="py-5 px-6 text-sm font-bold text-zinc-400">{index + 1}</td>
-                  <td className="py-5 px-4 text-sm font-black text-blue-950">{item.name}</td>
-                  <td className="py-5 px-4 text-right text-sm font-bold text-zinc-600">{item.price.toFixed(2)}</td>
-                  <td className="py-5 px-4 text-center text-sm font-bold text-zinc-600">{item.qty}</td>
-                  <td className="py-5 px-6 text-right text-sm font-black text-blue-950">{(item.price * item.qty).toFixed(2)}</td>
+          {order.type === "PAYMENT" ? (
+            <div className="p-8 bg-zinc-50 rounded-3xl border border-zinc-100 flex flex-col gap-6">
+              <div className="flex justify-between items-center border-b border-zinc-200 pb-4">
+                <span className="text-sm font-black text-blue-950 uppercase tracking-widest">Transaction Purpose</span>
+                <span className="text-sm font-bold text-zinc-600">Account Debt Settlement</span>
+              </div>
+              <div className="flex justify-between items-center border-b border-zinc-200 pb-4">
+                <span className="text-sm font-black text-blue-950 uppercase tracking-widest">Reference Number</span>
+                <span className="text-sm font-bold text-zinc-600">{order.reference_number || "N/A"}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-black text-blue-950 uppercase tracking-widest text-lg">Amount Received</span>
+                <span className="text-2xl font-black text-emerald-600">${order.total.toFixed(2)}</span>
+              </div>
+            </div>
+          ) : (
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-blue-700 text-white overflow-hidden">
+                  <th className="py-4 px-6 text-left text-xs font-black uppercase tracking-widest rounded-l-xl">No</th>
+                  <th className="py-4 px-4 text-left text-xs font-black uppercase tracking-widest">Product</th>
+                  <th className="py-4 px-4 text-right text-xs font-black uppercase tracking-widest">Price</th>
+                  <th className="py-4 px-4 text-center text-xs font-black uppercase tracking-widest">Qty</th>
+                  <th className="py-4 px-6 text-right text-xs font-black uppercase tracking-widest rounded-r-xl">Total</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-zinc-100">
+                {order.items?.map((item, index) => (
+                  <tr key={item.id || `item-${index}`} className={index % 2 === 0 ? "bg-white" : "bg-zinc-50/50"}>
+                    <td className="py-5 px-6 text-sm font-bold text-zinc-400">{index + 1}</td>
+                    <td className="py-5 px-4 text-sm font-black text-blue-950">{item.name}</td>
+                    <td className="py-5 px-4 text-right text-sm font-bold text-zinc-600">{item.price.toFixed(2)}</td>
+                    <td className="py-5 px-4 text-center text-sm font-bold text-zinc-600">{item.qty}</td>
+                    <td className="py-5 px-6 text-right text-sm font-black text-blue-950">{(item.price * item.qty).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
         {/* Totals & Signature */}
@@ -122,18 +158,37 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, en
           </div>
           
           <div className="space-y-4">
-            <div className="flex justify-between items-center px-4">
-              <span className="text-xs font-black text-blue-950 uppercase tracking-widest">Subtotal:</span>
-              <span className="text-sm font-bold text-zinc-600">{order.subtotal.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center px-4">
-              <span className="text-xs font-black text-blue-950 uppercase tracking-widest">Tax:</span>
-              <span className="text-sm font-bold text-zinc-600">{order.tax.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-center bg-zinc-50 rounded-2xl p-6 border border-zinc-100">
-              <span className="text-sm font-black text-blue-950 uppercase tracking-widest">Total:</span>
-              <span className="text-2xl font-black text-blue-700">{order.total.toFixed(2)}</span>
-            </div>
+            {order.type === "PAYMENT" ? (
+              <div className="space-y-3">
+                 <div className="flex justify-between items-center px-4">
+                  <span className="text-xs font-black text-blue-950 uppercase tracking-widest text-zinc-400">Previous Balance:</span>
+                  <span className="text-sm font-bold text-zinc-400">${(order.previous_balance || 0).toFixed(2)}</span>
+                </div>
+                 <div className="flex justify-between items-center px-4">
+                  <span className="text-xs font-black text-blue-950 uppercase tracking-widest text-emerald-600">Payment Applied:</span>
+                  <span className="text-sm font-bold text-emerald-600">-${order.total.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center bg-blue-50 rounded-2xl p-6 border border-blue-100">
+                  <span className="text-sm font-black text-blue-950 uppercase tracking-widest">New Balance:</span>
+                  <span className="text-2xl font-black text-blue-700">${(order.new_balance || 0).toFixed(2)}</span>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center px-4">
+                  <span className="text-xs font-black text-blue-950 uppercase tracking-widest">Subtotal:</span>
+                  <span className="text-sm font-bold text-zinc-600">{order.subtotal.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center px-4">
+                  <span className="text-xs font-black text-blue-950 uppercase tracking-widest">Tax:</span>
+                  <span className="text-sm font-bold text-zinc-600">{order.tax.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between items-center bg-zinc-50 rounded-2xl p-6 border border-zinc-100">
+                  <span className="text-sm font-black text-blue-950 uppercase tracking-widest">Total Amount:</span>
+                  <span className="text-2xl font-black text-blue-700">{order.total.toFixed(2)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -205,32 +260,6 @@ export const PrintableInvoice: React.FC<PrintableInvoiceProps> = ({ branding, en
         </div>
       </div>
 
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          body * {
-            visibility: hidden;
-            -webkit-print-color-adjust: exact;
-          }
-          #printable-invoice, #printable-invoice * {
-            visibility: visible;
-          }
-          #printable-invoice {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 210mm;
-            min-height: 297mm;
-            padding: 0;
-            margin: 0;
-            border: none;
-            box-shadow: none;
-            background: white;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
-      `}} />
     </div>
   );
 };

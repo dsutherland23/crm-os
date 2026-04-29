@@ -650,29 +650,44 @@ export default function Revenue() {
     // Previously unbounded — would download ALL records to the browser on every
     // load, causing OOM crashes and unbounded Firebase read billing at scale.
     const unsubInvoices = onSnapshot(
-      query(collection(db, "invoices"), where("enterprise_id", "==", enterpriseId), orderBy("due_date", "desc"), limit(500)),
+      query(collection(db, "invoices"), where("enterprise_id", "==", enterpriseId), limit(500)),
       (snapshot) => {
-        setInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        // Local sort to avoid composite index requirement and assertion errors
+        docs.sort((a, b) => new Date(b.due_date || 0).getTime() - new Date(a.due_date || 0).getTime());
+        setInvoices(docs);
         setLoading(false);
-      }, (error) => { console.error("invoices:", error); setLoading(false); });
+      }, (error) => { 
+        console.error("invoices query failed:", error); 
+        setLoading(false);
+      });
 
     const unsubExpenses = onSnapshot(
-      query(collection(db, "expenses"), where("enterprise_id", "==", enterpriseId), orderBy("date", "desc"), limit(500)),
+      query(collection(db, "expenses"), where("enterprise_id", "==", enterpriseId), limit(500)),
       (snapshot) => {
-        setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        docs.sort((a, b) => new Date(b.date || b.timestamp || 0).getTime() - new Date(a.date || a.timestamp || 0).getTime());
+        setExpenses(docs);
       }, (error) => console.error("expenses:", error));
 
     const unsubQuotes = onSnapshot(
-      query(collection(db, "quotes"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc"), limit(300)),
+      query(collection(db, "quotes"), where("enterprise_id", "==", enterpriseId), limit(300)),
       (snapshot) => {
-        setQuotes(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        docs.sort((a, b) => new Date(b.created_at || b.timestamp || 0).getTime() - new Date(a.created_at || a.timestamp || 0).getTime());
+        setQuotes(docs);
       }, (error) => console.error("quotes:", error));
 
     const unsubPos = onSnapshot(
-      query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), orderBy("created_at", "desc"), limit(500)),
+      query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), limit(500)),
       (snapshot) => {
-        setPosTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, (error) => console.error("pos transactions:", error));
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+        // Local sort to avoid composite index requirement and assertion errors
+        docs.sort((a, b) => new Date(b.timestamp || b.created_at || 0).getTime() - new Date(a.timestamp || a.created_at || 0).getTime());
+        setPosTransactions(docs);
+      }, (error) => {
+        console.error("pos transactions query failed:", error);
+      });
 
     const unsubRecurring = onSnapshot(
       query(collection(db, "recurring_billing"), where("enterprise_id", "==", enterpriseId), limit(200)),
@@ -702,9 +717,11 @@ export default function Revenue() {
       }, (error) => console.error("staff:", error));
 
     const unsubSessions = onSnapshot(
-      query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), orderBy("startTime", "desc"), limit(500)),
+      query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), limit(500)),
       (snapshot) => {
-        setSessions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        docs.sort((a: any, b: any) => new Date(b.startTime || 0).getTime() - new Date(a.startTime || 0).getTime());
+        setSessions(docs);
       }, (error) => console.error("sessions:", error));
 
     const unsubBankAccounts = onSnapshot(
@@ -1475,7 +1492,7 @@ export default function Revenue() {
           <CardContent className="pt-10">
             <div className="h-[350px] w-full">
               {isMounted && (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <ResponsiveContainer width="100%" height="100%" minHeight={350}>
                 <AreaChart data={cashFlowData}>
                   <defs>
                     <linearGradient id="colorIn" x1="0" y1="0" x2="0" y2="1">
@@ -1509,7 +1526,7 @@ export default function Revenue() {
           <CardContent className="pt-6">
             <div className="h-[250px] w-full">
               {isMounted && (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <ResponsiveContainer width="100%" height="100%" minHeight={350}>
                 <PieChart>
                   <Pie
                     data={expenseCategories}

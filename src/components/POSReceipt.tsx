@@ -1,8 +1,10 @@
 import React from "react";
+import { cn } from "@/lib/utils";
 import { BrandingConfig } from "@/context/ModuleContext";
 
 interface POSReceiptProps {
   branding: BrandingConfig;
+  paperSize?: "80mm" | "58mm";
   order: {
     id: string;
     customerName: string;
@@ -26,27 +28,31 @@ interface POSReceiptProps {
   formatCurrency: (amount: number) => string;
 }
 
-export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatCurrency }) => {
+export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatCurrency, paperSize = "80mm" }) => {
   if (!order) return null;
+  
+  const widthClass = paperSize === "58mm" ? "w-[58mm]" : "w-[80mm]";
+  const fontSize = paperSize === "58mm" ? "text-[10px]" : "text-[12px]";
+
   return (
-    <div className="w-[300px] bg-white p-4 font-mono text-[12px] text-black leading-tight border border-zinc-100" id="pos-receipt">
+    <div className={cn(widthClass, "bg-white p-4 font-mono text-black leading-tight border border-zinc-100", fontSize)} id="pos-receipt">
       {/* Header */}
       <div className="text-center space-y-1 mb-4">
-        <h2 className="text-lg font-black uppercase">{branding.name}</h2>
+        <h2 className="text-lg font-black uppercase tracking-tighter">{branding.name}</h2>
         <p className="text-[10px] whitespace-pre-wrap">{branding.address}</p>
-        <p className="text-[10px]">Tel: {branding.phone}</p>
-        <p className="text-[10px]">{branding.email}</p>
+        <p className="text-[10px]">TEL: {branding.phone}</p>
         <div className="border-b border-dashed border-black my-2" />
-        <p className="text-[10px] uppercase font-bold">Sales Receipt</p>
-        <p className="text-[10px] uppercase">#{order.id.substring(0, 8).toUpperCase()}</p>
+        <p className="text-[10px] uppercase font-bold">*** Sales Receipt ***</p>
+        <p className="text-[10px] uppercase">ID: {order.id.toUpperCase()}</p>
         <p className="text-[10px]">{order.date}</p>
+        <p className="text-[10px] font-bold uppercase underline">Customer Copy</p>
       </div>
 
       {/* Items */}
       <div className="space-y-2 mb-4">
-        <div className="flex justify-between font-bold border-b border-dashed border-black pb-1">
-          <span>Item</span>
-          <span>Total</span>
+        <div className="flex justify-between font-bold border-b border-dashed border-black pb-1 uppercase">
+          <span>Description</span>
+          <span>Amount</span>
         </div>
         {order.items.map((item, idx) => {
           const baseTotal = item.price * item.qty;
@@ -61,12 +67,12 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
           return (
             <div key={`${item.id}-${idx}`} className="space-y-0.5">
               <div className="flex justify-between">
-                <span className="uppercase">{item.name}</span>
-                <span>{formatCurrency(baseTotal - discountVal)}</span>
+                <span className="uppercase font-bold">{item.name}</span>
+                <span className="font-bold">{formatCurrency(baseTotal - discountVal)}</span>
               </div>
-              <div className="flex justify-between text-[10px] text-zinc-600">
-                <span>{item.qty} x {formatCurrency(item.price)}</span>
-                {discountVal > 0 && <span className="text-black font-bold">SAVED: -{formatCurrency(discountVal)}</span>}
+              <div className="flex justify-between text-[10px] text-zinc-800">
+                <span>{item.qty} UNIT(S) @ {formatCurrency(item.price)}</span>
+                {discountVal > 0 && <span className="font-bold">DISC: -{formatCurrency(discountVal)}</span>}
               </div>
             </div>
           );
@@ -76,14 +82,14 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
       <div className="border-b border-dashed border-black my-2" />
 
       {/* Totals */}
-      <div className="space-y-1">
+      <div className="space-y-1 font-bold">
         <div className="flex justify-between">
           <span>SUBTOTAL:</span>
           <span>{formatCurrency(order.subtotal)}</span>
         </div>
         {order.discountAmount && order.discountAmount > 0 && (
           <div className="flex justify-between">
-            <span>DISCOUNT:</span>
+            <span>TOTAL DISCOUNT:</span>
             <span>-{formatCurrency(order.discountAmount)}</span>
           </div>
         )}
@@ -91,8 +97,8 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
           <span>TAX:</span>
           <span>{formatCurrency(order.tax)}</span>
         </div>
-        <div className="flex justify-between text-base font-black pt-1">
-          <span>TOTAL:</span>
+        <div className="flex justify-between text-base font-black pt-1 border-t border-black">
+          <span>TOTAL DUE:</span>
           <span>{formatCurrency(order.total)}</span>
         </div>
       </div>
@@ -102,18 +108,18 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
       {/* Payment */}
       <div className="text-left space-y-1 mb-4">
         <div className="flex justify-between uppercase font-bold">
-          <span>PAID VIA {order.paymentMethod}:</span>
+          <span>PAID BY {order.paymentMethod}:</span>
           <span>{formatCurrency(order.tendered || order.total)}</span>
         </div>
         {order.change > 0 && (
-          <div className="flex justify-between text-[10px]">
-            <span>CHANGE GIVEN:</span>
+          <div className="flex justify-between font-bold">
+            <span>CHANGE:</span>
             <span>{formatCurrency(order.change)}</span>
           </div>
         )}
         {order.balanceDue > 0 && (
-          <div className="flex justify-between text-rose-600 font-bold bg-rose-50 px-1 py-0.5">
-            <span>REMAINING DEBT:</span>
+          <div className="flex justify-between font-bold">
+            <span>OUTSTANDING:</span>
             <span>{formatCurrency(order.balanceDue)}</span>
           </div>
         )}
@@ -121,26 +127,32 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
 
       <div className="border-b border-dashed border-black my-4" />
 
-      {/* Footer */}
+      {/* Footer & Policy */}
       <div className="text-center space-y-2">
-        <p className="text-[9px] uppercase font-bold">Thank you for your business!</p>
-        <p className="text-[8px] italic leading-tight px-2">
+        <div className="px-2 py-1 border border-black text-[9px] font-bold uppercase leading-tight mb-2">
+          Policy: No refund only exchange on not open or damaged product after few days of purchase
+        </div>
+        <p className="text-[10px] uppercase font-bold">Thank you for your visit!</p>
+        <p className="text-[8px] italic leading-tight text-zinc-500">
           {branding.disclaimer}
         </p>
+        
         <div className="flex justify-center pt-2">
-           {/* Placeholder for a simple barcode if needed */}
-           <div className="bg-black h-8 w-40 flex items-center justify-center text-[8px] text-white">
-             {order.id.substring(0, 12).toUpperCase()}
+           <div className="bg-black h-10 w-full flex items-center justify-center text-[10px] text-white font-bold tracking-[0.2em]">
+             {order.id.substring(0, 16).toUpperCase()}
            </div>
         </div>
-        <p className="text-[8px] pt-2 text-zinc-400">Done by Orivocrm.pro System v2026</p>
+        <p className="text-[8px] pt-2 text-zinc-400">Powered by CRM-OS v2026 Production</p>
       </div>
       
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
+          @page {
+            margin: 0;
+            size: ${paperSize === '58mm' ? '58mm' : '80mm'} auto;
+          }
           body * {
             visibility: hidden;
-            -webkit-print-color-adjust: exact;
           }
           #pos-receipt, #pos-receipt * {
             visibility: visible;
@@ -149,17 +161,14 @@ export const POSReceipt: React.FC<POSReceiptProps> = ({ branding, order, formatC
             position: absolute;
             left: 0;
             top: 0;
-            width: 80mm;
-            padding: 4mm;
+            width: ${paperSize === '58mm' ? '58mm' : '80mm'};
+            padding: 2mm;
             margin: 0;
             border: none;
-            background: white;
-          }
-          .no-print {
-            display: none !important;
           }
         }
       `}} />
     </div>
   );
 };
+

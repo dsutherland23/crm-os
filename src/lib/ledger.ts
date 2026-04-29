@@ -24,6 +24,66 @@ export interface LedgerEntry {
 }
 
 /**
+ * Record a financial event using Double-Entry Bookkeeping within a WriteBatch.
+ */
+export function recordFinancialEventBatch(batch: any, params: {
+  enterpriseId: string;
+  amount: number;
+  sourceId: string;
+  sourceType: LedgerEntry["source_type"];
+  description: string;
+  metadata?: any;
+}) {
+  const { enterpriseId, amount, sourceId, sourceType, description, metadata: rawMetadata } = params;
+  const entries: Omit<LedgerEntry, "id">[] = [];
+
+  const metadata = rawMetadata ? { ...rawMetadata } : {};
+  Object.keys(metadata).forEach(key => {
+    if (metadata[key] === undefined) metadata[key] = null;
+  });
+
+  const taxAmount = Number(metadata?.tax || 0);
+  const netAmount = amount - taxAmount;
+
+  // Re-use logic for mapping (internal helper would be better but let's keep it clean for now)
+  const createEntries = () => {
+    switch (sourceType) {
+      case "POS_TRANSACTION":
+        entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount, type: "DEBIT", account: LedgerAccount.CASH, source_id: sourceId, source_type: sourceType, description, metadata });
+        entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: netAmount, type: "CREDIT", account: LedgerAccount.SALES, source_id: sourceId, source_type: sourceType, description, metadata });
+        if (taxAmount > 0) entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: taxAmount, type: "CREDIT", account: LedgerAccount.TAX_LIABILITY, source_id: sourceId, source_type: sourceType, description: `GCT collected from ${sourceType}`, metadata });
+        break;
+      case "RETURN":
+      case "CREDIT_NOTE":
+        entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: netAmount, type: "DEBIT", account: LedgerAccount.SALES_RETURNS, source_id: sourceId, source_type: sourceType, description, metadata });
+        if (taxAmount > 0) entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: taxAmount, type: "DEBIT", account: LedgerAccount.TAX_LIABILITY, source_id: sourceId, source_type: sourceType, description: `GCT reversal from ${sourceType}`, metadata });
+        entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount, type: "CREDIT", account: metadata?.isRefund ? LedgerAccount.CASH : LedgerAccount.RECEIVABLE, source_id: sourceId, source_type: sourceType, description, metadata });
+        break;
+      // ... Add others as needed, focusing on POS/CRM core for now
+    }
+  };
+
+  createEntries();
+
+  const ledgerCol = collection(db, "ledger");
+  entries.forEach(entry => {
+    batch.set(doc(ledgerCol), entry);
+  });
+
+  const summaryRef = doc(db, "financial_summaries", enterpriseId);
+  const updates: any = { last_updated: serverTimestamp() };
+  if (["POS_TRANSACTION"].includes(sourceType)) {
+    updates.total_revenue = increment(netAmount);
+    updates.net_profit = increment(netAmount);
+  } else if (["RETURN", "CREDIT_NOTE"].includes(sourceType)) {
+    updates.total_revenue = increment(-Math.abs(netAmount));
+    updates.net_profit = increment(-Math.abs(netAmount));
+  }
+
+  batch.update(summaryRef, updates);
+}
+
+/**
  * Record a financial event using Double-Entry Bookkeeping.
  * Every event creates a balanced pair of Debit and Credit entries.
  */

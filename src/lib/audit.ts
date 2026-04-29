@@ -1,4 +1,4 @@
-import { db, collection, addDoc, serverTimestamp } from "./firebase";
+import { db, collection, addDoc, serverTimestamp, doc } from "./firebase";
 import { auth } from "./firebase";
 
 export type AuditSeverity = "INFO" | "WARNING" | "CRITICAL";
@@ -12,6 +12,27 @@ export interface AuditLogParams {
   type: AuditType;
   branchId?: string;
   metadata?: any;
+}
+
+/**
+ * Record an entry in the enterprise audit trail within a WriteBatch.
+ */
+export function recordAuditLogBatch(batch: any, params: AuditLogParams) {
+  const { enterpriseId, action, details, severity, type, branchId, metadata } = params;
+  const auditCol = collection(db, "audit_logs");
+  
+  batch.set(doc(auditCol), {
+    enterprise_id: enterpriseId,
+    action,
+    details,
+    severity,
+    type,
+    branch_id: branchId || "main",
+    user_id: auth.currentUser?.uid || "system",
+    user_email: auth.currentUser?.email || "system",
+    timestamp: serverTimestamp(),
+    metadata: metadata || {}
+  });
 }
 
 /**

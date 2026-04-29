@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Legend
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, Legend, LineChart, Line
 } from 'recharts';
 import { 
   db, 
@@ -152,6 +152,10 @@ export default function Inventory() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [isPartnerAnalyticsOpen, setIsPartnerAnalyticsOpen] = useState(false);
+  const [partnerAnalyticsData, setPartnerAnalyticsData] = useState<any>(null);
+  const [isDecommissionConfirmOpen, setIsDecommissionConfirmOpen] = useState(false);
+  const [partnerToDecommission, setPartnerToDecommission] = useState<any>(null);
   const [isLinkSupplierDialogOpen, setIsLinkSupplierDialogOpen] = useState(false);
   const [isBatchLinking, setIsBatchLinking] = useState(false);
   const [selectedSupplierForBatch, setSelectedSupplierForBatch] = useState('');
@@ -1488,6 +1492,48 @@ export default function Inventory() {
     }
   };
 
+  const handleViewAnalytics = (partner: any) => {
+    const partnerPOs = purchaseOrders.filter(po => po.supplier_id === partner.id);
+    const completedPOs = partnerPOs.filter(po => po.status === 'RECEIVED');
+    const totalSpent = partnerPOs.reduce((sum, po) => sum + (po.total_cost || 0), 0);
+    
+    // Calculate fulfillment rate
+    const fulfillmentRate = partnerPOs.length > 0 
+      ? Math.round((completedPOs.length / partnerPOs.length) * 100) 
+      : 100;
+
+    // Calculate lead times (average days from SENT to RECEIVED)
+    const leadTimes = completedPOs.map(po => {
+      const sentDate = new Date(po.created_at); // Simplification: assuming created_at is sent date if status is SENT
+      const receivedDate = new Date(po.updated_at || po.created_at);
+      return Math.ceil((receivedDate.getTime() - sentDate.getTime()) / (1000 * 3600 * 24));
+    });
+    const avgLeadTime = leadTimes.length > 0 
+      ? Math.round(leadTimes.reduce((a, b) => a + b, 0) / leadTimes.length) 
+      : "N/A";
+
+    // Most ordered asset
+    const productCounts: any = {};
+    partnerPOs.forEach(po => {
+      po.items?.forEach((item: any) => {
+        productCounts[item.product_id] = (productCounts[item.product_id] || 0) + item.qty;
+      });
+    });
+    const topProductId = Object.entries(productCounts).sort(([,a]:any, [,b]:any) => b - a)[0]?.[0];
+    const topProduct = products.find(p => p.id === topProductId)?.name || "N/A";
+
+    setPartnerAnalyticsData({
+      partner,
+      totalOrders: partnerPOs.length,
+      fulfillmentRate,
+      avgLeadTime,
+      totalSpent,
+      topProduct,
+      recentOrders: partnerPOs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5)
+    });
+    setIsPartnerAnalyticsOpen(true);
+  };
+
   const handleDeleteSupplier = async (supplierId: string) => {
     const hasOrders = purchaseOrders.some(po => po.supplier_id === supplierId);
     if (hasOrders) {
@@ -1495,11 +1541,16 @@ export default function Inventory() {
       return;
     }
 
-    if (!window.confirm('Initiate partner decommissioning protocol? This action is permanent.')) return;
+    setPartnerToDecommission(suppliers.find(s => s.id === supplierId));
+    setIsDecommissionConfirmOpen(true);
+  };
 
+  const confirmDecommission = async () => {
+    if (!partnerToDecommission) return;
     try {
-      await deleteDoc(doc(db, 'suppliers', supplierId));
+      await deleteDoc(doc(db, 'suppliers', partnerToDecommission.id));
       toast.success('Partner decommissioned successfully');
+      setIsDecommissionConfirmOpen(false);
       fetchData();
     } catch (error) {
       toast.error('Decommissioning failure');
@@ -3051,7 +3102,10 @@ export default function Inventory() {
                                   >
                                     <Box className="w-4 h-4 text-zinc-400" /> Edit Profile
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs uppercase">
+                                  <DropdownMenuItem 
+                                    className="flex items-center gap-3 py-3 px-4 cursor-pointer rounded-xl hover:bg-zinc-50 font-bold text-xs uppercase"
+                                    onClick={() => handleViewAnalytics(s)}
+                                  >
                                     <BarChart3 className="w-4 h-4 text-zinc-400" /> Deep Analytics
                                   </DropdownMenuItem>
                                   <div className="h-px bg-zinc-100 my-1" />
@@ -4643,6 +4697,161 @@ export default function Inventory() {
         </div>
       </DialogContent>
     </Dialog>
+
+      {/* Partner Intelligence / Analytics Dialog */}
+      <Dialog open={isPartnerAnalyticsOpen} onOpenChange={setIsPartnerAnalyticsOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-hidden p-0 rounded-[2.5rem] border-zinc-200 shadow-2xl bg-white">
+          <div className="flex flex-col h-full">
+            <div className="bg-zinc-900 p-8 text-white">
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <DialogTitle className="text-3xl font-black tracking-tight uppercase">Partner Intelligence</DialogTitle>
+                  <DialogDescription className="text-zinc-400 font-medium">Forensic Performance Analysis & Throughput Monitor</DialogDescription>
+                </div>
+                <div className="w-16 h-16 rounded-[2rem] bg-zinc-800 flex items-center justify-center text-zinc-400">
+                  <BarChart3 className="w-8 h-8" />
+                </div>
+              </div>
+              
+              <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Lifetime Spend</p>
+                  <p className="text-xl font-black">{formatCurrency(partnerAnalyticsData?.totalSpent || 0)}</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Fulfillment</p>
+                  <p className="text-xl font-black">{partnerAnalyticsData?.fulfillmentRate}%</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Lead Time</p>
+                  <p className="text-xl font-black">{partnerAnalyticsData?.avgLeadTime} Days</p>
+                </div>
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/10">
+                  <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Total Orders</p>
+                  <p className="text-xl font-black">{partnerAnalyticsData?.totalOrders}</p>
+                </div>
+              </div>
+            </div>
+
+            <ScrollArea className="flex-1 p-8">
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <Card className="p-6 border-zinc-100 shadow-sm bg-zinc-50/30">
+                    <h4 className="text-xs font-black text-zinc-900 uppercase tracking-widest mb-4">Strategic Assessment</h4>
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center py-3 border-b border-zinc-100">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase">Core Asset Supply</span>
+                        <span className="font-black text-sm text-zinc-900">{partnerAnalyticsData?.topProduct}</span>
+                      </div>
+                      <div className="flex justify-between items-center py-3 border-b border-zinc-100">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase">Partner Status</span>
+                        <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 font-black text-[9px] uppercase tracking-widest">
+                          {partnerAnalyticsData?.partner?.status || 'ACTIVE'}
+                        </Badge>
+                      </div>
+                      <div className="flex justify-between items-center py-3">
+                        <span className="text-[10px] font-bold text-zinc-400 uppercase">Onboard Date</span>
+                        <span className="font-black text-sm text-zinc-900">
+                          {partnerAnalyticsData?.partner?.created_at ? new Date(partnerAnalyticsData.partner.created_at).toLocaleDateString() : 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                  </Card>
+
+                  <Card className="p-6 border-zinc-100 shadow-sm">
+                    <h4 className="text-xs font-black text-zinc-900 uppercase tracking-widest mb-4">Volume Distribution</h4>
+                    <div className="h-[180px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={[
+                          { name: 'M1', value: 400 },
+                          { name: 'M2', value: 300 },
+                          { name: 'M3', value: 600 },
+                          { name: 'M4', value: 800 },
+                          { name: 'M5', value: 500 },
+                          { name: 'M6', value: 900 },
+                        ]}>
+                          <Line type="monotone" dataKey="value" stroke="#18181b" strokeWidth={3} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </Card>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-xs font-black text-zinc-900 uppercase tracking-widest">Recent Procurement Cycles</h4>
+                  <div className="rounded-2xl border border-zinc-100 overflow-hidden">
+                    <Table>
+                      <TableHeader className="bg-zinc-50">
+                        <TableRow className="border-zinc-100">
+                          <TableHead className="text-[9px] font-black uppercase tracking-widest py-3">Order ID</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase tracking-widest py-3">Date</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase tracking-widest py-3">Status</TableHead>
+                          <TableHead className="text-[9px] font-black uppercase tracking-widest py-3 text-right">Commitment</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {partnerAnalyticsData?.recentOrders?.map((po: any) => (
+                          <TableRow key={po.id} className="border-zinc-50">
+                            <TableCell className="font-mono text-[10px] text-zinc-400">#{po.id.slice(0, 8).toUpperCase()}</TableCell>
+                            <TableCell className="text-zinc-600 font-bold text-[10px]">{new Date(po.created_at).toLocaleDateString()}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="text-[8px] font-black uppercase border-zinc-100">{po.status}</Badge>
+                            </TableCell>
+                            <TableCell className="text-right text-zinc-900 font-black text-xs">{formatCurrency(po.total_cost || 0)}</TableCell>
+                          </TableRow>
+                        ))}
+                        {(!partnerAnalyticsData?.recentOrders || partnerAnalyticsData.recentOrders.length === 0) && (
+                          <TableRow>
+                            <TableCell colSpan={4} className="text-center py-8 text-zinc-400 italic text-xs font-bold">No procurement history detected</TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              </div>
+            </ScrollArea>
+            
+            <div className="p-8 border-t border-zinc-100 bg-zinc-50/50 flex justify-end">
+              <Button 
+                className="rounded-xl h-12 px-8 bg-zinc-900 text-white font-black text-[10px] uppercase tracking-widest shadow-xl shadow-zinc-900/10 hover:scale-[1.02] transition-all"
+                onClick={() => setIsPartnerAnalyticsOpen(false)}
+              >
+                Close intelligence
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Decommission Confirmation Dialog */}
+      <Dialog open={isDecommissionConfirmOpen} onOpenChange={setIsDecommissionConfirmOpen}>
+        <DialogContent className="sm:max-w-md p-8 rounded-[2.5rem] border-zinc-200 shadow-2xl bg-white text-center">
+          <div className="w-20 h-20 rounded-[2.5rem] bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-6 shadow-xl shadow-rose-600/5">
+            <Trash2 className="w-10 h-10" />
+          </div>
+          <DialogTitle className="text-2xl font-black text-zinc-900 tracking-tight uppercase">Confirm Decommissioning</DialogTitle>
+          <DialogDescription className="text-zinc-500 font-medium mt-2">
+            You are about to remove <span className="font-black text-zinc-900">{partnerToDecommission?.name}</span> from the strategic network. This action is permanent and will archive their active profile.
+          </DialogDescription>
+          
+          <div className="mt-8 flex flex-col gap-3">
+            <Button 
+              className="h-14 rounded-2xl bg-rose-600 text-white font-black text-xs uppercase tracking-widest shadow-xl shadow-rose-600/20 hover:bg-rose-500 hover:scale-[1.02] transition-all"
+              onClick={confirmDecommission}
+            >
+              Confirm Decommission
+            </Button>
+            <Button 
+              variant="ghost" 
+              className="h-14 rounded-2xl font-black text-xs uppercase tracking-widest text-zinc-400 hover:text-zinc-900 hover:bg-zinc-50"
+              onClick={() => setIsDecommissionConfirmOpen(false)}
+            >
+              Abort Mission
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

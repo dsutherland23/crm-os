@@ -42,7 +42,10 @@ import {
   Crown,
   Share2,
   Banknote,
-  ChevronDown
+  ChevronDown,
+  Printer,
+  Smartphone,
+  ExternalLink
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -103,10 +106,14 @@ import {
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
 import { motion, AnimatePresence } from "motion/react";
+import { createPortal } from "react-dom";
 
 import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, where, addDoc, serverTimestamp, deleteDoc, writeBatch, getStorage, ref, uploadBytes, getDownloadURL, limit, increment as fStoreIncrement } from "@/lib/firebase";
+import { deleteObject } from "firebase/storage";
 import { recordFinancialEvent } from "@/lib/ledger";
+import { recordAuditLog } from "@/lib/audit";
 import { usePendingAction } from "@/context/PendingActionContext";
+import { generateProfessionalReceipt } from "@/lib/pdf-generator";
 
 export default function CRM() {
   const { activeBranch, formatCurrency, topSpenderThreshold, enterpriseId, branding, hasPermission, userRole, posSession } = useModules();
@@ -135,6 +142,7 @@ export default function CRM() {
   const [commType, setCommType] = useState("Email");
   const [isSubmittingNote, setIsSubmittingNote] = useState(false);
   const [isSubmittingComm, setIsSubmittingComm] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const [isTagDialogOpen, setIsTagDialogOpen] = useState(false);
   const [newTag, setNewTag] = useState("");
@@ -175,6 +183,323 @@ export default function CRM() {
     reference: ""
   });
   const [isSubmittingCollection, setIsSubmittingCollection] = useState(false);
+  const [documentHubTx, setDocumentHubTx] = useState<any>(null);
+  const [isDocumentHubOpen, setIsDocumentHubOpen] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState<string | null>(null);
+  const [thermalSize, setThermalSize] = useState<'80mm' | '58mm'>('80mm');
+
+  // Generate PDF Preview when hub opens
+  useEffect(() => {
+    if (isDocumentHubOpen && documentHubTx) {
+      const generatePreview = async () => {
+        try {
+          const previewUri = await generateProfessionalReceipt(branding, enterpriseId, documentHubTx, 'blob');
+          setPdfPreview(previewUri as string);
+        } catch (err) {
+          console.error("Preview generation failed", err);
+        }
+      };
+      generatePreview();
+    } else {
+      setPdfPreview(null);
+    }
+  }, [isDocumentHubOpen, documentHubTx, branding, enterpriseId]);
+
+  const handleOpenDocumentHub = (tx: any) => {
+    setDocumentHubTx({
+      id: tx.id,
+      type: tx.type || "SALE",
+      customerName: selectedCustomer?.name || tx.customerName || "Guest",
+      customerAddress: selectedCustomer?.address || "",
+      customerPhone: selectedCustomer?.phone || "",
+      customerEmail: selectedCustomer?.email || "",
+      date: tx.timestamp?.toDate ? tx.timestamp.toDate().toLocaleString() : new Date(tx.timestamp || 0).toLocaleString(),
+      paymentMethod: tx.payment_method || tx.paymentMethod || "CASH",
+      receipt_id: tx.receipt_id,
+      reference_number: tx.reference_number,
+      exchangePolicy: "EXCHANGE POLICY: All sales are final. We offer exchanges only within 7 days of purchase for items that are unopened, undamaged, and in original packaging. No cash refunds.",
+      items: (tx.items || []).map((item: any) => ({
+        ...item,
+        qty: Number(item.qty) || 1,
+        price: Number(item.price) || 0
+      })),
+      subtotal: Number(tx.subtotal) || Number(tx.total) || 0,
+      tax: Number(tx.tax) || 0,
+      total: Number(tx.total) || 0,
+      previous_balance: tx.previous_balance !== undefined ? Number(tx.previous_balance) : undefined,
+      new_balance: tx.new_balance !== undefined ? Number(tx.new_balance) : undefined
+    });
+    setIsDocumentHubOpen(true);
+  };
+
+  const handlePrintPDF = async () => {
+    if (!documentHubTx) return;
+    const tid = toast.loading("Building Professional PDF...");
+    try {
+      await generateProfessionalReceipt(branding, enterpriseId, documentHubTx);
+      toast.success("PDF Ready", { id: tid });
+    } catch (err) {
+      toast.error("PDF Failed", { id: tid });
+    }
+  };
+
+  const handlePrintThermal = () => {
+    if (!documentHubTx) return;
+
+    // Create a hidden iframe for isolated printing
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+
+    const canvasWidth = thermalSize === '80mm' ? '72mm' : '50mm';
+    const paperSize = thermalSize === '80mm' ? '80mm auto' : '58mm auto';
+    const fontSize = thermalSize === '80mm' ? '12px' : '10px';
+    const headerSize = thermalSize === '80mm' ? '22px' : '18px';
+    const boxPadding = thermalSize === '80mm' ? '12px' : '8px';
+
+    const itemsHtml = (documentHubTx.items || []).map((item: any) => `
+      <div style="margin-bottom: 8px; font-size: ${fontSize};">
+        <div style="display: flex; justify-content: space-between; font-weight: bold;">
+          <span style="text-transform: uppercase;">${item.name}</span>
+          <span>${formatCurrency(Number(item.qty) * Number(item.price)).replace('$', '')}</span>
+        </div>
+        <div style="font-size: ${thermalSize === '80mm' ? '10px' : '9px'}; color: #666;">
+          ${item.qty} x ${formatCurrency(item.price).replace('$', '')}
+        </div>
+      </div>
+    `).join('');
+
+    const html = `
+      <html>
+        <head>
+          <style>
+            @page { margin: 0; size: ${paperSize}; }
+            body { 
+              width: ${canvasWidth}; 
+              margin: 0 auto; 
+              padding: 5mm 0; 
+              font-family: 'Courier New', Courier, monospace; 
+              color: black;
+              background: white;
+              line-height: 1.2;
+            }
+            .center { text-align: center; }
+            .bold { font-weight: bold; }
+            .divider { border-top: 1px dashed black; margin: 8px 0; }
+            .uppercase { text-transform: uppercase; }
+            .black-box { 
+              background: black; 
+              color: white; 
+              padding: ${boxPadding}; 
+              text-align: center; 
+              font-weight: bold; 
+              margin: 15px 0;
+              font-size: 10px;
+              letter-spacing: 1px;
+            }
+            .legal { 
+              font-size: 8px; 
+              text-align: center; 
+              margin-top: 10px; 
+              font-style: italic;
+              color: #444;
+              line-height: 1.3;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="center">
+            <h1 style="margin: 0; font-size: ${headerSize}; font-weight: bold;" class="uppercase">${branding.name}</h1>
+            <p style="margin: 5px 0; font-size: 10px;">
+              ${branding.address || ''}<br/>
+              ${branding.phone || ''}
+            </p>
+            <div class="divider"></div>
+            <p class="bold" style="margin: 5px 0; font-size: 13px;">SALES RECEIPT</p>
+            <p style="margin: 0; font-size: 11px;">#${documentHubTx.receipt_id || documentHubTx.id.substring(0, 8)}</p>
+            <p style="margin: 0; font-size: 11px;">${documentHubTx.date}</p>
+            <div class="divider"></div>
+          </div>
+
+          <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: ${fontSize}; margin-bottom: 5px;">
+            <span>Item</span>
+            <span>Total</span>
+          </div>
+          <div class="divider"></div>
+
+          <div style="margin-bottom: 10px;">
+            ${itemsHtml}
+          </div>
+
+          <div class="divider"></div>
+          
+          <div style="font-size: ${fontSize}; line-height: 1.5;">
+            <div style="display: flex; justify-content: space-between; font-weight: bold;">
+              <span>SUBTOTAL:</span>
+              <span>${formatCurrency(documentHubTx.subtotal || documentHubTx.total).replace('$', '')}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>TAX:</span>
+              <span>${formatCurrency(documentHubTx.tax || 0).replace('$', '')}</span>
+            </div>
+            <div class="divider"></div>
+            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: ${thermalSize === '80mm' ? '16px' : '14px'};">
+              <span>TOTAL:</span>
+              <span>${formatCurrency(documentHubTx.total).replace('$', '')}</span>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="center">
+            <p class="bold" style="margin: 10px 0 5px 0; font-size: 10px;">THANK YOU!</p>
+            <div class="legal">
+              ${documentHubTx.exchangePolicy}
+            </div>
+            
+            <div class="black-box">
+              ${(documentHubTx.receipt_id || documentHubTx.id.substring(0, 10)).toUpperCase()}
+            </div>
+
+            <p style="font-size: 8px; color: #999;">
+              OrivoCRM.pro System v2026
+            </p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const doc = iframe.contentWindow?.document;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      setTimeout(() => {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+        setTimeout(() => document.body.removeChild(iframe), 1000);
+      }, 500);
+    }
+  };
+
+  const handleShareWhatsApp = async () => {
+    if (!documentHubTx) return;
+    if (!documentHubTx.customerPhone) {
+      toast.error("Customer phone number missing");
+      return;
+    }
+
+    // Context-Aware Message Templates
+    const isPayment = documentHubTx.type === 'PAYMENT';
+    const docType = isPayment ? 'Receipt' : 'Invoice';
+    const amount = formatCurrency(documentHubTx.total);
+    const refVal = documentHubTx.receipt_id || documentHubTx.id.substring(0, 8);
+    const phone = documentHubTx.customerPhone.replace(/\D/g, '');
+    
+    const bName = branding.name || enterpriseId || "ORIVO CRM";
+    let message = `*OFFICIAL ${docType.toUpperCase()} FROM ${bName.toUpperCase()}*\n\n` +
+      `Hello ${documentHubTx.customerName},\n\n` +
+      (isPayment 
+        ? `We have received your payment of *${amount}* and it has been successfully applied to your account.\n`
+        : `Thank you for your purchase! Your total invoice amount is *${amount}*.\n`) +
+      `\n*Date:* ${documentHubTx.date}\n` +
+      `*Reference:* ${refVal}\n`;
+
+    if (documentHubTx.new_balance !== undefined) {
+      message += `*Current Balance:* ${formatCurrency(documentHubTx.new_balance)}\n`;
+    }
+
+    message += `\n_You can view your digital record here:_ ${window.location.origin}/verify/${documentHubTx.id}\n\n` +
+      `Thank you for choosing ${branding.name}!`;
+
+    const toastId = toast.loading("Queueing WhatsApp delivery...");
+    try {
+      const commRef = await addDoc(collection(db, "communications"), {
+        enterprise_id: enterpriseId,
+        customer_id: selectedCustomer?.id || null,
+        customer_name: documentHubTx.customerName,
+        type: "WHATSAPP",
+        status: "PENDING",
+        content: message,
+        transaction_id: documentHubTx.id,
+        recipient: phone,
+        timestamp: serverTimestamp(),
+        sender_id: auth.currentUser?.uid,
+        sender_name: auth.currentUser?.email || posSession?.staffName || "System"
+      });
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "WhatsApp Share Queued",
+        details: `Receipt/Invoice ${refVal} queued for WhatsApp delivery to ${phone}`,
+        severity: "INFO",
+        type: "CRM",
+        metadata: { communication_id: commRef.id, txId: documentHubTx.id }
+      });
+
+      toast.success("Document queued for WhatsApp delivery", { id: toastId });
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+    } catch (error) {
+      console.error("WhatsApp queue error:", error);
+      toast.error("Failed to queue communication", { id: toastId });
+    }
+  };
+
+  const handleShareEmail = async () => {
+    if (!documentHubTx) return;
+    const isPayment = documentHubTx.type === 'PAYMENT';
+    const docType = isPayment ? 'Receipt' : 'Invoice';
+    const refVal = documentHubTx.receipt_id || documentHubTx.id.substring(0, 8);
+    const email = documentHubTx.customerEmail || '';
+    
+    const subject = `${docType} #${refVal} from ${branding.name}`;
+    const body = `Hello ${documentHubTx.customerName},\n\n` +
+      `Please find the details of your official ${docType.toLowerCase()} below:\n\n` +
+      `Transaction ID: ${refVal}\n` +
+      `Date: ${documentHubTx.date}\n` +
+      `Amount: ${formatCurrency(documentHubTx.total)}\n` +
+      (documentHubTx.new_balance !== undefined ? `Current Account Balance: ${formatCurrency(documentHubTx.new_balance)}\n` : '') +
+      `\nThank you for your business!\n\n--\n${branding.name}\n${branding.tagline || ''}`;
+
+    const toastId = toast.loading("Queueing Email delivery...");
+    try {
+      const commRef = await addDoc(collection(db, "communications"), {
+        enterprise_id: enterpriseId,
+        customer_id: selectedCustomer?.id || null,
+        customer_name: documentHubTx.customerName,
+        type: "EMAIL",
+        status: "PENDING",
+        content: body,
+        subject: subject,
+        transaction_id: documentHubTx.id,
+        recipient: email,
+        timestamp: serverTimestamp(),
+        sender_id: auth.currentUser?.uid,
+        sender_name: auth.currentUser?.email || posSession?.staffName || "System"
+      });
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "Email Share Queued",
+        details: `Receipt/Invoice ${refVal} queued for Email delivery to ${email}`,
+        severity: "INFO",
+        type: "CRM",
+        metadata: { communication_id: commRef.id, txId: documentHubTx.id }
+      });
+
+      toast.success("Document queued for Email delivery", { id: toastId });
+      window.open(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
+    } catch (error) {
+      console.error("Email queue error:", error);
+      toast.error("Failed to queue communication", { id: toastId });
+    }
+  };
 
   // New Management State
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
@@ -197,7 +522,7 @@ export default function CRM() {
     photo_url: ""
   });
   const [isSubmittingCustomer, setIsSubmittingCustomer] = useState(false);
-  const [confirmName, setConfirmName] = useState(""); // FIX: Moved from IIFE at line 2550
+  const [confirmName, setConfirmName] = useState("");
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -310,9 +635,11 @@ export default function CRM() {
         status: "COMPLETED",
         branch_id: activeBranch,
         staff_id: posSession?.staffId || "System",
-        staff_name: posSession?.staffName || "System"
+        staff_name: posSession?.staffName || "System",
+        previous_balance: selectedCustomer.balance || 0,
+        new_balance: newBalance
       };
-      await addDoc(collection(db, "transactions"), paymentTx);
+      const txRef = await addDoc(collection(db, "transactions"), paymentTx);
 
       // 3. Record Financial Event (for global ledger)
       await recordFinancialEvent({
@@ -320,26 +647,26 @@ export default function CRM() {
         amount: amountPaid,
         sourceId: selectedCustomer.id,
         sourceType: "PAYMENT_RECEIVED",
-        description: `Debt Payment - ${selectedCustomer.name}`,
-        metadata: {
-          method: collectionData.method,
-          reference: collectionData.reference,
-          previous_balance: selectedCustomer.balance,
-          new_balance: newBalance
-        }
+        description: `Payment from ${selectedCustomer.name} (Ref: ${collectionData.reference || "N/A"})`,
+        metadata: { branchId: activeBranch?.id || "main" }
       });
 
       // 4. Log Audit
-      await addDoc(collection(db, "audit_logs"), {
+      await recordAuditLog({
         action: "Payment Collected",
         details: `Collected ${formatCurrency(amountPaid)} from ${selectedCustomer.name} via ${collectionData.method}. Remaining: ${formatCurrency(newBalance)}`,
-        enterprise_id: enterpriseId,
-        timestamp: serverTimestamp(),
-        user: posSession?.staffName || "System",
-        severity: "INFO"
+        enterpriseId,
+        severity: "INFO",
+        type: "FINANCE"
       });
 
-      toast.success(`Payment recorded: ${receiptId}`, { id: tid });
+      toast.success(`Payment recorded: ${receiptId}`, { 
+        id: tid,
+        action: {
+          label: "Open Hub",
+          onClick: () => handleOpenDocumentHub({ ...paymentTx, id: txRef.id })
+        }
+      });
       setIsCollectPaymentOpen(false);
       setCollectionData({ amount: "", method: "CASH", reference: "" });
       
@@ -423,11 +750,34 @@ export default function CRM() {
       return;
     }
     setIsSubmittingCustomer(true);
-    const toastId = toast.loading("Purging customer record...");
+    const toastId = toast.loading("Purging customer record and files...");
     try {
       const batch = writeBatch(db);
-      // Cascade: mark all associated sub-documents for deletion
-      const subCollections = ["transactions", "invoices", "credit_notes", "documents"];
+      
+      // 1. Storage Cleanup - Delete actual files
+      const docsSnap = await import("@/lib/firebase").then(({ getDocs }) =>
+        getDocs(query(collection(db, "documents"),
+          where("enterprise_id", "==", enterpriseId),
+          where("customer_id", "==", selectedCustomer.id)
+        ))
+      );
+
+      for (const d of docsSnap.docs) {
+        const data = d.data();
+        if (data.storagePath) {
+          try {
+            const storage = getStorage();
+            const fileRef = ref(storage, data.storagePath);
+            await deleteObject(fileRef);
+          } catch (storageErr) {
+            console.warn("Storage deletion failed (likely already gone):", storageErr);
+          }
+        }
+        batch.delete(d.ref);
+      }
+
+      // 2. Database Cleanup - Sub-collections
+      const subCollections = ["transactions", "invoices", "credit_notes", "notes", "communications", "customer_campaign_usage"];
       for (const col of subCollections) {
         const snap = await import("@/lib/firebase").then(({ getDocs }) =>
           getDocs(query(collection(db, col),
@@ -437,9 +787,21 @@ export default function CRM() {
         );
         snap.forEach((d: any) => batch.delete(d.ref));
       }
+
+      // 3. Delete Main Record
       batch.delete(doc(db, "customers", selectedCustomer.id));
+
+      // 4. Audit Log
+      await recordAuditLog({
+        enterpriseId,
+        action: "Customer Permanently Deleted",
+        details: `Customer ${selectedCustomer.name} (ID: ${selectedCustomer.id}) and all associated records/files were purged by ${auth.currentUser?.email}`,
+        severity: "CRITICAL",
+        type: "CRM"
+      });
+
       await batch.commit();
-      toast.success("Customer and all associated records deleted.", { id: toastId });
+      toast.success("Customer and all associated records purged successfully.", { id: toastId });
       setIsDeleteConfirmOpen(false);
       setIsPermanentDeleteOpen(false);
       setSelectedCustomer(null);
@@ -479,9 +841,6 @@ export default function CRM() {
 
   useEffect(() => {
     if (!enterpriseId) return;
-    // FIX: Added limit(500) cap — unbounded onSnapshot would download ALL customers
-    // to the browser on every page load, crashing tabs at scale and causing unbounded
-    // Firebase read billing. Use search to navigate beyond this window.
     const q = query(
       collection(db, "customers"),
       where("enterprise_id", "==", enterpriseId),
@@ -494,7 +853,9 @@ export default function CRM() {
       // Filter and sort locally to avoid composite index requirement
       docs = docs.filter(d => d.status !== "Archived");
       docs.sort((a, b) => {
-        if (a.status !== b.status) return a.status.localeCompare(b.status);
+        const sA = a.status || "ACTIVE";
+        const sB = b.status || "ACTIVE";
+        if (sA !== sB) return sA.localeCompare(sB);
         return (a.name || "").localeCompare(b.name || "");
       });
       
@@ -540,7 +901,8 @@ export default function CRM() {
     const q = query(
       collection(db, "transactions"), 
       where("enterprise_id", "==", enterpriseId),
-      where("customer_id", "==", selectedCustomer.id === 'walk-in' ? null : selectedCustomer.id)
+      where("customer_id", "==", selectedCustomer.id === 'walk-in' ? null : selectedCustomer.id),
+      limit(100)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const txs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
@@ -557,7 +919,8 @@ export default function CRM() {
     const qInv = query(
       collection(db, "invoices"),
       where("enterprise_id", "==", enterpriseId),
-      where("customer_id", "==", selectedCustomer.id)
+      where("customer_id", "==", selectedCustomer.id),
+      limit(100)
     );
     const unsubscribeInv = onSnapshot(qInv, (snapshot) => {
       const invs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
@@ -570,7 +933,8 @@ export default function CRM() {
     const qCN = query(
       collection(db, "credit_notes"),
       where("enterprise_id", "==", enterpriseId),
-      where("customer_id", "==", selectedCustomer.id)
+      where("customer_id", "==", selectedCustomer.id),
+      limit(100)
     );
     const unsubscribeCN = onSnapshot(qCN, (snapshot) => {
       const cns = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
@@ -594,7 +958,8 @@ export default function CRM() {
     const q = query(
       collection(db, "documents"),
       where("enterprise_id", "==", enterpriseId),
-      where("customer_id", "==", selectedCustomer.id)
+      where("customer_id", "==", selectedCustomer.id),
+      limit(100)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
@@ -615,8 +980,6 @@ export default function CRM() {
     const lastPurchaseDate = selectedCustomer.last_purchase_date?.toDate ? selectedCustomer.last_purchase_date.toDate() : new Date(selectedCustomer.last_purchase_date || selectedCustomer.lastContact || 0);
     const daysSinceLastPurchase = Math.floor((new Date().getTime() - lastPurchaseDate.getTime()) / (1000 * 3600 * 24));
     
-    // FIX: Use relative thresholds and honest heuristic labels — not fake ML percentages.
-    // "High/Medium/Low" is based on recency + spend, not hardcoded against a $1000 floor.
     const transactionCount = (selectedCustomer.transaction_count || 1);
     const avgSpend = totalSpent / transactionCount;
     const isHighValue = totalSpent > avgSpend * transactionCount * 0.8;
@@ -649,7 +1012,6 @@ export default function CRM() {
       churnText = "Engagement dropping";
     }
 
-    // FIX: "AI suggests" → "System recommends" — this is rule-based logic, not generative AI
     let recommendation = `Customer shows consistent engagement. System recommends maintaining regular communication.`;
     if (selectedCustomer.segment === "VIP") {
       recommendation = `VIP customer — System recommends priority outreach and exclusive offers.`;
@@ -677,9 +1039,10 @@ export default function CRM() {
     });
 
     (selectedCustomer.communications || []).forEach((comm: any) => {
+      const cType = comm.type || "Communication";
       activities.push({
-        type: comm.type.toUpperCase(),
-        title: comm.content.substring(0, 30) + "...",
+        type: cType.toUpperCase(),
+        title: (comm.content || "").substring(0, 30) + "...",
         date: new Date(comm.timestamp).toLocaleDateString(),
         timestamp: new Date(comm.timestamp).getTime(),
         amount: "Engagement",
@@ -757,23 +1120,39 @@ export default function CRM() {
     return filtered;
   }, [customers, searchTerm, selectedSegment]);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedCustomer) return;
+  const handleFileUpload = async (files: FileList | File[] | null | React.ChangeEvent<HTMLInputElement>) => {
+    let fileToUpload: File | null = null;
+    
+    if (files && 'target' in files) {
+      fileToUpload = (files as React.ChangeEvent<HTMLInputElement>).target.files?.[0] || null;
+    } else if (files instanceof FileList) {
+      fileToUpload = files[0];
+    } else if (Array.isArray(files)) {
+      fileToUpload = files[0];
+    }
 
-    if (file.size > 10 * 1024 * 1024) {
+    if (!fileToUpload || !selectedCustomer) return;
+
+    if (fileToUpload.size > 10 * 1024 * 1024) {
       toast.error("File exceeds 10MB limit");
       return;
     }
 
     setIsUploading(true);
-    const toastId = toast.loading(`Uploading "${file.name}"...`);
+    const toastId = toast.loading(`Uploading "${fileToUpload.name}"...`);
     let storageRef: any = null;
+
+    if (!enterpriseId) {
+      toast.error("Enterprise context missing. Please reload.");
+      setIsUploading(false);
+      toast.dismiss(toastId);
+      return;
+    }
 
     try {
       const storage = getStorage();
-      storageRef = ref(storage, `enterprise/${enterpriseId}/customers/${selectedCustomer.id}/docs/${Date.now()}_${file.name}`);
-      await uploadBytes(storageRef, file);
+      storageRef = ref(storage, `enterprise/${enterpriseId}/customers/${selectedCustomer.id}/docs/${Date.now()}_${fileToUpload.name}`);
+      await uploadBytes(storageRef, fileToUpload);
       const url = await getDownloadURL(storageRef);
 
       // Atomic: if Firestore write fails, delete the orphaned Storage file
@@ -781,9 +1160,9 @@ export default function CRM() {
         await addDoc(collection(db, "documents"), {
           customer_id: selectedCustomer.id,
           enterprise_id: enterpriseId,
-          name: file.name,
-          type: file.type,
-          size: file.size,
+          name: fileToUpload.name,
+          type: fileToUpload.type,
+          size: fileToUpload.size,
           url: url,
           path: storageRef.fullPath,
           uploadedAt: new Date().toISOString(),
@@ -793,20 +1172,21 @@ export default function CRM() {
       } catch (firestoreError) {
         // Rollback: remove the already-uploaded Storage file to prevent orphaning
         try {
-          const { deleteObject } = await import("firebase/storage");
           await deleteObject(storageRef);
         } catch (_) { /* best-effort cleanup */ }
         throw firestoreError;
       }
 
-      toast.success(`Successfully uploaded ${file.name}`, { id: toastId });
+      toast.success(`Successfully uploaded ${fileToUpload.name}`, { id: toastId });
     } catch (error) {
       console.error(error);
       toast.error("Upload failed", { id: toastId });
     } finally {
       setIsUploading(false);
-      // Reset input so the same file can be re-uploaded after failure
-      e.target.value = "";
+      // Reset input if it was a change event
+      if (files && 'target' in files) {
+        (files as React.ChangeEvent<HTMLInputElement>).target.value = "";
+      }
     }
   };
 
@@ -866,7 +1246,6 @@ export default function CRM() {
     } catch (error: any) {
       console.error("AI Error:", error);
       if (error?.status === 404) {
-        // FIX: The API route doesn't exist in this deployment environment
         toast.error("AI Copilot is not available in this environment.", {
           description: "Contact your administrator to enable the AI integration.",
           duration: 6000
@@ -987,6 +1366,10 @@ export default function CRM() {
   };
 
   const handlePrintReport = (reportName: string) => {
+    if (!isManager && (reportName === "Purchase History" || reportName === "Full Audit")) {
+      toast.error("Access Denied: Manager role required for aggregate exports.");
+      return;
+    }
     setActivePrintReport(reportName);
     let checkInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -996,10 +1379,8 @@ export default function CRM() {
       setActivePrintReport(null);
     };
 
-    // Safety fallback: always print after 3s regardless of image state
     const timer = setTimeout(triggerPrint, 3000);
 
-    // Proactive check: print as soon as all images are ready
     checkInterval = setInterval(() => {
       const container = document.getElementById('printable-report-container');
       if (container) {
@@ -1012,7 +1393,6 @@ export default function CRM() {
       }
     }, 100);
 
-    // Guaranteed cleanup if component unmounts mid-wait
     return () => { clearTimeout(timer); if (checkInterval) clearInterval(checkInterval); };
   };
 
@@ -1045,7 +1425,6 @@ export default function CRM() {
     const amountStr = String(invoiceData.amount).trim();
     const amountVal = parseFloat(amountStr);
     
-    // Currency format validation (optional strict: ^\d+(\.\d{1,2})?$)
     if (!amountStr || isNaN(amountVal) || amountVal <= 0 || !/^\d+(\.\d{1,2})?$/.test(amountStr)) {
       toast.error("Please enter a valid currency amount (e.g., 150.00)");
       return;
@@ -1056,7 +1435,6 @@ export default function CRM() {
       return;
     }
 
-    // Date format validation (YYYY-MM-DD)
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!invoiceData.dueDate || !dateRegex.test(invoiceData.dueDate)) {
       toast.error("Please provide a valid due date (YYYY-MM-DD)");
@@ -1069,13 +1447,11 @@ export default function CRM() {
       return;
     }
 
-    // Ensure due date isn't arbitrarily in the past (e.g., year 2000) - simple check
     if (dueDateObj.getFullYear() < 2000) {
       toast.error("Please enter a realistic due date");
       return;
     }
 
-    // Warn (non-blocking) if the due date is in the past
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (dueDateObj < today) {
@@ -1086,7 +1462,6 @@ export default function CRM() {
 
     setIsSubmittingInvoice(true);
     try {
-      const { addDoc, collection, serverTimestamp } = await import("@/lib/firebase");
       await addDoc(collection(db, "invoices"), {
         invoice_number: invoiceData.invoiceNumber.trim(),
         customer_id: selectedCustomer.id,
@@ -1329,7 +1704,10 @@ export default function CRM() {
                </select>
              </div>
              <div className="space-y-2">
-               <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Reference #</Label>
+               <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center justify-between">
+                 Reference #
+                 <span className="text-[8px] font-bold text-zinc-300 normal-case">(For Bank Reconciliation)</span>
+               </Label>
                <Input 
                  placeholder="Optional"
                  value={collectionData.reference}
@@ -1344,7 +1722,7 @@ export default function CRM() {
             onClick={handleCollectPayment}
             disabled={isSubmittingCollection || !collectionData.amount}
           >
-            {isSubmittingCollection ? "Processing..." : `Record ${formatCurrency(parseFloat(collectionData.amount) || 0)} Payment`}
+            {isSubmittingCollection ? "Processing..." : `Record & Settle ${formatCurrency(parseFloat(collectionData.amount) || 0)}`}
           </Button>
         </div>
       </DialogContent>
@@ -1691,11 +2069,13 @@ export default function CRM() {
           <div className="flex items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="rounded-xl border-zinc-200 h-10 px-4 font-bold text-[10px] uppercase tracking-widest bg-white shadow-sm hover:bg-zinc-50 flex items-center gap-2">
-                  <Filter className="w-3.5 h-3.5 text-zinc-400" />
-                  <span className="text-zinc-500">View:</span>
-                  <span className="text-zinc-900">{selectedSegment}</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-zinc-400 ml-1" />
+                <Button variant="outline" className="rounded-xl border-zinc-200 h-11 px-4 font-black text-[10px] uppercase tracking-widest bg-white shadow-sm hover:bg-zinc-50 flex items-center gap-2 transition-all">
+                  <div className="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 mr-1">
+                    <Filter className="w-3.5 h-3.5" />
+                  </div>
+                  <span className="text-zinc-400">Showing:</span>
+                  <span className="text-zinc-900">{selectedSegment === "All" ? "All Accounts" : selectedSegment}</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-zinc-300 ml-1" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="w-56 rounded-2xl border-zinc-200 p-2 shadow-xl bg-white/95 backdrop-blur-sm">
@@ -1858,14 +2238,12 @@ export default function CRM() {
               </div>
               <div className="flex flex-wrap items-center gap-3 mt-4 lg:mt-0">
                 <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button className={cn(buttonVariants({ variant: "outline" }), "rounded-xl border-zinc-200 h-12 px-6 font-bold text-xs bg-white shadow-sm hover:bg-zinc-50 transition-all cursor-pointer")}>
-                      <MoreHorizontal className="w-4 h-4 mr-2" />
-                      Actions
-                    </button>
-                  }
-                />
+                <DropdownMenuTrigger asChild>
+                  <button className={cn(buttonVariants({ variant: "outline" }), "rounded-xl border-zinc-200 h-12 px-6 font-bold text-xs bg-white shadow-sm hover:bg-zinc-50 transition-all cursor-pointer")}>
+                    <MoreHorizontal className="w-4 h-4 mr-2" />
+                    Actions
+                  </button>
+                </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 rounded-2xl border-zinc-200 p-2 shadow-xl">
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest px-3 py-2">Profile Management</DropdownMenuLabel>
@@ -2074,27 +2452,6 @@ export default function CRM() {
                         <Button onClick={() => setIsOfferDialogOpen(true)} variant="outline" className="w-full rounded-xl border-blue-200 text-blue-600 hover:bg-blue-50 font-bold text-xs h-10">
                           Generate Personalized Offer
                         </Button>
-                        <Dialog open={isOfferDialogOpen} onOpenChange={setIsOfferDialogOpen}>
-                          <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-md">
-                            <DialogHeader>
-                              <DialogTitle>Generate Personalized Offer</DialogTitle>
-                              <DialogDescription>Create a custom offer for {selectedCustomer.name}</DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-4 py-4">
-                              <Textarea 
-                                placeholder="Describe the offer details..." 
-                                value={offerDetails}
-                                onChange={(e) => setOfferDetails(e.target.value)}
-                                className="min-h-[100px] rounded-xl"
-                              />
-                            </div>
-                            <DialogFooter>
-                              <Button className="w-full rounded-xl bg-blue-600 text-white hover:bg-blue-700 h-12 font-bold" onClick={handleGenerateOffer}>
-                                Generate & Save
-                              </Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
                       </div>
                     </div>
                   </CardContent>
@@ -2130,26 +2487,6 @@ export default function CRM() {
                         <Button onClick={() => setIsTagDialogOpen(true)} variant="ghost" size="sm" className="h-6 px-2 rounded-lg text-blue-600 hover:bg-blue-50 text-[10px] font-bold">
                           + Add Tag
                         </Button>
-                        <Dialog open={isTagDialogOpen} onOpenChange={setIsTagDialogOpen}>
-                          <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-md">
-                            <DialogHeader>
-                              <DialogTitle>Add Custom Tag</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4 py-4">
-                              <Input 
-                                placeholder="Enter tag name..." 
-                                value={newTag}
-                                onChange={(e) => setNewTag(e.target.value)}
-                                className="rounded-xl h-11"
-                              />
-                            </div>
-                            <DialogFooter>
-                              <Button className="w-full rounded-xl bg-zinc-900 text-white h-12 font-bold" onClick={handleAddTag}>
-                                Add Tag
-                              </Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
                       </div>
                     </div>
                   </CardContent>
@@ -2279,35 +2616,65 @@ export default function CRM() {
                         <TableRow key={tx.id} className="hover:bg-zinc-50 transition-colors border-b border-zinc-50 cursor-pointer group" onClick={() => { setSelectedTransaction(tx); setIsTransactionDialogOpen(true); }}>
                           <TableCell className="py-4">
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-lg bg-zinc-100 flex items-center justify-center">
-                                <History className="w-4 h-4 text-zinc-400" />
+                              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105", tx.type === "PAYMENT" ? "bg-emerald-50" : "bg-zinc-100")}>
+                                {tx.type === "PAYMENT" ? (
+                                  <Banknote className="w-5 h-5 text-emerald-600" />
+                                ) : (
+                                  <History className="w-5 h-5 text-zinc-400" />
+                                )}
                               </div>
                               <div>
-                                <p className="font-bold text-zinc-900 text-sm">#{tx.id.substring(0, 8)}</p>
-                                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{tx.items?.length || 0} ITEMS</p>
+                                <p className="font-bold text-zinc-900 text-sm">
+                                  {tx.type === "PAYMENT" ? "Account Settlement" : "Store Purchase"}
+                                </p>
+                                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
+                                  {tx.type === "PAYMENT" ? (
+                                    <span className="text-emerald-600">Ref: {tx.receipt_id || tx.reference_number || "Settlement"}</span>
+                                  ) : (
+                                    <span>{tx.items?.length || 0} Items • #{tx.id.substring(0, 6)}</span>
+                                  )}
+                                </p>
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell className="py-4 font-bold text-zinc-900">{formatCurrency(tx.total || 0)}</TableCell>
-                          <TableCell className="py-4 text-sm text-zinc-600">
-                            {tx.timestamp?.toDate ? tx.timestamp.toDate().toLocaleDateString() : new Date(tx.timestamp || 0).toLocaleDateString()}
+                          <TableCell className="py-4 font-black text-zinc-900">
+                            {formatCurrency(tx.total || 0)}
+                          </TableCell>
+                          <TableCell className="py-4 text-sm text-zinc-500 font-medium">
+                            {tx.timestamp?.toDate ? tx.timestamp.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : new Date(tx.timestamp || 0).toLocaleDateString()}
                           </TableCell>
                           <TableCell className="py-4">
                             <div className="flex flex-col gap-1">
-                              <Badge variant="outline" className="text-[10px] uppercase font-bold text-zinc-500 border-zinc-200 w-fit">
+                              <Badge variant="outline" className={cn("text-[10px] uppercase font-bold border-zinc-200 w-fit shadow-sm", tx.type === "PAYMENT" ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-white text-zinc-500")}>
                                 {tx.payment_method || tx.paymentMethod || "CASH"}
                               </Badge>
                               {tx.status === "PARTIAL" && (
+                                <Badge variant="outline" className="text-[8px] uppercase font-black bg-rose-50 text-rose-600 border-rose-100 w-fit animate-pulse">
+                                  Debt: {formatCurrency(tx.balance_due || 0)}
+                                </Badge>
+                              )}
+                              {tx.type === "PAYMENT" && (
                                 <Badge variant="outline" className="text-[8px] uppercase font-black bg-blue-50 text-blue-600 border-blue-100 w-fit">
-                                  Partial (${(tx.balance_due || 0).toFixed(2)} due)
+                                  Balance Cleared
                                 </Badge>
                               )}
                             </div>
                           </TableCell>
                           <TableCell className="text-right py-4">
-                            <Button variant="ghost" size="sm" className="rounded-lg font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50">
-                              View Receipt <ChevronRight className="w-4 h-4 ml-1" />
-                            </Button>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="rounded-xl font-bold text-zinc-400 hover:text-blue-600 hover:bg-blue-50 h-9 w-9 p-0 transition-all"
+                                onClick={(e) => { e.stopPropagation(); handleOpenDocumentHub(tx); }}
+                                title="Open Document Hub"
+                              >
+                                <ExternalLink className="w-4 h-4" />
+                              </Button>
+                              <Button variant="ghost" size="sm" className="rounded-xl font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-9 px-4 transition-all">
+                                View Entry <ChevronRight className="w-4 h-4 ml-1" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))
@@ -2503,15 +2870,31 @@ export default function CRM() {
                 </CardHeader>
                 <CardContent className="space-y-8">
                   <div className="flex items-center justify-center w-full">
-                    <label htmlFor="dropzone-file" className={cn(
-                      "flex flex-col items-center justify-center w-full h-44 border-2 border-zinc-100 border-dashed rounded-[2rem] cursor-pointer bg-zinc-50/30 hover:bg-zinc-50 transition-all",
-                      isUploading && "opacity-50 pointer-events-none"
-                    )}>
+                    <label 
+                      htmlFor="dropzone-file" 
+                      className={cn(
+                        "flex flex-col items-center justify-center w-full h-44 border-2 border-dashed rounded-[2rem] cursor-pointer transition-all duration-300",
+                        isDragging ? "border-blue-500 bg-blue-50/50 scale-[1.02]" : "border-zinc-100 bg-zinc-50/30 hover:bg-zinc-50",
+                        isUploading && "opacity-50 pointer-events-none"
+                      )}
+                      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        setIsDragging(false);
+                        handleFileUpload(e.dataTransfer.files);
+                      }}
+                    >
                       <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                        <div className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-zinc-100 flex items-center justify-center mb-4">
-                          <Plus className="w-6 h-6 text-zinc-400" />
+                        <div className={cn(
+                          "w-12 h-12 rounded-2xl shadow-sm border flex items-center justify-center mb-4 transition-all duration-500",
+                          isDragging ? "bg-blue-600 border-blue-600 scale-110 rotate-90" : "bg-white border-zinc-100"
+                        )}>
+                          <Plus className={cn("w-6 h-6", isDragging ? "text-white" : "text-zinc-400")} />
                         </div>
-                        <p className="mb-1 text-sm font-black text-zinc-600">Click to upload or drag and drop</p>
+                        <p className={cn("mb-1 text-sm font-black transition-colors", isDragging ? "text-blue-600" : "text-zinc-600")}>
+                          {isDragging ? "Drop to Upload" : "Click to upload or drag and drop"}
+                        </p>
                         <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">PDF, JPG, PNG or DOC (MAX. 10MB)</p>
                       </div>
                       <input id="dropzone-file" type="file" className="hidden" accept=".pdf,.doc,.docx,.jpg,.png" 
@@ -2520,6 +2903,7 @@ export default function CRM() {
                       />
                     </label>
                   </div>
+
 
                   <div className="space-y-3">
                     {customerDocuments.length > 0 ? (
@@ -2539,12 +2923,12 @@ export default function CRM() {
                                variant="ghost" 
                                size="icon" 
                                className="h-10 w-10 rounded-xl hover:bg-zinc-50"
-                               render={
-                                 <a href={doc.url} target="_blank" rel="noopener noreferrer">
-                                   <Plus className="w-4 h-4 text-zinc-900 rotate-45" />
-                                 </a>
-                               }
-                             />
+                               asChild
+                             >
+                               <a href={doc.url} target="_blank" rel="noopener noreferrer">
+                                 <Plus className="w-4 h-4 text-zinc-900 rotate-45" />
+                               </a>
+                             </Button>
                              <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl hover:bg-zinc-50">
                                <MoreVertical className="w-4 h-4 text-zinc-400" />
                              </Button>
@@ -3055,11 +3439,32 @@ export default function CRM() {
         </>
       )}
 
-      </div>
-      </div>
-      {/* Printable Report Container */}
+      {/* Printable Report Container & Preview Modal */}
       {activePrintReport && (
-        <div id="printable-report-container" className="fixed inset-0 bg-white z-[9999] p-10 overflow-visible print:block hidden">
+        <div id="printable-report-container" className="fixed inset-0 bg-white z-[9999] overflow-auto animate-in fade-in zoom-in duration-300">
+          {/* Preview Controls (Hidden during print) */}
+          <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-zinc-100 p-4 flex justify-between items-center z-20 print:hidden">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-zinc-900 flex items-center justify-center text-white">
+                <Printer className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-zinc-900">Print Preview</h3>
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">{activePrintReport}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="rounded-xl font-bold h-9" onClick={() => setActivePrintReport(null)}>
+                Close Preview
+              </Button>
+              <Button size="sm" className="rounded-xl font-bold h-9 bg-zinc-900 text-white hover:bg-zinc-800" onClick={() => window.print()}>
+                <Printer className="w-4 h-4 mr-2" />
+                Print Document
+              </Button>
+            </div>
+          </div>
+
+          <div className="max-w-[8.5in] mx-auto p-10 sm:p-16 bg-white shadow-2xl my-8 print:my-0 print:shadow-none print:p-0">
           <div className="border-b-2 border-zinc-900 pb-6 mb-8 flex justify-between items-end">
              <div>
                 <h1 className="text-3xl font-black text-zinc-900 uppercase tracking-tight">{activePrintReport}</h1>
@@ -3201,7 +3606,7 @@ export default function CRM() {
           <div className="fixed bottom-10 left-10 right-10 flex justify-between items-end border-t border-zinc-100 pt-6">
              <div className="space-y-1">
                 <p className="text-[10px] font-bold text-zinc-900 uppercase tracking-widest">Certified Document — 2026 Enterprise Standards</p>
-                <p className="text-[9px] text-zinc-400 font-medium">Verification ID: {crypto.randomUUID().substring(0, 8).toUpperCase()}</p>
+                <p className="text-[9px] text-zinc-400 font-medium">Verification ID: {Math.random().toString(36).substring(2, 10).toUpperCase()}</p>
                 <p className="text-[9px] text-zinc-400 font-medium">Page 1 of 1</p>
              </div>
              <div className="flex items-center gap-4">
@@ -3225,12 +3630,251 @@ export default function CRM() {
                      className="w-full h-full object-contain"
                      crossOrigin="anonymous"
                    />
-                </div>
-             </div>
+                 </div>
+              </div>
+           </div>
           </div>
         </div>
       )}
 
+      {/* Document Hub Dialog */}
+      <Dialog open={isDocumentHubOpen} onOpenChange={setIsDocumentHubOpen}>
+        <DialogContent className="sm:max-w-[1000px] p-0 overflow-hidden border-none shadow-2xl rounded-[2.5rem] bg-white flex flex-col sm:flex-row h-[95vh] sm:h-[700px]">
+          {/* Left Side: High-Impact Preview */}
+          <div className="w-full sm:w-[500px] bg-zinc-950 flex flex-col relative overflow-hidden group">
+            {/* Ambient Background Glow */}
+            <div className="absolute top-[-20%] left-[-20%] w-[140%] h-[140%] bg-gradient-to-br from-blue-600/10 via-transparent to-emerald-600/10 animate-pulse pointer-events-none" />
+            
+            <div className="flex-1 flex items-center justify-center p-6 relative z-10 overflow-hidden bg-zinc-900/40">
+              {pdfPreview ? (
+                <div className="relative w-full h-full shadow-[0_32px_64px_-12px_rgba(0,0,0,0.8)] overflow-hidden transition-all duration-700 ease-out group/doc rounded-sm border-[6px] border-zinc-800/50 bg-white">
+                  <iframe 
+                    src={`${pdfPreview}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} 
+                    className="w-full h-full border-none"
+                    title="Receipt Preview"
+                  />
+                  {/* Interactive Overlay - Professional Maximize Action */}
+                  <div 
+                    className="absolute inset-0 bg-black/0 hover:bg-black/40 transition-all cursor-zoom-in flex flex-col items-center justify-center group/view"
+                    onClick={() => {
+                      const win = window.open(pdfPreview, '_blank');
+                      if (win) win.focus();
+                      else toast.error("Pop-up blocked. Please allow pop-ups to view PDF.");
+                    }}
+                  >
+                    <div className="bg-white/10 backdrop-blur-md border border-white/20 px-6 py-3 rounded-full shadow-2xl opacity-0 group-hover/view:opacity-100 transform translate-y-8 group-hover/view:translate-y-0 transition-all duration-500 flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Full Screen Protocol</p>
+                      <ExternalLink className="w-3 h-3 text-white/60" />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center text-zinc-500 gap-4">
+                  <div className="w-16 h-16 rounded-3xl bg-zinc-800/50 flex items-center justify-center animate-pulse">
+                    <Loader2 className="w-8 h-8 animate-spin" />
+                  </div>
+                  <p className="text-[10px] font-black uppercase tracking-widest">Compiling Assets...</p>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-zinc-900 p-6 border-t border-white/5 flex items-center justify-between">
+              <div className="flex flex-col">
+                <p className="text-[10px] font-black text-white uppercase tracking-widest">Live Security Manifest</p>
+                <p className="text-[8px] font-bold text-zinc-500 uppercase tracking-tighter">Verified by Orivo-Engine</p>
+              </div>
+              <div className="flex gap-2">
+                 <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                 <div className="w-2 h-2 rounded-full bg-zinc-700" />
+                 <div className="w-2 h-2 rounded-full bg-zinc-700" />
+              </div>
+            </div>
+          </div>
+          
+          {/* Right Side: Command Center */}
+          <div className="flex-1 flex flex-col bg-white overflow-hidden relative">
+            <div className="p-8 pb-4 relative">
+              <div className="absolute top-0 right-0 p-8 opacity-[0.03]">
+                <FileText className="w-32 h-32" />
+              </div>
+              <h2 className="text-3xl font-black tracking-tighter mb-1 text-zinc-900">Document Hub</h2>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <p className="text-zinc-400 font-bold text-[10px] uppercase tracking-widest">A4 Digital Standard Ready</p>
+              </div>
+            </div>
+            
+            <div className="p-8 space-y-6 flex-1 overflow-y-auto">
+              <div className="space-y-3">
+                 <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Hardware Outputs</p>
+                 <div className="grid grid-cols-1 gap-3">
+                   <Button 
+                    variant="outline" 
+                    className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white flex items-center justify-start gap-5 px-6 hover:border-blue-500 hover:bg-blue-50 group transition-all shadow-sm"
+                    onClick={handlePrintPDF}
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-black text-base text-zinc-900">Professional A4 PDF</p>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Office Printers / Digital Archive</p>
+                    </div>
+                  </Button>
+
+                  <div className="flex flex-col gap-2">
+                    <Button 
+                      variant="outline" 
+                      className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white flex items-center justify-start gap-5 px-6 hover:border-emerald-500 hover:bg-emerald-50 group transition-all shadow-sm"
+                      onClick={handlePrintThermal}
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                        <Printer className="w-6 h-6" />
+                      </div>
+                      <div className="text-left flex-1">
+                        <p className="font-black text-base text-zinc-900">Thermal Receipt</p>
+                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Point of Sale Printers</p>
+                      </div>
+                    </Button>
+                    
+                    {/* Thermal Size Toggle */}
+                    <div className="flex items-center justify-between px-3 bg-zinc-50 rounded-2xl py-3 border border-zinc-100">
+                       <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Canvas Size Selection</span>
+                       <div className="flex gap-1">
+                         {['80mm', '58mm'].map((size) => (
+                           <button
+                             key={size}
+                             onClick={() => setThermalSize(size as any)}
+                             className={cn(
+                               "px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all",
+                               thermalSize === size 
+                                ? "bg-zinc-900 text-white shadow-lg" 
+                                : "bg-white text-zinc-400 hover:text-zinc-600"
+                             )}
+                           >
+                             {size}
+                           </button>
+                         ))}
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Digital Distribution</p>
+                <div className="grid grid-cols-1 gap-3">
+                  <Button 
+                    className="w-full h-20 rounded-[1.5rem] bg-[#25D366] hover:bg-[#128C7E] text-white font-bold flex items-center justify-start gap-5 px-6 shadow-lg shadow-emerald-500/20"
+                    onClick={handleShareWhatsApp}
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center">
+                      <MessageSquare className="w-6 h-6" />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-black text-base">WhatsApp Share</p>
+                      <p className="text-[10px] font-bold text-white/60 uppercase tracking-tighter">Direct Social Outreach</p>
+                    </div>
+                  </Button>
+                  
+                  <Button 
+                    variant="outline"
+                    className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white text-zinc-900 font-bold flex items-center justify-start gap-5 px-6 shadow-sm hover:border-zinc-300 transition-all"
+                    onClick={handleShareEmail}
+                  >
+                    <div className="w-12 h-12 rounded-2xl bg-zinc-50 flex items-center justify-center text-zinc-400">
+                      <Send className="w-6 h-6" />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-black text-base">Email Digital Copy</p>
+                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Official Corporate File</p>
+                    </div>
+                  </Button>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-zinc-50 p-4 border-t border-zinc-100 flex items-center justify-between px-8">
+              <div className="flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                <p className="text-[9px] font-black text-zinc-900 uppercase tracking-[0.2em]">OrivoCRM.pro Official</p>
+              </div>
+              <p className="text-[8px] font-bold text-zinc-300 uppercase tracking-widest">SECURE_ENGINE_V2.6</p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+    {/* Manage Tags Dialog (Portal-Safe Sibling) */}
+    <Dialog open={isTagDialogOpen} onOpenChange={setIsTagDialogOpen}>
+      <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-bold">Manage Tags</DialogTitle>
+          <DialogDescription>Organize and categorize {selectedCustomer?.name}.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-6 py-4">
+          <div className="flex flex-wrap gap-2 min-h-[40px] p-3 rounded-2xl bg-zinc-50/50 border border-zinc-100 italic text-zinc-400 text-xs">
+            {selectedCustomer?.tags && selectedCustomer.tags.length > 0 ? (
+              selectedCustomer.tags.map((tag: string, i: number) => (
+                <Badge key={i} className="bg-white text-zinc-700 border-zinc-200 px-3 py-1 flex items-center gap-2 group">
+                  {tag}
+                  <button 
+                    onClick={async () => {
+                      await updateDoc(doc(db, "customers", selectedCustomer.id), {
+                        tags: arrayRemove(tag)
+                      });
+                    }}
+                    className="hover:text-rose-600 transition-colors"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </Badge>
+              ))
+            ) : "No tags assigned yet..."}
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">New Tag Entry</Label>
+            <div className="flex gap-2">
+              <Input 
+                placeholder="Tag name..." 
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                className="rounded-xl"
+                onKeyDown={(e) => e.key === 'Enter' && handleAddTag()}
+              />
+              <Button onClick={handleAddTag} className="rounded-xl bg-zinc-900 text-white font-bold">Add</Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Personalized Offer Dialog (Portal-Safe Sibling) */}
+    <Dialog open={isOfferDialogOpen} onOpenChange={setIsOfferDialogOpen}>
+      <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-bold">Generate Personalized Offer</DialogTitle>
+          <DialogDescription>Create a custom incentive for {selectedCustomer?.name}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <Input 
+            placeholder="Offer details (e.g. 20% off next purchase)" 
+            value={offerDetails}
+            onChange={(e) => setOfferDetails(e.target.value)}
+            className="rounded-xl h-12"
+          />
+        </div>
+        <DialogFooter>
+          <Button className="w-full rounded-xl bg-emerald-600 text-white h-14 font-bold shadow-lg shadow-emerald-600/20" onClick={handleGenerateOffer}>
+            Distribute Custom Offer
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </div>
+    </div>
     </div>
   );
 }

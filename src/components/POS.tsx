@@ -84,8 +84,8 @@ import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDo
 import { PrintableInvoice } from "./PrintableInvoice";
 import { POSReceipt } from "./POSReceipt";
 import { POSAIUpsell } from "./POSAIUpsell";
-import { recordFinancialEvent } from "@/lib/ledger";
-import { recordAuditLog } from "@/lib/audit";
+import { recordFinancialEventBatch } from "@/lib/ledger";
+import { recordAuditLogBatch, recordAuditLog } from "@/lib/audit";
 import { POSZReport } from "./POSZReport";
 
 interface CartDiscount {
@@ -104,8 +104,13 @@ export default function POS() {
     shiftTimePolicies: timePolicies, setShiftTimePolicies: setTimePolicies,
     taxRate: globalTaxRate,
     autoCloseTime,
-    autoCloseEnabled
+    autoCloseEnabled,
+    userRole,
+    hasPermission
   } = useModules();
+
+  const isAdmin = userRole?.toLowerCase() === "admin" || userRole?.toLowerCase() === "owner";
+  const isManager = isAdmin || userRole?.toLowerCase() === "manager";
   const { consumeAction } = usePendingAction();
   
   const [cart, setCart] = useState<{ product: any; quantity: number; discount?: { type: "Percentage" | "Fixed Amount"; value: number } | null }[]>([]);
@@ -236,6 +241,7 @@ export default function POS() {
   const [customerUsage, setCustomerUsage] = useState<any[]>([]);
   const [isReturnMode, setIsReturnMode] = useState(false);
   const [restockOnReturn, setRestockOnReturn] = useState(true);
+  const [receiptPaperSize, setReceiptPaperSize] = useState<"80mm" | "58mm">("80mm");
 
   useEffect(() => {
     if (!selectedCustomer?.id || !enterpriseId) {
@@ -245,7 +251,8 @@ export default function POS() {
     const q = query(
       collection(db, "customer_campaign_usage"),
       where("customer_id", "==", selectedCustomer.id),
-      where("enterprise_id", "==", enterpriseId)
+      where("enterprise_id", "==", enterpriseId),
+      limit(100)
     );
     const unsub = onSnapshot(q, (snap) => {
       setCustomerUsage(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -491,7 +498,8 @@ export default function POS() {
     if (isClosePromptOpen && currentSessionId) {
       const q = query(
         collection(db, "transactions"), 
-        where("sessionId", "==", currentSessionId)
+        where("sessionId", "==", currentSessionId),
+        limit(1000)
       );
       
       const unsub = onSnapshot(q, (snapshot) => {
@@ -864,23 +872,23 @@ export default function POS() {
       return;
     }
     setIsProcessing(true);
+    const batch = writeBatch(db);
     try {
       const resolvedBranch = activeBranch === "all" ? "main" : activeBranch;
       
-      // MODERN CRM PAYMENT LOGIC
       const tendered = paymentMethod === "SPLIT" 
         ? (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0)
         : (parseFloat(paidAmount) || (paymentMethod === "DEBT" ? 0 : total));
       
-      // If they pay more than total (Cash Change), we only record payment up to the total.
-      // If they pay less than total, the remainder is debt.
       const actualPaid = Math.min(total, tendered);
       const changeDue = paymentMethod === "CASH" ? Math.max(0, tendered - total) : 0;
       const balanceDue = Math.max(0, total - actualPaid);
-      
       const isPartial = balanceDue > 0.01;
 
-      const txRef = await addDoc(collection(db, "transactions"), {
+      const txRef = doc(collection(db, "transactions"));
+      const txId = txRef.id;
+
+      batch.set(txRef, {
         items: cart.map(item => {
           const basePrice = item.product.retail_price || item.product.price || 0;
           const baseTotal = basePrice * item.quantity;
@@ -927,10 +935,10 @@ export default function POS() {
         split_card_amount: paymentMethod === "SPLIT" ? parseFloat(splitCardAmount) || 0 : 0
       });
 
-      await recordFinancialEvent({
+      recordFinancialEventBatch(batch, {
         enterpriseId,
-        amount: actualPaid, // Only record what we actually KEPT (total - change)
-        sourceId: txRef.id,
+        amount: actualPaid,
+        sourceId: txId,
         sourceType: isReturnMode ? "RETURN" : "POS_TRANSACTION",
         description: `${isReturnMode ? 'RETURN' : 'POS Sale'} - ${cart.length} items (${paymentMethod})`,
         metadata: { 
@@ -944,12 +952,13 @@ export default function POS() {
         }
       });
 
-      const evaluateReplenishment = async (productId: string, currentQty: number) => {
+      const evaluateReplenishment = async (productId: string, currentQty: number, currentBatch: any) => {
         try {
           const product = products.find(p => p.id === productId);
           if (!product || !product.auto_reorder || !product.supplier_id) return;
           const minStock = product.min_stock_level || 10;
           if (currentQty > minStock) return;
+          
           const existingPOs = await getDocs(query(
             collection(db, 'purchase_orders'),
             where('enterprise_id', '==', enterpriseId),
@@ -961,9 +970,12 @@ export default function POS() {
             return data.items?.some((item: any) => item.product_id === productId);
           });
           if (hasPendingPO) return;
+          
           const suggestedQty = Math.max(minStock * 2, 20);
           const totalCost = (product.cost || 0) * suggestedQty;
-          await addDoc(collection(db, 'purchase_orders'), {
+          
+          const poRef = doc(collection(db, 'purchase_orders'));
+          currentBatch.set(poRef, {
             enterprise_id: enterpriseId,
             supplier_id: product.supplier_id,
             status: 'AUTODRAFT',
@@ -981,7 +993,9 @@ export default function POS() {
             updated_at: new Date().toISOString(),
             type: 'AUTO'
           });
-          await addDoc(collection(db, 'notifications'), {
+
+          const notifRef = doc(collection(db, 'notifications'));
+          currentBatch.set(notifRef, {
             enterprise_id: enterpriseId,
             title: 'Autonomous Replenishment Triggered',
             message: `Stock level for ${product.name} is low (${currentQty}). A draft PO has been generated for review.`,
@@ -996,65 +1010,65 @@ export default function POS() {
         }
       };
 
-      await Promise.all(cart.map(async (item) => {
+      for (const item of cart) {
         const invItem = inventory.find(i => 
           i.product_id === item.product.id && 
           (activeBranch === "all" ? (i.branch_id === "main" || i.branch_id === "primary") : i.branch_id === resolvedBranch)
-        ) || inventory.find(i => i.product_id === item.product.id); // Fallback to first available branch record
+        ) || inventory.find(i => i.product_id === item.product.id);
 
         if (invItem) {
           const qtyAdjustment = isReturnMode ? (restockOnReturn ? item.quantity : 0) : -item.quantity;
           if (qtyAdjustment !== 0) {
             const newQty = (invItem.quantity || 0) + qtyAdjustment;
-            await updateDoc(doc(db, "inventory", invItem.id), {
+            batch.update(doc(db, "inventory", invItem.id), {
               quantity: increment(qtyAdjustment)
             });
             if (!isReturnMode && newQty <= (item.product.min_stock_level || 10)) {
-              await evaluateReplenishment(item.product.id, newQty);
+              await evaluateReplenishment(item.product.id, newQty, batch);
             }
           }
         }
-      }));
+      }
 
       if (selectedCustomer?.id) {
         const pointsEarned = Math.floor(total);
         const pointAdjustment = isReturnMode ? -pointsEarned : ((cartDiscount as any)?.isLoyaltyReward ? -(loyaltySettings.pointsRequiredForReward || 100) : pointsEarned);
-        await updateDoc(doc(db, "customers", selectedCustomer.id), {
+        batch.update(doc(db, "customers", selectedCustomer.id), {
           spend: increment(isReturnMode ? -total : total),
           points: increment(pointAdjustment),
-          balance: increment(isReturnMode ? 0 : balanceDue), // Track debt in CRM
+          balance: increment(isReturnMode ? 0 : balanceDue),
           last_purchase_date: serverTimestamp(),
           lastContact: new Date().toISOString()
         });
       }
 
       if (currentSessionId) {
-        await updateDoc(doc(db, "pos_sessions", currentSessionId), {
+        batch.update(doc(db, "pos_sessions", currentSessionId), {
           totalSales: increment(isReturnMode ? -total : total),
           transactionCount: increment(isReturnMode ? 0 : 1),
           lastActivity: new Date().toISOString()
         });
       }
 
-      await addDoc(collection(db, "audit_logs"), {
+      recordAuditLogBatch(batch, {
+        enterpriseId,
         action: isReturnMode ? "Return Completed" : "Sale Completed",
         details: `${cart.length} item(s) ${isReturnMode ? 'returned' : 'sold'} for ${formatCurrency(total)} via ${paymentMethod}`,
-        timestamp: serverTimestamp(),
-        user: selectedAdmin?.name || "Cashier",
-        enterprise_id: enterpriseId,
-        severity: isReturnMode ? "WARNING" : "INFO"
+        severity: isReturnMode ? "WARNING" : "INFO",
+        type: "POS",
+        branchId: resolvedBranch
       });
 
       if (cartDiscount && !isReturnMode) {
         const campaign = campaigns.find(c => c.id === cartDiscount.id);
         if (campaign && campaign.one_time_per_customer && selectedCustomer?.id) {
-          await addDoc(collection(db, "customer_campaign_usage"), {
+          batch.set(doc(collection(db, "customer_campaign_usage")), {
             customer_id: selectedCustomer.id,
             customer_name: selectedCustomer.name,
             campaign_id: campaign.id,
             campaign_name: campaign.name,
             used_at: serverTimestamp(),
-            transaction_id: txRef.id,
+            transaction_id: txId,
             enterprise_id: enterpriseId,
             staff_name: selectedAdmin?.name || "System",
             staff_id: selectedAdmin?.id || "system"
@@ -1062,8 +1076,10 @@ export default function POS() {
         }
       }
 
+      await batch.commit();
+
       setLastTransaction({
-        id: txRef.id,
+        id: txId,
         items: cart.map(item => ({
           id: item.product.id,
           name: item.product.name,
@@ -1097,6 +1113,29 @@ export default function POS() {
       toast.error("Transaction failed: " + (error.message || "Unknown error"));
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const handleQueueCommunication = async (type: "whatsapp" | "email", documentType: "RECEIPT" | "INVOICE" | "ZREPORT", recipient: string, data: any) => {
+    if (!enterpriseId) return;
+    
+    const toastId = toast.loading(`Queueing ${documentType} for ${type}...`);
+    try {
+      await addDoc(collection(db, "communications"), {
+        enterprise_id: enterpriseId,
+        customer_id: selectedCustomer?.id || "walk-in",
+        type,
+        documentType,
+        recipient,
+        data,
+        status: "PENDING",
+        createdAt: serverTimestamp(),
+        author: selectedAdmin?.name || "POS System"
+      });
+      toast.success("Message queued for delivery", { id: toastId });
+    } catch (err) {
+      console.error("Queue error:", err);
+      toast.error("Failed to queue message", { id: toastId });
     }
   };
 
@@ -1395,21 +1434,23 @@ Variance: ${formatCurrency((parseFloat(countedCash) || 0) - sessionExpectedCash)
 Notes: ${closeRegisterNotes || 'None'}
     `.trim();
 
+    // Audit trail first
+    await handleQueueCommunication("email", "ZREPORT", branding.email, { reportText, sessionId: currentSessionId });
+
     if (navigator.share) {
       try {
         await navigator.share({
           title: `Z-Report - ${branding.name}`,
           text: reportText,
         });
-        toast.success("Z-Report shared successfully");
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
-          toast.error("Failed to share report");
+          toast.error("Local share failed, but audit record saved.");
         }
       }
     } else {
       navigator.clipboard.writeText(reportText);
-      toast.success("Z-Report copied to clipboard");
+      toast.success("Audit record saved & Text copied");
     }
   };
 
@@ -1803,7 +1844,13 @@ Notes: ${closeRegisterNotes || 'None'}
                     onClick={() => {
                       if (cart.length > 0) {
                         const confirm = window.confirm("Are you sure you want to clear the current order?");
-                        if (confirm) setCart([]);
+                        if (confirm) {
+                          if (!isManager) {
+                            toast.error("Manager override required to clear active cart.");
+                            return;
+                          }
+                          setCart([]);
+                        }
                       }
                     }}
                     disabled={cart.length === 0}
@@ -2228,6 +2275,20 @@ Notes: ${closeRegisterNotes || 'None'}
               </div>
             </div>
 
+            <div className="flex items-center justify-between w-full px-1">
+              <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Printer Paper Size</span>
+              <div className="flex bg-zinc-100 p-1 rounded-xl">
+                <button 
+                  onClick={() => setReceiptPaperSize("80mm")}
+                  className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black transition-all", receiptPaperSize === "80mm" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-400")}
+                >80MM</button>
+                <button 
+                  onClick={() => setReceiptPaperSize("58mm")}
+                  className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black transition-all", receiptPaperSize === "58mm" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-400")}
+                >58MM</button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3 w-full">
               <Button 
                 variant="outline" 
@@ -2253,30 +2314,25 @@ ${lastTransaction?.change > 0 ? `Change: ${formatCurrency(lastTransaction?.chang
 Date: ${lastTransaction?.date}
                   `.trim();
                   
+                  // Audit trail
+                  await handleQueueCommunication(
+                    selectedCustomer?.phone ? "whatsapp" : "email", 
+                    "RECEIPT", 
+                    selectedCustomer?.phone || selectedCustomer?.email || branding.email,
+                    { text, transactionId: lastTransaction?.id }
+                  );
+
                   if (navigator.share) {
                     try {
                       await navigator.share({ title: 'Receipt', text });
-                      toast.success("Receipt shared");
                     } catch (e: any) {
-                      // AbortError = user cancelled the share sheet — do nothing
                       if (e?.name !== 'AbortError') {
-                        // Real failure: fall back to clipboard
-                        try {
-                          await navigator.clipboard.writeText(text);
-                          toast.success("Receipt copied to clipboard (share unavailable)");
-                        } catch {
-                          toast.error("Could not share or copy receipt");
-                        }
+                        toast.error("Local share failed, but audit record saved.");
                       }
                     }
                   } else {
-                    // Desktop fallback: copy to clipboard
-                    try {
-                      await navigator.clipboard.writeText(text);
-                      toast.success("Receipt copied to clipboard");
-                    } catch {
-                      toast.error("Could not copy receipt");
-                    }
+                    navigator.clipboard.writeText(text);
+                    toast.success("Audit record saved & Text copied");
                   }
                 }}
               >
@@ -2324,9 +2380,10 @@ Date: ${lastTransaction?.date}
 
            <ScrollArea className="flex-1 min-h-0">
              <div className="p-5 sm:p-8 space-y-6 sm:space-y-8">
-               {/* Print Only Z-Report (Hidden in UI) */}
-               <POSZReport 
-                 branding={branding}
+                {/* Print Only Z-Report (Hidden in UI) */}
+                {isAdmin ? (
+                  <POSZReport 
+                    branding={branding}
                  session={{
                    id: currentSessionId || "",
                    staffName: selectedAdmin?.name || "",
@@ -2340,9 +2397,21 @@ Date: ${lastTransaction?.date}
                  }}
                  stats={sessionStats}
                  formatCurrency={formatCurrency}
-               />
-               {/* Sales Breakdown */}
-               <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-3">
+                />
+                ) : (
+                  <div className="flex flex-col items-center justify-center p-12 text-center space-y-4">
+                    <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center">
+                      <Lock className="w-8 h-8 text-amber-600" />
+                    </div>
+                    <h3 className="text-lg font-black text-zinc-900">Settlement Locked</h3>
+                    <p className="text-xs text-zinc-500 font-medium max-w-[280px]">
+                      Shift settlement details and Z-Reports are restricted to administrative staff only. 
+                      Please contact your supervisor to finalize this session.
+                    </p>
+                  </div>
+                )}
+                {isAdmin && (
+                <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 gap-3">
                  <div className="p-4 rounded-2xl bg-zinc-50 border border-zinc-100 space-y-1">
                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Gross Sales</p>
                    <p className="text-base sm:text-xl font-black text-zinc-900">{formatCurrency(sessionStats.sales)}</p>
@@ -2356,7 +2425,7 @@ Date: ${lastTransaction?.date}
                    <p className="text-base sm:text-xl font-black text-rose-600">{formatCurrency(sessionStats.discounts)}</p>
                  </div>
                </div>
-
+                )}
                {/* Cash Audit Section */}
                <div className="p-6 rounded-3xl bg-zinc-900 text-white space-y-6 shadow-2xl relative overflow-hidden group">
                  <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-transparent opacity-50" />
@@ -2914,7 +2983,7 @@ Date: ${lastTransaction?.date}
   )}
   {/* Dedicated printing container - visible only to the printer */}
   <div className="md:fixed md:top-0 md:left-0 md:opacity-0 md:pointer-events-none z-[-1]">
-    <POSReceipt branding={branding} order={lastTransaction} formatCurrency={formatCurrency} />
+    <POSReceipt branding={branding} order={lastTransaction} formatCurrency={formatCurrency} paperSize={receiptPaperSize} />
   </div>
 </div>
 );
