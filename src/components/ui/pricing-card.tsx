@@ -14,54 +14,10 @@ import { useState, useEffect } from "react";
 import { useModules } from "@/context/ModuleContext";
 import { toast } from "sonner";
 
-// Customized Pricing Plans
-const plans = [
-  {
-    id: "starter",
-    name: "Starter",
-    description: "essential features",
-    monthlyPrice: 39,
-    yearlyPrice: 32.76, // 16% off $39
-    includedUsers: 3,
-    includedBranches: 1,
-    features: [
-      "Basic CRM functionality",
-      "Up to 500 contacts",
-      "Email support",
-    ],
-  },
-  {
-    id: "business-pro",
-    name: "Business Pro",
-    description: "growth teams",
-    monthlyPrice: 79,
-    yearlyPrice: 66.36, // 16% off $79
-    includedUsers: 25,
-    includedBranches: 5,
-    features: [
-      "Advanced CRM functionality",
-      "Up to 5,000 contacts",
-      "Priority email & chat support",
-      "Custom reporting",
-    ],
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    description: "large organizations",
-    monthlyPrice: 199,
-    yearlyPrice: 167.16, // 16% off $199
-    includedUsers: 100, // Base users
-    includedBranches: 10, // Base branches
-    features: [
-      "Unlimited contacts",
-      "Dedicated account manager",
-      "24/7 phone support",
-      "Custom integrations",
-      "Advanced security & SSO",
-    ],
-  },
-];
+import { PLAN_LIMITS } from "@/constants/plan-limits";
+
+const plans = Object.values(PLAN_LIMITS);
+
 
 const TRANSITION = {
   type: "spring" as const,
@@ -78,14 +34,14 @@ function PricingCard() {
   );
   const [selectedPlan, setSelectedPlan] = useState(billing.planId || "business-pro");
   const [userCounts, setUserCounts] = useState<Record<string, number>>(() => ({
-    starter: billing.planId === "starter" ? billing.userCount : plans[0].includedUsers,
-    "business-pro": billing.planId === "business-pro" ? billing.userCount : plans[1].includedUsers,
-    enterprise: billing.planId === "enterprise" ? billing.userCount : plans[2].includedUsers,
+    starter: billing.planId === "starter" ? billing.userCount : PLAN_LIMITS.starter.maxUsers,
+    "business-pro": billing.planId === "business-pro" ? billing.userCount : PLAN_LIMITS["business-pro"].maxUsers,
+    enterprise: billing.planId === "enterprise" ? billing.userCount : PLAN_LIMITS.enterprise.maxUsers,
   }));
   const [branchCounts, setBranchCounts] = useState<Record<string, number>>(() => ({
-    starter: billing.planId === "starter" ? billing.branchCount : plans[0].includedBranches,
-    "business-pro": billing.planId === "business-pro" ? billing.branchCount : plans[1].includedBranches,
-    enterprise: billing.planId === "enterprise" ? billing.branchCount : plans[2].includedBranches,
+    starter: billing.planId === "starter" ? billing.branchCount : PLAN_LIMITS.starter.maxBranches,
+    "business-pro": billing.planId === "business-pro" ? billing.branchCount : PLAN_LIMITS["business-pro"].maxBranches,
+    enterprise: billing.planId === "enterprise" ? billing.branchCount : PLAN_LIMITS.enterprise.maxBranches,
   }));
   const [isSaving, setIsSaving] = useState(false);
 
@@ -172,13 +128,13 @@ function PricingCard() {
         {plans.map((plan) => {
           const isSelected = selectedPlan === plan.id;
           
-          // Pricing logic: $5/user, $29/branch for additions
-          const extraUsers = Math.max(0, userCounts[plan.id] - plan.includedUsers);
-          const extraBranches = Math.max(0, branchCounts[plan.id] - plan.includedBranches);
+          // Pricing logic: Addons from PLAN_LIMITS
+          const extraUsers = Math.max(0, userCounts[plan.id] - plan.maxUsers);
+          const extraBranches = Math.max(0, branchCounts[plan.id] - plan.maxBranches);
           
-          const basePrice = billingCycle === "monthly" ? plan.monthlyPrice : plan.yearlyPrice;
-          const userAddonPrice = billingCycle === "monthly" ? 5 : 4.20; // $5 with 16% off
-          const branchAddonPrice = billingCycle === "monthly" ? 29 : 24.36; // $29 with 16% off
+          const basePrice = billingCycle === "monthly" ? plan.pricing.monthly : plan.pricing.yearly;
+          const userAddonPrice = billingCycle === "monthly" ? plan.addons.userMonthly : plan.addons.userYearly;
+          const branchAddonPrice = billingCycle === "monthly" ? plan.addons.branchMonthly : plan.addons.branchYearly;
           
           const totalPrice = basePrice + (extraUsers * userAddonPrice) + (extraBranches * branchAddonPrice);
 
@@ -290,7 +246,7 @@ function PricingCard() {
                       >
                         <div className="pt-6 flex flex-col gap-6">
                           <div className="flex flex-col gap-3.5">
-                            {plan.features.map((feature, idx) => (
+                            {plan.displayFeatures.map((feature, idx) => (
                               <motion.div
                                 initial={{ opacity: 0, y: 5 }}
                                 animate={{ opacity: 1, y: 0 }}
@@ -327,7 +283,7 @@ function PricingCard() {
                                   Users
                                 </span>
                                 <span className="text-[10px] text-muted-foreground mt-1 uppercase font-bold tracking-wider">
-                                  {userCounts[plan.id] <= plan.includedUsers ? "Included" : `+${userCounts[plan.id] - plan.includedUsers} Additional`}
+                                  {userCounts[plan.id] <= plan.maxUsers ? "Included" : `+${userCounts[plan.id] - plan.maxUsers} Additional`}
                                 </span>
                               </div>
                             </div>
@@ -343,7 +299,7 @@ function PricingCard() {
                                 <HugeiconsIcon icon={MinusSignIcon} size={14} />
                               </button>
                               <span className="text-sm  w-4 text-center tabular-nums text-foreground/80">
-                                <NumberFlow value={userCounts[plan.id] ?? plan.includedUsers} />
+                                <NumberFlow value={userCounts[plan.id] ?? plan.maxUsers} />
                               </span>
                               <button
                                 onClick={(e) => {
@@ -371,7 +327,7 @@ function PricingCard() {
                                   Branches
                                 </span>
                                 <span className="text-[10px] text-muted-foreground mt-1 uppercase font-bold tracking-wider">
-                                  {branchCounts[plan.id] <= plan.includedBranches ? "Included" : `+${branchCounts[plan.id] - plan.includedBranches} Additional`}
+                                  {branchCounts[plan.id] <= plan.maxBranches ? "Included" : `+${branchCounts[plan.id] - plan.maxBranches} Additional`}
                                 </span>
                               </div>
                             </div>
@@ -387,7 +343,7 @@ function PricingCard() {
                                 <HugeiconsIcon icon={MinusSignIcon} size={14} />
                               </button>
                               <span className="text-sm  w-4 text-center tabular-nums text-foreground/80">
-                                <NumberFlow value={branchCounts[plan.id] ?? plan.includedBranches} />
+                                <NumberFlow value={branchCounts[plan.id] ?? plan.maxBranches} />
                               </span>
                               <button
                                 onClick={(e) => {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { PLAN_LIMITS } from "@/constants/plan-limits";
 import { 
   Settings as SettingsIcon, 
   Shield, 
@@ -2194,9 +2195,9 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                   <div className="divide-y divide-zinc-100">
                     {[
                       { feature: "Contacts / Customers", starter: "500", pro: "5,000", enterprise: "Unlimited" },
-                      { feature: "Branches", starter: "1", pro: "5", enterprise: "Unlimited" },
-                      { feature: "Staff Accounts", starter: "3", pro: "25", enterprise: "Unlimited" },
-                      { feature: "POS Terminals", starter: "1", pro: "5", enterprise: "Unlimited" },
+                      { feature: "Branches", starter: PLAN_LIMITS.starter.maxBranches, pro: PLAN_LIMITS["business-pro"].maxBranches, enterprise: "Unlimited" },
+                      { feature: "Staff Accounts", starter: PLAN_LIMITS.starter.maxUsers, pro: PLAN_LIMITS["business-pro"].maxUsers, enterprise: "Unlimited" },
+                      { feature: "POS Terminals", starter: PLAN_LIMITS.starter.maxBranches, pro: PLAN_LIMITS["business-pro"].maxBranches, enterprise: "Unlimited" },
                       { feature: "AI Copilot (Gemini)", starter: "—", pro: "✓", enterprise: "✓" },
                       { feature: "Advanced Analytics", starter: "—", pro: "✓", enterprise: "✓" },
                       { feature: "Custom Workflows", starter: "—", pro: "✓", enterprise: "✓" },
@@ -2425,9 +2426,9 @@ function PaymentNotificationModal({ onClose }: { onClose: () => void }) {
                 <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Subscription Plan</label>
                 <select value={selectedPlan} onChange={e => setSelectedPlan(e.target.value)}
                   className="w-full h-12 px-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-xs font-black text-zinc-900 outline-none focus:border-indigo-600 transition-all appearance-none cursor-pointer">
-                  <option value="starter">STARTER — $49</option>
-                  <option value="professional">PROFESSIONAL — $149</option>
-                  <option value="enterprise">ENTERPRISE — CUSTOM</option>
+                  <option value="starter">STARTER — ${PLAN_LIMITS.starter.pricing.monthly}</option>
+                  <option value="business-pro">BUSINESS PRO — ${PLAN_LIMITS["business-pro"].pricing.monthly}</option>
+                  <option value="enterprise">ENTERPRISE — ${PLAN_LIMITS.enterprise.pricing.monthly}</option>
                 </select>
               </div>
               <div className="space-y-1.5">

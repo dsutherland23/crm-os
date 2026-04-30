@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { PLAN_LIMITS } from "@/constants/plan-limits";
 import {
   signInWithEmailAndPassword,
   signOut,
@@ -1065,18 +1066,19 @@ function TenantModal({ t, allUsers, adminUser, onClose }: {
   });
 
   const PLAN_PRICES: Record<string, { monthly: number; yearly: number; label: string }> = {
-    starter:       { monthly: 39,  yearly: 32.76, label: "Starter" },
-    "business-pro": { monthly: 79,  yearly: 66.36, label: "Business Pro" },
-    enterprise:    { monthly: 199, yearly: 167.16, label: "Enterprise" },
+    starter:       { monthly: PLAN_LIMITS.starter.pricing.monthly,  yearly: PLAN_LIMITS.starter.pricing.yearly, label: "Starter" },
+    "business-pro": { monthly: PLAN_LIMITS["business-pro"].pricing.monthly,  yearly: PLAN_LIMITS["business-pro"].pricing.yearly, label: "Business Pro" },
+    enterprise:    { monthly: PLAN_LIMITS.enterprise.pricing.monthly, yearly: PLAN_LIMITS.enterprise.pricing.yearly, label: "Enterprise" },
   };
 
   const calcTotal = () => {
     const plan = PLAN_PRICES[editBilling.planId] || PLAN_PRICES.starter;
+    const limits = PLAN_LIMITS[editBilling.planId as keyof typeof PLAN_LIMITS] || PLAN_LIMITS.starter;
     const base = editBilling.billingCycle === "monthly" ? plan.monthly : plan.yearly;
-    const extraUsers = Math.max(0, editBilling.userCount - { starter: 3, "business-pro": 25, enterprise: 100 }[editBilling.planId as string]!);
-    const extraBranches = Math.max(0, editBilling.branchCount - { starter: 1, "business-pro": 5, enterprise: 10 }[editBilling.planId as string]!);
-    const uPrice = editBilling.billingCycle === "monthly" ? 5 : 4.20;
-    const bPrice = editBilling.billingCycle === "monthly" ? 29 : 24.36;
+    const extraUsers = Math.max(0, editBilling.userCount - limits.maxUsers);
+    const extraBranches = Math.max(0, editBilling.branchCount - limits.maxBranches);
+    const uPrice = editBilling.billingCycle === "monthly" ? limits.addons.userMonthly : limits.addons.userYearly;
+    const bPrice = editBilling.billingCycle === "monthly" ? limits.addons.branchMonthly : limits.addons.branchYearly;
     return base + (extraUsers * uPrice) + (extraBranches * bPrice);
   };
 
@@ -1389,7 +1391,7 @@ function TenantsPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean
               <div className="grid grid-cols-3 gap-1">
                 {[
                   ["Users", userCount],
-                  ["Plan", t.billing?.planId?.replace("-", " ") || t.plan || "Free"],
+                  ["Plan", PLAN_LIMITS[t.billing?.planId as keyof typeof PLAN_LIMITS]?.name || t.billing?.planId || "Free"],
                   ["Billing", t.billing?.billingCycle || "—"]
                 ].map(([l, v]) => (
                   <div key={l as string} className="bg-zinc-800/60 rounded-xl p-2 text-center">

@@ -443,8 +443,8 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     
     // Notifications for plan changes
     if (update.planId && update.planId !== oldPlan) {
-      const oldWeight = oldPlan === "enterprise" ? 3 : oldPlan === "professional" ? 2 : 1;
-      const newWeight = update.planId === "enterprise" ? 3 : update.planId === "professional" ? 2 : 1;
+      const oldWeight = oldPlan === "enterprise" ? 3 : oldPlan === "business-pro" ? 2 : 1;
+      const newWeight = update.planId === "enterprise" ? 3 : update.planId === "business-pro" ? 2 : 1;
       
       const { toast } = await import("sonner");
       if (newWeight > oldWeight) {
