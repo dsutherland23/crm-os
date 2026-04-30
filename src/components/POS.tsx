@@ -220,7 +220,7 @@ export default function POS() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT">("CARD");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT" | "DEBT">("CARD");
   const [isSplitPaymentDialogOpen, setIsSplitPaymentDialogOpen] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitCardAmount, setSplitCardAmount] = useState("");
@@ -867,6 +867,7 @@ export default function POS() {
   const handleCompleteTransaction = async () => {
     if (cart.length === 0) { toast.error("Cart is empty"); return; }
     if (isProcessing) return;
+
     if (!currentSessionId) {
       setShowResolution({ type: "NO_SESSION" });
       return;
@@ -2981,7 +2982,6 @@ Date: ${lastTransaction?.date}
       </Dialog>
     </>
   )}
-  {/* Dedicated printing container - visible only to the printer */}
   <div className="md:fixed md:top-0 md:left-0 md:opacity-0 md:pointer-events-none z-[-1]">
     <POSReceipt branding={branding} order={lastTransaction} formatCurrency={formatCurrency} paperSize={receiptPaperSize} />
   </div>

@@ -13,6 +13,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState, useEffect } from "react";
 import { useModules } from "@/context/ModuleContext";
 import { toast } from "sonner";
+import { WiPayService, defaultWiPayConfig } from "@/lib/wipay";
+import { CreditCardIcon } from "@hugeicons/core-free-icons";
 
 import { PLAN_LIMITS } from "@/constants/plan-limits";
 
@@ -62,10 +64,47 @@ function PricingCard() {
         branchCount: branchCounts[selectedPlan],
         billingCycle
       });
-      toast.success("Billing configuration updated successfully!");
+      toast.success("Configuration updated successfully!");
     } catch (err) {
-      toast.error("Failed to update billing.");
+      toast.error("Failed to update configuration.");
     } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleWiPayCheckout = async () => {
+    setIsSaving(true);
+    try {
+      const plan = PLAN_LIMITS[selectedPlan as keyof typeof PLAN_LIMITS];
+      
+      // Calculate total for WiPay
+      const extraUsers = Math.max(0, userCounts[selectedPlan] - plan.maxUsers);
+      const extraBranches = Math.max(0, branchCounts[selectedPlan] - plan.maxBranches);
+      const basePrice = billingCycle === "monthly" ? plan.pricing.monthly : plan.pricing.yearly;
+      const userAddonPrice = billingCycle === "monthly" ? plan.addons.userMonthly : plan.addons.userYearly;
+      const branchAddonPrice = billingCycle === "monthly" ? plan.addons.branchMonthly : plan.addons.branchYearly;
+      const total = basePrice + (extraUsers * userAddonPrice) + (extraBranches * branchAddonPrice);
+
+      const wipay = new WiPayService({
+        ...defaultWiPayConfig,
+        currency: "USD" // or TTD based on user settings
+      });
+
+      const checkoutUrl = await wipay.getCheckoutUrl({
+        total: billingCycle === "yearly" ? total * 12 : total,
+        orderId: `SUB-${billing.enterpriseId || "NEW"}-${Date.now()}`,
+        customerName: billing.enterpriseId || "Customer",
+        customerEmail: "connect@orivocrm.pro", // Should pull from auth/branding
+        returnUrl: window.location.href,
+        responseUrl: "https://us-central1-crm-os.cloudfunctions.net/wipayWebhook", // Example webhook
+      });
+
+      toast.info("Redirecting to WiPay Secure Gateway...");
+      setTimeout(() => {
+        window.location.href = checkoutUrl;
+      }, 1500);
+    } catch (err) {
+      toast.error("Checkout initialization failed.");
       setIsSaving(false);
     }
   };
@@ -373,14 +412,22 @@ function PricingCard() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 10 }}
-            className="pt-2"
+            className="pt-2 flex flex-col gap-2"
           >
+            <button
+              onClick={handleWiPayCheckout}
+              disabled={isSaving}
+              className="w-full h-12 bg-zinc-900 text-white rounded-xl font-bold shadow-xl shadow-black/10 hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <HugeiconsIcon icon={CreditCardIcon} size={18} />
+              {isSaving ? "Initializing..." : "Secure Checkout via WiPay"}
+            </button>
             <button
               onClick={handleUpdate}
               disabled={isSaving}
-              className="w-full h-12 bg-primary text-primary-foreground rounded-xl font-bold shadow-lg shadow-primary/20 hover:opacity-90 transition-all active:scale-[0.98] disabled:opacity-50"
+              className="w-full h-10 text-zinc-500 rounded-xl font-bold text-xs uppercase tracking-widest hover:text-zinc-900 transition-all disabled:opacity-50"
             >
-              {isSaving ? "Updating Plan..." : "Update Configuration"}
+              Save Configuration (Internal)
             </button>
           </motion.div>
         )}
