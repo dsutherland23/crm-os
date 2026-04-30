@@ -138,6 +138,15 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   const isEditingSettings = React.useRef(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [enterpriseName, setEnterpriseName] = useState(branding.name || "");
+  const [isPaymentSuccessOpen, setIsPaymentSuccessOpen] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("payment") === "success") {
+      setIsPaymentSuccessOpen(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2256,8 +2265,55 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
           </div>
         </TabsContent>
       </Tabs>
+      <PaymentSuccessDialog 
+        open={isPaymentSuccessOpen} 
+        onClose={() => setIsPaymentSuccessOpen(false)} 
+        planName={PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS]?.name || "Business"}
+      />
     </div>
     </ScrollArea>
+  );
+}
+
+// ── Payment Success Dialog ──────────────────────────────────────────
+function PaymentSuccessDialog({ open, onClose, planName }: any) {
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="rounded-[2.5rem] p-0 max-w-sm overflow-hidden border-none shadow-2xl bg-white">
+        <div className="bg-emerald-600 p-10 text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-3xl" />
+          <div className="relative z-10">
+            <motion.div 
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="w-20 h-20 rounded-3xl bg-white/20 backdrop-blur-xl border border-white/30 flex items-center justify-center text-white mx-auto mb-6"
+            >
+              <CheckCircle2 className="w-10 h-10" />
+            </motion.div>
+            <h2 className="text-2xl font-black text-white uppercase tracking-tight">Payment Verified!</h2>
+            <p className="text-emerald-100 text-[10px] font-bold mt-2 uppercase tracking-[0.2em]">Transaction Complete</p>
+          </div>
+        </div>
+
+        <div className="p-10 space-y-8 text-center">
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-zinc-500 leading-relaxed">
+              Welcome to the <span className="font-black text-zinc-900">{planName}</span> tier. Your enterprise account has been successfully upgraded and all features are now unlocked.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <Button 
+              onClick={onClose}
+              className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black shadow-xl shadow-zinc-900/20"
+            >
+              Continue to Dashboard
+            </Button>
+            <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">A receipt has been sent to your email</p>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

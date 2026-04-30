@@ -397,34 +397,29 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
   };
 
   const hasPermission = (moduleId: string, level: "viewer" | "editor" | "admin" = "viewer") => {
-    // Normalization: Map UI tabs to their respective backend module IDs
+    // 1. Super-user overrides (Owner & Executive bypass almost everything)
+    if (userRole?.toLowerCase() === "owner") return true;
+    if (posSession?.payGrade?.toLowerCase() === "executive") return true;
+
+    // 2. Normalization: Map UI tabs to their respective backend module IDs
     const normalizedId = moduleId === "suppliers" ? "inventory" : 
                          moduleId === "revenue" ? "finance" : 
                          moduleId;
 
-    // Plan Gating: Check if feature is included in the current plan
-    const limits = PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS] || PLAN_LIMITS.starter;
-    if (!limits.features.includes(normalizedId) && !["dashboard", "settings", "support", "staff", "billing"].includes(normalizedId)) {
+    // 3. Plan Gating: Check if feature is included in the current plan
+    // Normalize legacy 'business' ID to 'business-pro'
+    const planId = (billing.planId === "business" || !billing.planId) ? "business-pro" : billing.planId;
+    const limits = PLAN_LIMITS[planId as keyof typeof PLAN_LIMITS] || PLAN_LIMITS["business-pro"];
+    
+    const coreModules = ["dashboard", "settings", "support", "staff", "billing"];
+    if (!limits.features.includes(normalizedId) && !coreModules.includes(normalizedId)) {
       return false;
     }
 
+    // 4. Supervisor/Override checks
     if (grantedOverrides.includes(normalizedId)) return true;
 
-    if (posSession) {
-      // FIX: Use case-insensitive comparison to protect against schema drift (e.g., "executive" vs "EXECUTIVE")
-      if (posSession.payGrade?.toLowerCase() === "executive") return true;
-      if (!rolePermissions) return false;
-
-      const perm = rolePermissions[normalizedId];
-      if (perm === true || perm === "admin") return true;
-      if (level === "admin") return perm === "admin";
-      if (level === "editor") return perm === "editor" || perm === "admin";
-      if (level === "viewer") return perm === "viewer" || perm === "editor" || perm === "admin";
-      return false;
-    }
-
-    // FIX: Case-insensitive role check — "owner", "Owner", "OWNER" all grant full access
-    if (userRole?.toLowerCase() === "owner") return true;
+    // 5. Role-based checks
     if (!rolePermissions) return false;
 
     const perm = rolePermissions[normalizedId];
