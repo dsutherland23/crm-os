@@ -1517,15 +1517,44 @@ export default function Inventory() {
   };
 
   const handleScanResult = (result: string) => {
-    const foundProduct = products.find(p => p.sku === result || p.barcode === result);
+    if (!result) return;
+    const clean = result.trim();
+    const lower = clean.toLowerCase();
+    
+    // Modern Search: Match SKU, Barcode, or ID (exact or case-insensitive)
+    const foundProduct = products.find(p => 
+      (p.sku && p.sku.toLowerCase() === lower) || 
+      (p.barcode && p.barcode.toLowerCase() === lower) ||
+      (p.id && p.id.toLowerCase() === lower)
+    );
+
     if (foundProduct) {
       openProductSheet(foundProduct);
-      toast.success('Asset identified');
+      toast.success(`Asset identified: ${foundProduct.name}`, {
+        description: `SKU: ${foundProduct.sku || 'N/A'}`,
+        icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+      });
     } else {
-      setProductForm(prev => ({ ...prev, barcode: result }));
-      toast.info('New SKU detected. Ready for initialization.');
+      // Logic for new asset initialization
+      setEditingProductId(null);
+      setProductForm(prev => ({ 
+        ...prev, 
+        name: '',
+        sku: clean, // Use scanned data as default SKU
+        barcode: clean,
+        category: '',
+        price: 0,
+        cost: 0
+      }));
+      setIsProductSheetOpen(true);
+      toast.info('New SKU detected', {
+        description: `Initializing profile for ${clean}`,
+        icon: <Zap className="w-4 h-4 text-blue-500" />
+      });
     }
-    setIsScannerOpen(false);
+    // Note: setIsScannerOpen is now optionally handled by the scanner itself in continuous mode,
+    // but for Inventory we usually want to jump to the product sheet.
+    // If the user wants continuous scanning, we'd need to adjust this.
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {

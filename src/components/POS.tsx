@@ -295,7 +295,7 @@ export default function POS() {
   const [isCountingBillsClose, setIsCountingBillsClose] = useState(false);
   const [billCountsClose, setBillCountsClose] = useState<Record<number, string>>({});
   const [sessionStats, setSessionStats] = useState({ sales: 0, tax: 0, discounts: 0, cash: 0, card: 0, split: 0 });
-  const [loyaltySettings, setLoyaltySettings] = useState({ pointsRequiredForReward: 100, rewardValue: 5 });
+  const [loyaltySettings, setLoyaltySettings] = useState({ pointsPerDollar: 1, pointsRequiredForReward: 100, rewardValue: 5 });
 
   useEffect(() => {
     if (!enterpriseId) return;
@@ -449,6 +449,21 @@ export default function POS() {
       unsubInventory?.();
     };
   }, [enterpriseId, isAuthorized]);
+
+  useEffect(() => {
+    if (!enterpriseId) return;
+    const unsubLoyalty = onSnapshot(doc(db, "loyalty_settings", enterpriseId), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setLoyaltySettings({
+          pointsPerDollar: data.pointsPerDollar || 1,
+          pointsRequiredForReward: data.pointsRequiredForReward || 100,
+          rewardValue: data.rewardValue || 5
+        });
+      }
+    });
+    return () => unsubLoyalty();
+  }, [enterpriseId]);
 
   useEffect(() => {
     if (!currentSessionId || typeof currentSessionId !== 'string') {
@@ -654,20 +669,29 @@ export default function POS() {
     const clean = data.trim().replace(/[\r\n]+$/, '');
     if (!clean) return;
     const lower = clean.toLowerCase();
+
+    // Modern Search: Match SKU, Barcode, or ID
     const product = products.find(p =>
       (p.barcode && p.barcode.toLowerCase() === lower) ||
       (p.sku && p.sku.toLowerCase() === lower) ||
-      p.id === clean
+      (p.id && p.id.toLowerCase() === lower)
     );
+
     if (product) {
       addToCart(product);
-      toast.success(`✓ Added "${product.name}" to cart`);
-      setIsScannerOpen(false);
+      toast.success(`✓ Added "${product.name}" to cart`, {
+        description: `Price: ${formatCurrency(product.retail_price || product.price || 0)}`,
+        icon: <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+      });
+      // We keep scanner open if user wants to scan multiple items quickly
     } else {
       setSearchTerm(clean);
-      toast.error(`No product matched ${type === 'qr' ? 'QR' : 'barcode'}: ${clean}`);
+      toast.error(`Unrecognized item`, {
+        description: `No product matched ${type === 'qr' ? 'QR' : 'barcode'}: ${clean}`,
+        icon: <AlertCircle className="w-4 h-4 text-rose-500" />
+      });
     }
-  }, [products, addToCart]);
+  }, [products, addToCart, formatCurrency]);
 
   const handleBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
@@ -1038,7 +1062,15 @@ export default function POS() {
       }
 
       if (selectedCustomer?.id) {
-        const pointsEarned = Math.floor(total);
+        const basePoints = total * (loyaltySettings.pointsPerDollar || 1);
+        
+        // Modern Tier-based Multipliers
+        let multiplier = 1;
+        const tier = selectedCustomer.tier?.toLowerCase() || 'silver';
+        if (tier === 'gold') multiplier = 1.25;
+        if (tier === 'platinum') multiplier = 1.5;
+        
+        const pointsEarned = Math.floor(basePoints * multiplier);
         const pointAdjustment = isReturnMode ? -pointsEarned : ((cartDiscount as any)?.isLoyaltyReward ? -(loyaltySettings.pointsRequiredForReward || 100) : pointsEarned);
         batch.update(doc(db, "customers", selectedCustomer.id), {
           spend: increment(isReturnMode ? -total : total),

@@ -614,10 +614,32 @@ export default function Loyalty() {
                    className="h-11 rounded-lg"
                  />
               </div>
-              <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-xl">
-                 <p className="text-sm font-medium text-zinc-600">
-                    Summary: Customers earn <strong className="text-zinc-900">{rewardLogic.pointsPerDollar} points</strong> for every {currency} spent. They can redeem <strong className="text-zinc-900">{rewardLogic.pointsRequiredForReward} points</strong> for <strong className="text-zinc-900">{currency}{rewardLogic.rewardValue} off</strong> their purchase.
+              <div className="p-5 bg-zinc-900 rounded-2xl text-white shadow-xl shadow-zinc-900/20 space-y-4">
+                 <div className="flex items-center gap-2 text-amber-400">
+                    <Star className="w-4 h-4 fill-amber-400" />
+                    <span className="text-[10px] font-black uppercase tracking-widest">Active Logic Summary</span>
+                 </div>
+                 <p className="text-sm font-medium text-zinc-300 leading-relaxed">
+                    Standard customers earn <strong className="text-white">{rewardLogic.pointsPerDollar} pts</strong> per {currency}1.00. 
+                    Redeem <strong className="text-white">{rewardLogic.pointsRequiredForReward} pts</strong> for <strong className="text-emerald-400">{currency}{rewardLogic.rewardValue} OFF</strong>.
                  </p>
+                 <div className="pt-2 border-t border-zinc-800 space-y-2">
+                    <p className="text-[10px] font-black text-zinc-500 uppercase tracking-tighter">Modern Tier Multipliers (Auto-Applied)</p>
+                    <div className="grid grid-cols-3 gap-2">
+                       <div className="bg-zinc-800 p-2 rounded-lg text-center">
+                          <p className="text-[9px] font-bold text-zinc-500">SILVER</p>
+                          <p className="text-xs font-black">1.0x</p>
+                       </div>
+                       <div className="bg-zinc-800 p-2 rounded-lg text-center">
+                          <p className="text-[9px] font-bold text-amber-500">GOLD</p>
+                          <p className="text-xs font-black">1.25x</p>
+                       </div>
+                       <div className="bg-zinc-800 p-2 rounded-lg text-center">
+                          <p className="text-[9px] font-bold text-blue-400">PLATINUM</p>
+                          <p className="text-xs font-black">1.5x</p>
+                       </div>
+                    </div>
+                 </div>
               </div>
             </div>
           </div>

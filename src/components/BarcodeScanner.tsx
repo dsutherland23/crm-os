@@ -11,9 +11,10 @@ interface BarcodeScannerProps {
   isOpen: boolean;
   onClose: () => void;
   onScan: (data: string, type: 'barcode' | 'qr') => void;
+  continuous?: boolean;
 }
 
-export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScannerProps) {
+export default function BarcodeScanner({ isOpen, onClose, onScan, continuous = false }: BarcodeScannerProps) {
   const uid = useId().replace(/:/g, '');           // stable, colon-free id
   const scannerDivId = `qr-reader-${uid}`;
 
@@ -22,9 +23,24 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
   const [isInitializing, setIsInitializing] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [lastScan, setLastScan] = useState<string | null>(null);
+  const [isContinuous, setIsContinuous] = useState(continuous);
+  const [isFlashActive, setIsFlashActive] = useState(false);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const mountedRef = useRef(true);
+
+  // ── Manual permission request ───────────────────────────────────────────
+  const manualPermissionRequest = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // Stop the stream immediately, we only wanted the permission
+      stream.getTracks().forEach(track => track.stop());
+      return true;
+    } catch (err) {
+      console.warn("Manual permission request failed:", err);
+      throw err;
+    }
+  };
 
   // ── Stop & clean up scanner ─────────────────────────────────────────────
   const stopScanner = async () => {
@@ -67,6 +83,14 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
       }
 
       try {
+        // 1. Check for Secure Context (HTTPS)
+        if (!window.isSecureContext && window.location.hostname !== 'localhost') {
+          throw new Error('Camera access requires a secure connection (HTTPS). Please ensure you are using an https:// URL.');
+        }
+
+        // Force browser prompt if not already granted
+        await manualPermissionRequest();
+
         // Check camera availability
         const devices = await Html5Qrcode.getCameras();
         if (!devices || devices.length === 0) {
@@ -90,7 +114,8 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
             disableFlip: false,
           },
           (decodedText: string, decodedResult: any) => {
-            // html5-qrcode v2.3 stores format at result.format.formatName
+            if (lastScan === decodedText.trim()) return; // Prevent double scans
+
             let fmt = '';
             try {
               fmt =
@@ -100,9 +125,17 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
                 '';
             } catch (_) {}
             const type = fmt === 'QR_CODE' || fmt === 'qr_code' ? 'qr' : 'barcode';
-            playBeep();
+            
+            triggerFeedback();
             setLastScan(decodedText.trim());
             onScan(decodedText, type);
+
+            if (!isContinuous) {
+              onClose();
+            } else {
+              // Clear last scan after a delay to allow re-scanning same item
+              setTimeout(() => setLastScan(null), 2000);
+            }
           },
           (_errorMessage: string) => {
             // Frame decode errors are normal — suppress
@@ -113,13 +146,20 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
       } catch (err: any) {
         if (!mountedRef.current) return;
         setIsInitializing(false);
-        const msg =
-          err?.name === 'NotAllowedError' || err?.message?.includes('ermission')
-            ? 'Camera permission denied. Open site settings and allow camera access, then retry.'
-            : err?.message || 'Could not start camera scanner.';
+        
+        let msg = err?.message || 'Could not start camera scanner.';
+        
+        if (err?.name === 'NotAllowedError' || err?.message?.toLowerCase().includes('permission')) {
+          msg = 'Camera permission denied. Click the "Lock" icon in your browser address bar to allow camera access, then retry.';
+        } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
+          msg = 'No camera found. If you have a USB camera, please ensure it is plugged in.';
+        } else if (err?.name === 'NotReadableError' || err?.name === 'TrackStartError') {
+          msg = 'Camera is already in use by another application. Please close other apps and retry.';
+        }
+        
         setCameraError(msg);
         if (err?.name === 'NotAllowedError') {
-          toast.error('Camera permission denied.');
+          toast.error('Permission Denied');
         }
       }
     }, 700);
@@ -156,11 +196,12 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
       if (e.key === 'Enter') {
         const clean = barcode.trim();
         if (clean.length > 2) {
-          playBeep();
+          triggerFeedback();
           const type = clean.startsWith('{') || clean.startsWith('http') ? 'qr' : 'barcode';
           setLastScan(clean);
           onScan(clean, type);
           barcode = '';
+          if (!isContinuous) onClose();
         }
       } else if (e.key.length === 1) {
         barcode += e.key;
@@ -172,7 +213,8 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
   }, [isOpen, onScan]);
 
   // ── Audio beep ─────────────────────────────────────────────────────────
-  const playBeep = () => {
+  const triggerFeedback = () => {
+    // 1. Audio
     try {
       const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
       const osc = ctx.createOscillator();
@@ -186,6 +228,15 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.12);
     } catch (_) {}
+
+    // 2. Haptic
+    if ('vibrate' in navigator) {
+      navigator.vibrate(50);
+    }
+
+    // 3. Visual
+    setIsFlashActive(true);
+    setTimeout(() => setIsFlashActive(false), 150);
   };
 
   // ── Manual submit ──────────────────────────────────────────────────────
@@ -193,10 +244,12 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
     e.preventDefault();
     const clean = manualInput.trim();
     if (!clean) return;
+    triggerFeedback();
     const type = clean.startsWith('{') || clean.startsWith('http') ? 'qr' : 'barcode';
     setLastScan(clean);
     onScan(clean, type);
     setManualInput('');
+    if (!isContinuous) onClose();
   };
 
   const retryScanner = () => {
@@ -240,6 +293,23 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
             </button>
           </div>
 
+          {/* Continuous mode toggle */}
+          <div className="flex items-center justify-between px-2">
+            <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Continuous Scanning</span>
+            <button 
+              onClick={() => setIsContinuous(!isContinuous)}
+              className={cn(
+                "w-10 h-5 rounded-full transition-colors relative flex items-center",
+                isContinuous ? "bg-blue-600" : "bg-zinc-200"
+              )}
+            >
+              <div className={cn(
+                "w-3.5 h-3.5 bg-white rounded-full transition-transform absolute shadow-sm",
+                isContinuous ? "translate-x-5.5" : "translate-x-1"
+              )} />
+            </button>
+          </div>
+
           {/* Camera view */}
           {mode === 'scanner' ? (
             <div className="rounded-2xl overflow-hidden border-2 border-zinc-200 bg-zinc-900 relative flex items-center justify-center" style={{ minHeight: 280 }}>
@@ -273,11 +343,18 @@ export default function BarcodeScanner({ isOpen, onClose, onScan }: BarcodeScann
               {/* Scan target box overlay */}
               {!isInitializing && !cameraError && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
-                  <div className="w-52 h-52 relative">
-                    <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-xl" />
-                    <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-xl" />
-                    <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-xl" />
-                    <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-xl" />
+                  <div className={cn(
+                    "w-52 h-52 relative transition-all duration-150",
+                    isFlashActive ? "scale-110" : "scale-100"
+                  )}>
+                    <div className={cn("absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 rounded-tl-xl transition-colors", isFlashActive ? "border-emerald-400" : "border-blue-400")} />
+                    <div className={cn("absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 rounded-tr-xl transition-colors", isFlashActive ? "border-emerald-400" : "border-blue-400")} />
+                    <div className={cn("absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 rounded-bl-xl transition-colors", isFlashActive ? "border-emerald-400" : "border-blue-400")} />
+                    <div className={cn("absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 rounded-br-xl transition-colors", isFlashActive ? "border-emerald-400" : "border-blue-400")} />
+                    
+                    {/* Visual Flash */}
+                    {isFlashActive && <div className="absolute inset-0 bg-emerald-400/20 rounded-xl animate-in fade-in duration-150" />}
+                    
                     {/* Scan line animation */}
                     <div className="absolute inset-x-0 h-0.5 bg-blue-400/70 animate-scan-line" />
                   </div>
