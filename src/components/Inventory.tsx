@@ -5,7 +5,7 @@ import {
   AlertTriangle, ArrowRightLeft, TrendingUp, Layers, Box, BarChart3,
   ChevronRight, ArrowRight, CheckCircle2, AlertCircle, Truck, Clock, RefreshCw, Sparkles,
   Camera, Image as ImageIcon, Scan, ScanLine, Check, Info, MoreVertical, X as XIcon, Zap, ZapOff, Maximize2, Zap as Flashlight, Loader2, Trash2, Users,
-  ShieldCheck, CalendarCheck, CreditCard, Activity, FileText, Link2
+  ShieldCheck, CalendarCheck, CreditCard, Activity, FileText, Link2, LifeBuoy
 } from 'lucide-react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -2447,6 +2447,15 @@ export default function Inventory() {
                 className="rounded-2xl h-14 px-6 border-zinc-200 font-black text-[10px] uppercase tracking-widest transition-all bg-white flex-1 sm:flex-none hover:border-blue-500 hover:text-blue-600 shadow-sm"
               >
                 <ScanLine className="w-4 h-4 mr-2 text-blue-600" /> Scan Barcode
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="icon"
+                onClick={() => window.dispatchEvent(new CustomEvent('switchSupportTab', { detail: 'documentation' }))}
+                className="rounded-xl h-14 w-14 border border-zinc-200 text-zinc-400 hover:text-blue-600 hover:border-blue-200 transition-all bg-white"
+                title="Help & Guides"
+              >
+                <LifeBuoy className="w-5 h-5" />
               </Button>
               <Button 
                 variant="outline" 

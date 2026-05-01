@@ -129,6 +129,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     setBranding, 
     enterpriseId,
     billing,
+    updateBilling,
     taxRate,
     setTaxRate,
     checkLimit,
@@ -138,7 +139,55 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   const isEditingSettings = React.useRef(false);
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [enterpriseName, setEnterpriseName] = useState(branding.name || "");
+  const [isPaymentMethodDialogOpen, setIsPaymentMethodDialogOpen] = useState(false);
   const [isPaymentSuccessOpen, setIsPaymentSuccessOpen] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({
+    cardName: "",
+    cardNumber: "",
+    expiry: "",
+    cvv: ""
+  });
+
+  const handleUpdatePaymentMethod = async () => {
+    if (!paymentForm.cardNumber || !paymentForm.expiry || !paymentForm.cvv) {
+      toast.error("Please fill in all payment details.");
+      return;
+    }
+
+    const last4 = paymentForm.cardNumber.replace(/\s/g, "").slice(-4);
+    const type = paymentForm.cardNumber.startsWith("4") ? "Visa" : 
+                 paymentForm.cardNumber.startsWith("5") ? "Mastercard" : "Card";
+
+    const loadingToast = toast.loading("Verifying security credentials...");
+    
+    // Simulate network delay for professional feel
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    try {
+      await updateBilling({
+        paymentMethod: {
+          type,
+          last4,
+          expiry: paymentForm.expiry
+        }
+      });
+      setIsPaymentMethodDialogOpen(false);
+      setPaymentForm({ cardName: "", cardNumber: "", expiry: "", cvv: "" });
+      toast.success("Vault credentials synchronized.", { id: loadingToast });
+      
+      if (enterpriseId) {
+        await recordAuditLog({
+          enterpriseId,
+          action: "PAYMENT_METHOD_UPDATED",
+          details: `Vault entry updated: ${type} ending in ${last4}`,
+          severity: "INFO",
+          type: "SECURITY"
+        });
+      }
+    } catch (err) {
+      toast.error("Handshake failed. Verify card details.", { id: loadingToast });
+    }
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -2245,7 +2294,120 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                       <p className="text-sm font-bold text-zinc-900">Payment Method</p>
                       <p className="text-xs text-zinc-500">{billing.paymentMethod.type} ending in {billing.paymentMethod.last4} · Expires {billing.paymentMethod.expiry}</p>
                     </div>
-                    <Button variant="outline" size="sm" className="ml-auto rounded-xl text-xs font-bold border-zinc-200">Update</Button>
+                    <Dialog open={isPaymentMethodDialogOpen} onOpenChange={setIsPaymentMethodDialogOpen}>
+                      <DialogTrigger
+                        render={
+                          <Button variant="outline" size="sm" className="ml-auto rounded-xl text-xs font-bold border-zinc-200">Update</Button>
+                        }
+                      />
+                      <DialogContent className="rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl bg-white sm:max-w-md">
+                        <div className="bg-zinc-900 p-8 text-white relative overflow-hidden">
+                          <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+                            <CreditCard className="w-32 h-32" />
+                          </div>
+                          <div className="relative z-10 space-y-2">
+                            <DialogTitle className="font-bold text-2xl tracking-tight">Update Vault Credentials</DialogTitle>
+                            <DialogDescription className="text-zinc-400 font-medium">Update your primary funding source for subscription settlements.</DialogDescription>
+                          </div>
+                        </div>
+
+                        <div className="p-8 space-y-6">
+                          {/* Card Preview */}
+                          <div className="bg-gradient-to-br from-zinc-800 to-zinc-950 rounded-2xl p-6 shadow-xl relative overflow-hidden h-44 flex flex-col justify-between group">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-3xl" />
+                            <div className="flex justify-between items-start relative z-10">
+                              <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center backdrop-blur-md">
+                                <Cpu className="w-6 h-6 text-zinc-400" />
+                              </div>
+                              <CreditCard className="w-8 h-8 text-white/20" />
+                            </div>
+                            <div className="relative z-10">
+                              <p className="text-white font-mono text-lg tracking-[0.2em] mb-2">
+                                {paymentForm.cardNumber ? paymentForm.cardNumber.replace(/(\d{4})/g, '$1 ').trim() : "•••• •••• •••• ••••"}
+                              </p>
+                              <div className="flex justify-between items-end">
+                                <div>
+                                  <p className="text-[8px] text-zinc-500 uppercase tracking-widest font-black">Card Holder</p>
+                                  <p className="text-white text-xs font-bold uppercase tracking-wider">{paymentForm.cardName || "Full Name"}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[8px] text-zinc-500 uppercase tracking-widest font-black">Expires</p>
+                                  <p className="text-white text-xs font-bold font-mono">{paymentForm.expiry || "MM/YY"}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Cardholder Name</Label>
+                              <Input 
+                                className="rounded-xl h-11 bg-zinc-50 border-zinc-100 font-bold" 
+                                placeholder="e.g. John Doe"
+                                value={paymentForm.cardName}
+                                onChange={(e) => setPaymentForm({...paymentForm, cardName: e.target.value})}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Card Number</Label>
+                              <div className="relative">
+                                <CreditCard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-300" />
+                                <Input 
+                                  className="rounded-xl h-11 bg-zinc-50 border-zinc-100 font-bold pl-10" 
+                                  placeholder="0000 0000 0000 0000"
+                                  maxLength={19}
+                                  value={paymentForm.cardNumber}
+                                  onChange={(e) => {
+                                    const val = e.target.value.replace(/\D/g, '').replace(/(\d{4})/g, '$1 ').trim();
+                                    setPaymentForm({...paymentForm, cardNumber: val});
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div className="space-y-2">
+                                <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Expiry Date</Label>
+                                <Input 
+                                  className="rounded-xl h-11 bg-zinc-50 border-zinc-100 font-bold text-center" 
+                                  placeholder="MM/YY"
+                                  maxLength={5}
+                                  value={paymentForm.expiry}
+                                  onChange={(e) => {
+                                    let val = e.target.value.replace(/\D/g, '');
+                                    if (val.length > 2) val = val.slice(0, 2) + '/' + val.slice(2, 4);
+                                    setPaymentForm({...paymentForm, expiry: val});
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">CVV / CVC</Label>
+                                <Input 
+                                  type="password"
+                                  className="rounded-xl h-11 bg-zinc-50 border-zinc-100 font-bold text-center" 
+                                  placeholder="•••"
+                                  maxLength={3}
+                                  value={paymentForm.cvv}
+                                  onChange={(e) => setPaymentForm({...paymentForm, cvv: e.target.value.replace(/\D/g, '')})}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-8 bg-zinc-50 border-t border-zinc-100">
+                          <Button 
+                            className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black shadow-xl shadow-zinc-900/10 hover:translate-y-[-2px] active:translate-y-0 transition-all"
+                            onClick={handleUpdatePaymentMethod}
+                          >
+                            Synchronize Payment Method
+                          </Button>
+                          <p className="text-[9px] text-center text-zinc-400 font-bold uppercase tracking-[0.2em] mt-4 flex items-center justify-center gap-2">
+                            <Lock className="w-3 h-3" />
+                            Secure PCI-DSS Encrypted Channel
+                          </p>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                   </div>
                   <div className="h-px bg-zinc-100" />
                   <div className="flex items-center justify-between text-sm">

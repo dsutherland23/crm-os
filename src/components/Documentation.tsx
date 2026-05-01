@@ -26,6 +26,7 @@ interface GuideSection {
       tip?: string;
     }[];
   };
+  tags: string[];
 }
 
 const GUIDES: GuideSection[] = [
@@ -34,6 +35,7 @@ const GUIDES: GuideSection[] = [
     title: "Command Center",
     icon: Layout,
     description: "Real-time enterprise metrics and AI-driven business intelligence.",
+    tags: ["revenue", "metrics", "ai", "overview", "kpi"],
     content: {
       subtitle: "Mastering the Dashboard Hub",
       sections: [
@@ -59,6 +61,7 @@ const GUIDES: GuideSection[] = [
     title: "Point of Sale",
     icon: ShoppingCart,
     description: "High-performance checkout logic, sessions, and AI upselling.",
+    tags: ["checkout", "sales", "returns", "restock", "cashier", "receipts"],
     content: {
       subtitle: "Advanced POS Operations",
       sections: [
@@ -72,11 +75,12 @@ const GUIDES: GuideSection[] = [
           ]
         },
         {
-          title: "AI Upsell Engine",
-          text: "During checkout, the system analyzes the cart and suggests relevant additions based on historical customer behavior.",
+          title: "Intelligent Checkout",
+          text: "Modern checkout features designed for speed and accuracy.",
           bullets: [
-            "Smart Suggestions: One-click additions for frequently paired items.",
-            "Loyalty Triggers: Automatic alerts when a customer is eligible for a reward."
+            "Restock on Return: Choose whether to return items to inventory automatically during a refund.",
+            "Auto-Replenishment: The system can automatically draft Purchase Orders when stock levels drop during a sale.",
+            "AI Upsell Engine: Real-time analysis of cart contents to suggest relevant add-ons."
           ]
         }
       ]
@@ -87,6 +91,7 @@ const GUIDES: GuideSection[] = [
     title: "Inventory Control",
     icon: Package,
     description: "Batch management, stock transfers, and automated procurement.",
+    tags: ["stock", "barcode", "scan", "warehouse", "delivery", "sku"],
     content: {
       subtitle: "Enterprise Stock Logistics",
       sections: [
@@ -96,13 +101,18 @@ const GUIDES: GuideSection[] = [
           bullets: [
             "Stock Transfers: Move inventory between branches with a digital chain of custody.",
             "Batch Tracking: Manage perishable goods or serialized items using batches.",
-            "Barcode Integration: Use the camera or dedicated scanners for rapid intake."
+            "Logic Calibrations: Adjust stock for damage, shrinkage, or restocking."
           ]
         },
         {
-          title: "Automated Replenishment",
-          text: "Configure low-stock thresholds to trigger procurement alerts.",
-          tip: "Enable 'Auto-PO' for strategic partners to have purchase orders drafted automatically when stock hits critical levels."
+          title: "The Scan Engine",
+          text: "A high-fidelity scanning system designed for 2026 enterprise hardware.",
+          bullets: [
+            "Continuous Mode: Toggle 'Continuous Scanning' to process high-volume intake without interruption.",
+            "Feedback Protocol: Instant audio (beep), haptic (vibration), and visual (emerald flash) confirmation.",
+            "Auto-Onboarding: Scanning an unknown SKU triggers a prompt to initialize the asset's profile immediately.",
+            "Hardware Agnostic: Works with mobile cameras, tablets, and USB/Bluetooth hardware scanners."
+          ]
         }
       ]
     }
@@ -112,6 +122,7 @@ const GUIDES: GuideSection[] = [
     title: "Customer Intelligence",
     icon: Users,
     description: "Loyalty systems, clinical records, and personalized engagement.",
+    tags: ["customers", "loyalty", "points", "platinum", "gold", "profiles"],
     content: {
       subtitle: "CRM & Relationship Logic",
       sections: [
@@ -120,16 +131,18 @@ const GUIDES: GuideSection[] = [
           text: "Customer records store more than just contact info; they maintain a full history of engagement.",
           bullets: [
             "Transactional History: Every receipt and invoice linked to the profile.",
-            "Preferences: Capture specific notes, clinical records, and scanned documents.",
-            "Personalized Outreach: AI-generated messaging for birthdays or re-engagement."
+            "Financial Debt: Track store credit and outstanding balances per customer.",
+            "Preferences: Capture specific notes, clinical records, and scanned documents."
           ]
         },
         {
-          title: "Loyalty Architecture",
-          text: "The platform supports multi-tiered loyalty programs (e.g., Bronze, Silver, Gold).",
+          title: "Tiered Loyalty Engine",
+          text: "Reward customer retention with automated point multipliers.",
           bullets: [
-            "Points Accumulation: Earn points automatically during checkout.",
-            "Reward Redemption: Deduct points for free products or tiered discounts."
+            "Silver (Standard): Earn 1x points per unit spent.",
+            "Gold (Premium): Earn 1.25x points automatically.",
+            "Platinum (Elite): Earn 1.5x points and priority service status.",
+            "Points Redemption: Points can be traded at POS for fixed-value discounts or free products."
           ]
         }
       ]
@@ -140,6 +153,7 @@ const GUIDES: GuideSection[] = [
     title: "Financial Treasury",
     icon: DollarSign,
     description: "General ledger, automated invoicing, and compliance reporting.",
+    tags: ["money", "finance", "invoice", "ledger", "tax", "payroll"],
     content: {
       subtitle: "Revenue & Ledger Management",
       sections: [
@@ -165,6 +179,7 @@ const GUIDES: GuideSection[] = [
     title: "Staff & Productivity",
     icon: BadgeCheck,
     description: "Roster management, performance tracking, and security.",
+    tags: ["employees", "roles", "pin", "clock-in", "permissions"],
     content: {
       subtitle: "Personnel Management",
       sections: [
@@ -192,6 +207,7 @@ const GUIDES: GuideSection[] = [
     title: "Audit & Security",
     icon: ShieldAlert,
     description: "Forensic logs, risk scoring, and compliance monitoring.",
+    tags: ["security", "logs", "forensics", "compliance", "encryption"],
     content: {
       subtitle: "Enterprise Compliance Logic",
       sections: [
@@ -215,6 +231,7 @@ const GUIDES: GuideSection[] = [
     title: "Procurement Hub",
     icon: Truck,
     description: "Partner management, purchase orders, and sourcing cycles.",
+    tags: ["suppliers", "po", "orders", "procurement", "sourcing"],
     content: {
       subtitle: "Supply Chain & Partnerships",
       sections: [
@@ -239,6 +256,7 @@ const GUIDES: GuideSection[] = [
     title: "Logic Workflows",
     icon: Zap,
     description: "Task automation, project boards, and team collaboration.",
+    tags: ["tasks", "automation", "board", "collaboration", "todo"],
     content: {
       subtitle: "Operational Automation",
       sections: [
@@ -262,6 +280,7 @@ const GUIDES: GuideSection[] = [
     title: "System Core",
     icon: Settings,
     description: "Branding, branch configuration, and subscription management.",
+    tags: ["branding", "branch", "subscription", "logo", "white-label"],
     content: {
       subtitle: "Platform Configuration",
       sections: [
@@ -290,7 +309,8 @@ export default function Documentation() {
   const filteredGuides = GUIDES.filter(g => 
     g.title.toLowerCase().includes(search.toLowerCase()) || 
     g.description.toLowerCase().includes(search.toLowerCase()) ||
-    g.content.subtitle.toLowerCase().includes(search.toLowerCase())
+    g.content.subtitle.toLowerCase().includes(search.toLowerCase()) ||
+    g.tags.some(t => t.toLowerCase().includes(search.toLowerCase()))
   );
 
   return (

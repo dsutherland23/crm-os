@@ -98,20 +98,20 @@ const FAQ_ITEMS = [
     a: "Yes. In the Customers module, use the 'Export' button to download a CSV of all customer records scoped to your enterprise.",
   },
   {
-    q: "How does the Loyalty program work?",
-    a: "Customers earn points per purchase based on your configured multiplier. Points are redeemable at POS. Configure tiers in the Loyalty module.",
+    q: "How does the the new Scan Engine work?",
+    a: "The engine supports continuous scanning for high-volume tasks. You can toggle 'Continuous Mode' in the scanner dialog to keep the camera active. It also provides audio, haptic, and visual feedback for every successful match.",
   },
   {
-    q: "Is my data isolated from other companies?",
-    a: "Absolutely. Every query is scoped to your unique enterprise_id — no data, user, or transaction is ever shared across accounts.",
+    q: "Can I automatically reorder low stock?",
+    a: "Yes. By enabling 'Auto-Replenishment' in POS Settings, the system will automatically draft Purchase Orders (POs) when an item's stock level drops during a sale.",
   },
   {
-    q: "How do I reset a staff member's PIN?",
-    a: "Go to Staff → select the member → edit their profile and choose 'Reset PIN'. A temporary PIN is generated and can be changed on next login.",
+    q: "What are the Loyalty Tiers?",
+    a: "We support three tiers: Silver (1x points), Gold (1.25x points), and Platinum (1.5x points). Multipliers are applied automatically at checkout based on the customer's profile.",
   },
   {
-    q: "What payment methods does the POS support?",
-    a: "Cash, Card (Stripe), and custom tender types. You can configure accepted methods in POS Settings.",
+    q: "How do I handle returns?",
+    a: "In the POS, you can toggle 'Return Mode'. When completing a return, you'll be asked if the items should be restocked. If 'Yes', the inventory levels are adjusted automatically.",
   },
 ];
 

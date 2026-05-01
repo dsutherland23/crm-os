@@ -35,8 +35,9 @@ import {
   Clock,
   Share2,
   PauseCircle,
-  RefreshCw,
-  Star
+  Star,
+  LifeBuoy,
+  RefreshCw
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -1777,6 +1778,14 @@ Notes: ${closeRegisterNotes || 'None'}
                   <Input placeholder="Scan or search..." className="pl-10 rounded-xl border-zinc-200 bg-white shadow-sm h-10 text-xs w-full" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={handleBarcodeScan} />
                 </div>
                 <Button variant="outline" className="h-10 px-3 rounded-xl border-zinc-200 bg-white shadow-sm hover:bg-zinc-50 shrink-0" onClick={() => setIsScannerOpen(true)}><ScanLine className="w-4 h-4" /></Button>
+                <Button 
+                  variant="outline" 
+                  className="h-10 px-3 rounded-xl border-zinc-200 bg-white shadow-sm hover:text-blue-600 hover:border-blue-200 shrink-0" 
+                  onClick={() => window.dispatchEvent(new CustomEvent('switchSupportTab', { detail: 'documentation' }))}
+                  title="POS Documentation"
+                >
+                  <LifeBuoy className="w-4 h-4" />
+                </Button>
               </div>
 
 

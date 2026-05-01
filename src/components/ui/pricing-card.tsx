@@ -21,6 +21,7 @@ import { RefreshCw, ShieldCheck, Zap, Landmark, FileUp, Image as ImageIcon, Tras
 import { Button } from "@/components/ui/button";
 import { db, addDoc, collection, serverTimestamp } from "@/lib/firebase";
 import { recordAuditLog } from "@/lib/audit";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
 const plans = Object.values(PLAN_LIMITS);
 

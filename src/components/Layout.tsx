@@ -1136,7 +1136,18 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
         )}
 
         <div className="flex items-center gap-2">
-          <NotificationsMenu />
+          <Button 
+          variant="ghost" 
+          size="icon" 
+          onClick={() => setActiveTab?.('support:help')}
+          className="h-10 w-10 rounded-xl text-zinc-500 hover:text-blue-600 hover:bg-blue-50 transition-all group relative"
+          title="Help Center"
+        >
+          <LifeBuoy className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+          <span className="absolute -top-1 -right-1 w-2 h-2 bg-blue-400 rounded-full border-2 border-zinc-50" />
+        </Button>
+
+        <NotificationsMenu />
           <div className="h-8 w-[1px] bg-zinc-200 mx-2" />
           <Button variant="ghost" size="icon" className="hover:bg-zinc-200 rounded-xl" onClick={() => setActiveTab?.("settings")}>
             <Settings className="w-5 h-5 text-zinc-600" />
