@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Share2,
   MessageSquarePlus,
@@ -18,6 +18,7 @@ import {
   Linkedin,
   Mail,
   Send,
+  X,
   ArrowUpRight,
   Sparkles,
   Clock,
@@ -41,6 +42,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useModules } from "@/context/ModuleContext";
@@ -453,6 +455,7 @@ const TERMS_CONTENT = (
 function HelpSection() {
   const [search, setSearch] = useState("");
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const filtered = FAQ_ITEMS.filter(
     (f) =>
@@ -555,11 +558,13 @@ function HelpSection() {
                <p className="text-zinc-500 text-[10px] mt-0.5">Our 2026 response team is standing by.</p>
             </div>
          </div>
-         <Button onClick={() => window.dispatchEvent(new CustomEvent('switchSupportTab', { detail: 'contact' }))} 
+         <Button onClick={() => setIsChatOpen(true)} 
            className="bg-white text-zinc-900 hover:bg-zinc-100 rounded-xl font-bold px-6 border-0">
            Start Chat
          </Button>
       </div>
+
+      <ChatDialog open={isChatOpen} onOpenChange={setIsChatOpen} />
     </div>
   );
 }
@@ -1070,6 +1075,136 @@ function TicketCenter() {
         )}
       </div>
     </div>
+  );
+}
+
+// ── Chat Dialog ─────────────────────────────────────────────────────────────
+function ChatDialog({ open, onOpenChange }: { open: boolean, onOpenChange: (open: boolean) => void }) {
+  const [messages, setMessages] = useState<{ role: 'user' | 'agent', text: string, time: string }[]>([
+    { role: 'agent', text: "Hello! I'm your Orivo Success Agent. How can I assist you today?", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+  ]);
+  const [input, setInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isTyping]);
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+    const userMsg = { role: 'user' as const, text: input, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+    setMessages(prev => [...prev, userMsg]);
+    setInput("");
+    setIsTyping(true);
+
+    // Simulate Agent Response
+    setTimeout(() => {
+      setIsTyping(false);
+      const agentMsg = { 
+        role: 'agent' as const, 
+        text: "I've received your inquiry regarding '" + input.substring(0, 20) + (input.length > 20 ? "..." : "") + "'. A technical specialist is reviewing your context now. Is there anything specific you'd like me to highlight for them?", 
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+      };
+      setMessages(prev => [...prev, agentMsg]);
+    }, 2000);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[450px] h-[650px] rounded-[2.5rem] p-0 overflow-hidden flex flex-col border-none shadow-3xl bg-white">
+        <div className="bg-zinc-900 p-6 text-white flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center">
+                <Headphones className="w-5 h-5 text-white" />
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full border-[3px] border-zinc-900" />
+            </div>
+            <div>
+              <p className="text-sm font-black uppercase tracking-widest leading-none mb-1">Orivo Live Support</p>
+              <div className="text-[9px] text-emerald-400 font-bold uppercase tracking-[0.2em] flex items-center gap-1">
+                <div className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                Response under 2m
+              </div>
+            </div>
+          </div>
+          <Button variant="ghost" size="icon" onClick={() => onOpenChange(false)} className="text-zinc-500 hover:text-white rounded-full hover:bg-zinc-800">
+            <X className="w-5 h-5" />
+          </Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-zinc-50/50" ref={scrollRef}>
+          <div className="text-center py-2">
+            <Badge variant="outline" className="bg-white border-zinc-100 text-zinc-400 text-[9px] font-bold uppercase tracking-widest px-3 py-1">Secure Channel Established</Badge>
+          </div>
+          
+          {messages.map((m, i) => (
+            <div key={i} className={cn("flex items-end gap-2", m.role === 'user' ? "flex-row-reverse" : "flex-row")}>
+              <div className={cn(
+                "max-w-[85%] p-4 rounded-2xl shadow-sm relative group",
+                m.role === 'user' 
+                  ? "bg-zinc-900 text-white rounded-br-none" 
+                  : "bg-white border border-zinc-100 text-zinc-700 rounded-bl-none"
+              )}>
+                <p className="text-sm leading-relaxed font-medium">{m.text}</p>
+                <p className={cn(
+                  "text-[8px] mt-2 font-bold uppercase tracking-widest opacity-0 group-hover:opacity-40 transition-opacity", 
+                  m.role === 'user' ? "text-right" : "text-left"
+                )}>
+                  {m.time}
+                </p>
+              </div>
+            </div>
+          ))}
+          
+          {isTyping && (
+            <div className="flex justify-start items-center gap-2">
+              <div className="bg-white border border-zinc-100 p-4 rounded-2xl rounded-bl-none flex gap-1.5 shadow-sm">
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-duration:0.8s]" />
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.2s]" />
+                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce [animation-duration:0.8s] [animation-delay:0.4s]" />
+              </div>
+              <span className="text-[10px] font-black text-zinc-300 uppercase tracking-widest animate-pulse">Agent Typing...</span>
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 bg-white border-t border-zinc-100 shadow-[0_-10px_40px_rgba(0,0,0,0.02)]">
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-2xl blur opacity-0 group-focus-within:opacity-10 transition duration-500" />
+            <Input 
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              placeholder="Describe your request..."
+              className="relative h-14 rounded-2xl border-zinc-200 pr-14 pl-5 focus:ring-blue-500/10 focus:border-blue-400 bg-zinc-50/50 font-medium placeholder:text-zinc-400"
+            />
+            <Button 
+              size="icon"
+              disabled={!input.trim()}
+              onClick={handleSend}
+              className={cn(
+                "absolute right-2 top-2 h-10 w-10 rounded-xl transition-all duration-300",
+                input.trim() ? "bg-blue-600 text-white shadow-lg shadow-blue-500/40" : "bg-zinc-100 text-zinc-400"
+              )}
+            >
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+          <div className="flex items-center justify-center gap-4 mt-4">
+            <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-[0.25em] flex items-center gap-1.5">
+              <Shield className="w-3 h-3 text-emerald-500" />
+              PCI-DSS Protected
+            </p>
+            <div className="w-1 h-1 rounded-full bg-zinc-200" />
+            <p className="text-[8px] text-zinc-400 font-bold uppercase tracking-[0.25em]">End-to-End Encrypted</p>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
