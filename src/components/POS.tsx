@@ -1826,7 +1826,7 @@ Notes: ${closeRegisterNotes || 'None'}
           </div>
 
           <div className={cn("fixed inset-y-0 right-0 w-full sm:w-[420px] border-l border-zinc-200 bg-white flex flex-col shadow-2xl z-40 transition-all duration-500 ease-in-out md:relative md:shadow-xl md:z-auto", isCartOpenOnMobile ? "translate-x-0" : "translate-x-full md:translate-x-0", isCartCollapsed ? "md:w-0 md:opacity-0 md:pointer-events-none -mr-4" : "md:w-[400px] md:opacity-100")}>
-            <div className="flex-none p-6 lg:p-8 border-b border-zinc-100 space-y-4">
+            <div className="flex-none p-4 sm:p-6 lg:p-8 border-b border-zinc-100 space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
@@ -1893,7 +1893,7 @@ Notes: ${closeRegisterNotes || 'None'}
                   </Button>
                 </div>
               </div>
-              <Button variant="outline" className="w-full justify-start rounded-2xl border-zinc-200 h-14 text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 group transition-all hover:bg-white hover:border-blue-500/30" onClick={() => setIsCustomerSearchOpen(true)}>
+              <Button variant="outline" className="w-full justify-start rounded-2xl border-zinc-200 h-12 sm:h-14 text-zinc-500 hover:text-zinc-900 bg-zinc-50/50 group transition-all hover:bg-white hover:border-blue-500/30" onClick={() => setIsCustomerSearchOpen(true)}>
                 {selectedCustomer ? (
                   <div className="flex items-center justify-between w-full">
                     <div className="flex items-center gap-3">
@@ -1924,8 +1924,7 @@ Notes: ${closeRegisterNotes || 'None'}
                 )}
               </Button>
             </div>
-            <div className="flex-1 min-h-0 relative">
-              <div className="absolute inset-0 overflow-y-auto p-8 hide-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-zinc-50/30 scroll-smooth hide-scrollbar">
               {cart.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-40">
                   <div className="w-20 h-20 bg-zinc-100 rounded-full flex items-center justify-center"><ShoppingCart className="w-10 h-10 text-zinc-400" /></div>
@@ -1964,9 +1963,8 @@ Notes: ${closeRegisterNotes || 'None'}
                   </AnimatePresence>
                 </div>
               )}
-              </div>
             </div>
-            <div className="flex-none p-8 bg-zinc-50 border-t border-zinc-200 space-y-6">
+            <div className="flex-none p-4 sm:p-6 lg:p-8 bg-white border-t border-zinc-200 space-y-4 sm:space-y-6 shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
               <AnimatePresence>
                 {eligibleCampaigns.length > 0 && (activeBranch === "all" || !cartDiscount) && (
                   <motion.div initial={{ opacity: 0, y: 10, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }} exit={{ opacity: 0, y: -10, height: 0 }} className="overflow-hidden">
@@ -2013,19 +2011,19 @@ Notes: ${closeRegisterNotes || 'None'}
                   </div>
                   <span className="font-medium text-zinc-900">{formatCurrency(tax)}</span>
                 </div>
-                <div className="flex justify-between text-2xl font-black pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
+                <div className="flex justify-between text-lg sm:text-2xl font-black pt-3 sm:pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
               </div>
-              <div className="grid grid-cols-2 xs:grid-cols-4 gap-2">
-                <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CARD"); }}><CreditCard className="w-4 h-4 mr-2" />Card</Button>
-                <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CASH"); }}><Banknote className="w-4 h-4 mr-2" />Cash</Button>
-                <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => { setPaymentMethod("SPLIT"); }}><Split className="w-4 h-4 mr-2" />Split</Button>
+              <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
+                <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CARD"); }}><CreditCard className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Card</Button>
+                <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CASH"); }}><Banknote className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Cash</Button>
+                <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => { setPaymentMethod("SPLIT"); }}><Split className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Split</Button>
                 <Button 
                   variant={paymentMethod === "DEBT" ? "default" : "outline"} 
-                  className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "DEBT" && "bg-blue-600")} 
+                  className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "DEBT" && "bg-blue-600")} 
                   disabled={!selectedCustomer}
                   onClick={() => { setPaymentMethod("DEBT"); setPaidAmount("0"); }}
                 >
-                  <Clock className="w-4 h-4 mr-2" />Account
+                  <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Acc.
                 </Button>
               </div>
 
@@ -2045,7 +2043,7 @@ Notes: ${closeRegisterNotes || 'None'}
                         placeholder={total.toFixed(2)}
                         value={paidAmount}
                         onChange={(e) => setPaidAmount(e.target.value)}
-                        className="h-12 pl-8 rounded-xl border-zinc-200 bg-white font-black text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
+                        className="h-10 sm:h-12 pl-8 rounded-xl border-zinc-200 bg-white font-black text-base sm:text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
                       />
                     </div>
                   </div>
@@ -2073,8 +2071,8 @@ Notes: ${closeRegisterNotes || 'None'}
                       </div>
                     )}
                     <div className="flex justify-between items-center pt-2 border-t border-zinc-200">
-                      <span className="text-xs font-bold text-zinc-900">Total Applied</span>
-                      <span className="text-sm font-black text-zinc-900">{formatCurrency(Math.min(total, parseFloat(paidAmount) || total))}</span>
+                      <span className="text-[10px] sm:text-xs font-bold text-zinc-900">Total Applied</span>
+                      <span className="text-xs sm:text-sm font-black text-zinc-900">{formatCurrency(Math.min(total, parseFloat(paidAmount) || total))}</span>
                     </div>
                   </div>
                 </div>
@@ -2097,7 +2095,7 @@ Notes: ${closeRegisterNotes || 'None'}
               )}
               <Button 
                 className={cn(
-                  "w-full rounded-xl h-14 font-bold text-lg shadow-xl transition-all active:scale-95",
+                  "w-full rounded-xl h-12 sm:h-14 font-bold text-base sm:text-lg shadow-xl transition-all active:scale-95",
                   (selectedCustomer && (parseFloat(paidAmount) || total) < total) 
                     ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20" 
                     : "bg-zinc-900 hover:bg-zinc-800 text-white shadow-zinc-900/20"
@@ -2118,7 +2116,7 @@ Notes: ${closeRegisterNotes || 'None'}
                 }} 
                 disabled={isProcessing || cart.length === 0}
               >
-                {isProcessing ? "Processing..." : (selectedCustomer && (parseFloat(paidAmount) || total) < total) ? "Charge Remainder to Account" : "Complete Transaction"}
+                {isProcessing ? "Processing..." : (selectedCustomer && (parseFloat(paidAmount) || total) < total) ? (window.innerWidth < 640 ? "Charge Account" : "Charge Remainder to Account") : "Complete Transaction"}
               </Button>
             </div>
           </div>
@@ -2279,7 +2277,7 @@ Notes: ${closeRegisterNotes || 'None'}
                     <Star className="w-2.5 h-2.5 mr-1 fill-amber-600" />
                     +{Math.floor(lastTransaction?.total || 0)} Points Earned
                   </Badge>
-                )}
+               )}
               </div>
             </div>
 

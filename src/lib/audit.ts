@@ -2,7 +2,7 @@ import { db, collection, addDoc, serverTimestamp, doc } from "./firebase";
 import { auth } from "./firebase";
 
 export type AuditSeverity = "INFO" | "WARNING" | "CRITICAL";
-export type AuditType = "SECURITY" | "POS" | "CRM" | "FINANCE" | "SYSTEM";
+export type AuditType = "SECURITY" | "POS" | "CRM" | "FINANCE" | "SYSTEM" | "BILLING";
 
 export interface AuditLogParams {
   enterpriseId: string;

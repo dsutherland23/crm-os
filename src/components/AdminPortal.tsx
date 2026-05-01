@@ -23,6 +23,15 @@ import {
   where,
 } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase";
+import {
+  buildAdminPrincipal,
+  adminApi,
+  canAccessTenant,
+  hasAdminCapability,
+  type AdminCapability,
+  type AdminApiResponse,
+  type AdminPrincipal,
+} from "@/lib/admin";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
@@ -36,6 +45,7 @@ import {
   UserCog, Send, MoreVertical, Check, Globe, Megaphone, Plus,
   ExternalLink, ArrowUpRight, Server, Command, Trash2, LifeBuoy, MessageSquare,
   Sparkles, Star, CreditCard, History, FileCheck, XCircle, Clock, AlertCircle,
+  DollarSign, Smartphone, MapPin, Wifi, Radio, Zap,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "motion/react";
@@ -47,16 +57,54 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 // ══════════════════════════════════════════════════════════════════════
 // TYPES
 // ══════════════════════════════════════════════════════════════════════
-type AdminTab = "dashboard" | "users" | "tenants" | "analytics" | "security" | "audit" | "config" | "admins" | "support";
+type AdminTab =
+  | "dashboard"
+  | "tenants"
+  | "users"
+  | "security"
+  | "audit"
+  | "support"
+  | "analytics"
+  | "flags"
+  | "billing"
+  | "incidents"
+  | "config"
+  | "admins"
+  | "approvals";
 
 interface AdminRecord {
   email: string;
   role: "super_admin" | "admin";
   granted_at: string;
+  granted_by?: string;
+  capabilities?: AdminCapability[];
+  scope?: {
+    tenantIds?: string[];
+    regions?: string[];
+    environments?: Array<"production" | "staging">;
+  };
 }
 
 interface UserRecord {
@@ -148,16 +196,20 @@ interface TicketReply {
 // ══════════════════════════════════════════════════════════════════════
 // NAV
 // ══════════════════════════════════════════════════════════════════════
-const NAV: { id: AdminTab; label: string; icon: React.ElementType; superOnly?: boolean }[] = [
-  { id: "dashboard",  label: "Overview",     icon: Activity    },
-  { id: "users",      label: "Users",         icon: Users       },
-  { id: "tenants",    label: "Tenants",       icon: Building2   },
-  { id: "analytics",  label: "Analytics",     icon: BarChart3   },
-  { id: "security",   label: "Security",      icon: ShieldAlert },
-  { id: "audit",      label: "Audit Logs",    icon: FileText    },
-  { id: "support",    label: "Support Center",icon: LifeBuoy    },
-  { id: "config",     label: "Config",        icon: Sliders     },
-  { id: "admins",     label: "Admins",        icon: UserCog, superOnly: true },
+const NAV: { id: AdminTab; label: string; icon: React.ElementType; superOnly?: boolean; capability?: AdminCapability }[] = [
+  { id: "dashboard",  label: "Overview",      icon: Activity,     capability: "platform.read" },
+  { id: "tenants",    label: "Tenant Control",icon: Building2,    capability: "tenant.read" },
+  { id: "users",      label: "Users",         icon: Users,        capability: "user.read" },
+  { id: "security",   label: "Security",      icon: ShieldAlert,  capability: "tenant.security.read" },
+  { id: "audit",      label: "Audit Logs",    icon: FileText,     capability: "audit.read" },
+  { id: "support",    label: "Support",       icon: LifeBuoy,     capability: "support.read" },
+  { id: "analytics",  label: "Analytics",     icon: BarChart3,    capability: "analytics.read" },
+  { id: "flags",      label: "Feature Flags", icon: Sparkles,     capability: "tenant.feature_flags.read" },
+  { id: "billing",    label: "Billing Ops",   icon: CreditCard,   capability: "tenant.billing.read" },
+  { id: "incidents",  label: "Incidents",     icon: AlertCircle,  capability: "platform.read" },
+  { id: "config",     label: "Config",        icon: Sliders,      capability: "platform.configure" },
+  { id: "admins",     label: "Admins",        icon: UserCog,      superOnly: true, capability: "admin.manage" },
+  { id: "approvals",  label: "Approvals",     icon: FileCheck,    capability: "admin.manage" },
 ];
 
 // ══════════════════════════════════════════════════════════════════════
@@ -460,7 +512,62 @@ function AdminShell({ user, record }: { user: User; record: AdminRecord }) {
   const [tab, setTab] = useState<AdminTab>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pendingNotices, setPendingNotices] = useState<number>(0);
+  const [pendingApprovals, setPendingApprovals] = useState<number>(0);
+  const [activeImpersonation, setActiveImpersonation] = useState<{ sessionId: string; targetUserId: string; targetEmail: string; expiresAt: string } | null>(null);
+  const [endingImpersonation, setEndingImpersonation] = useState(false);
   const isSuperAdmin = record.role === "super_admin";
+  const principal = buildAdminPrincipal({
+    id: user.uid,
+    email: user.email || record.email,
+    role: record.role,
+    granted_at: record.granted_at,
+    granted_by: record.granted_by,
+    capabilities: record.capabilities,
+    scope: record.scope,
+  });
+
+  // Check for active impersonation sessions by this admin
+  useEffect(() => {
+    if (!hasAdminCapability(principal, "impersonate")) return;
+    const q = query(
+      collection(db, "impersonation_sessions"),
+      where("adminUid", "==", user.uid),
+      where("status", "==", "active")
+    );
+    return onSnapshot(q, (snap) => {
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        setActiveImpersonation({
+          sessionId: snap.docs[0].id,
+          targetUserId: data.targetUserId,
+          targetEmail: data.targetEmail || data.targetUserId,
+          expiresAt: data.expiresAt,
+        });
+      } else {
+        setActiveImpersonation(null);
+      }
+    });
+  }, [user.uid, principal.capabilities]);
+
+  const endImpersonation = async () => {
+    if (!activeImpersonation) return;
+    setEndingImpersonation(true);
+    try {
+      await adminApi<AdminApiResponse<{ sessionId: string; status: string }>>("/api/admin/impersonation/end", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: activeImpersonation.sessionId,
+          reason: "Admin ended session manually",
+        }),
+      });
+      toast.success("Impersonation session ended.");
+      setActiveImpersonation(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to end session");
+    } finally {
+      setEndingImpersonation(false);
+    }
+  };
 
   // Global listener for pending payment notices
   useEffect(() => {
@@ -468,12 +575,30 @@ function AdminShell({ user, record }: { user: User; record: AdminRecord }) {
     return onSnapshot(q, (snap) => setPendingNotices(snap.docs.length));
   }, []);
 
+  // Global listener for pending approval requests
+  useEffect(() => {
+    if (!hasAdminCapability(principal, "admin.manage")) return;
+    const q = query(collection(db, "admin_approval_requests"), where("status", "==", "PENDING"));
+    return onSnapshot(q, (snap) => {
+      const now = new Date();
+      const active = snap.docs.filter(d => {
+        const exp = d.data().expiresAt?.toDate?.() || new Date(d.data().expiresAt);
+        return exp > now;
+      });
+      setPendingApprovals(active.length);
+    });
+  }, [principal.capabilities]);
+
   const handleSignOut = async () => {
     await audit(user, "ADMIN_LOGOUT", { resource_type: "session" });
     await signOut(auth);
   };
 
-  const visibleNav = NAV.filter(n => !n.superOnly || isSuperAdmin);
+  const visibleNav = NAV.filter((n) => {
+    if (n.superOnly && !isSuperAdmin) return false;
+    if (!n.capability) return true;
+    return hasAdminCapability(principal, n.capability);
+  });
 
   return (
     <div className="min-h-screen bg-zinc-950 flex">
@@ -502,7 +627,8 @@ function AdminShell({ user, record }: { user: User; record: AdminRecord }) {
 
         <nav className="flex-1 p-2 space-y-0.5 overflow-y-auto font-sans">
           {visibleNav.map(n => {
-            const hasBadge = n.id === "support" && pendingNotices > 0;
+            const hasBadge = (n.id === "support" && pendingNotices > 0) || (n.id === "approvals" && pendingApprovals > 0);
+            const badgeCount = n.id === "approvals" ? pendingApprovals : pendingNotices;
             return (
               <button key={n.id} onClick={() => { setTab(n.id); setSidebarOpen(false); }}
                 className={cn(
@@ -513,7 +639,7 @@ function AdminShell({ user, record }: { user: User; record: AdminRecord }) {
                 {n.label}
                 {hasBadge && (
                   <span className="ml-auto flex h-4 min-w-[16px] px-1 items-center justify-center rounded-full bg-rose-600 text-[10px] text-white font-black animate-pulse shadow-lg shadow-rose-600/40">
-                    {pendingNotices}
+                    {badgeCount}
                   </span>
                 )}
               </button>
@@ -542,22 +668,51 @@ function AdminShell({ user, record }: { user: User; record: AdminRecord }) {
           </button>
           <p className="text-white font-black text-sm">{visibleNav.find(n => n.id === tab)?.label}</p>
           <div className="ml-auto flex items-center gap-2">
+            <span className="hidden xl:flex items-center gap-1.5 text-[9px] font-black text-blue-300 bg-blue-500/10 border border-blue-500/15 rounded-full px-2.5 py-1 uppercase tracking-wider">
+              {principal.capabilities.length} capabilities
+            </span>
             <span className="hidden sm:flex items-center gap-1.5 text-[9px] font-black text-emerald-400 bg-emerald-400/10 border border-emerald-400/15 rounded-full px-2.5 py-1 uppercase tracking-wider">
               <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />Live
             </span>
           </div>
         </div>
 
+        {/* Impersonation Banner */}
+        {activeImpersonation && (
+          <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5 flex items-center gap-3 shrink-0">
+            <Eye className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+            <div className="min-w-0 flex-1">
+              <p className="text-amber-300 text-xs font-black">
+                Impersonating: {activeImpersonation.targetEmail}
+              </p>
+              <p className="text-amber-600 text-[9px]">
+                Expires {new Date(activeImpersonation.expiresAt).toLocaleTimeString()}
+              </p>
+            </div>
+            <button
+              onClick={endImpersonation}
+              disabled={endingImpersonation}
+              className="px-3 py-1.5 rounded-lg bg-amber-600 text-white text-[10px] font-black hover:bg-amber-500 transition-all shrink-0"
+            >
+              {endingImpersonation ? "Ending…" : "End Session"}
+            </button>
+          </div>
+        )}
+
         <main className="flex-1 overflow-y-auto">
           {tab === "dashboard"  && <DashPane  user={user} />}
-          {tab === "users"      && <UsersPane  user={user} isSuperAdmin={isSuperAdmin} />}
-          {tab === "tenants"    && <TenantsPane user={user} isSuperAdmin={isSuperAdmin} />}
+          {tab === "users"      && <UsersPane  user={user} isSuperAdmin={isSuperAdmin} principal={principal} />}
+          {tab === "tenants"    && <TenantsPane user={user} isSuperAdmin={isSuperAdmin} principal={principal} />}
           {tab === "analytics"  && <AnalyticsPane />}
-          {tab === "security"   && <SecurityPane />}
+          {tab === "security"   && <SecurityPane principal={principal} />}
           {tab === "audit"      && <AuditPane />}
+          {tab === "flags"      && <FeatureFlagsPane principal={principal} />}
+          {tab === "billing"    && <BillingOpsPane principal={principal} />}
+          {tab === "incidents"  && <IncidentsPane principal={principal} />}
           {tab === "config"     && <ConfigPane user={user} isSuperAdmin={isSuperAdmin} />}
           {tab === "admins"     && <AdminsPane user={user} />}
           {tab === "support"    && <SupportPane />}
+          {tab === "approvals"  && <ApprovalsPane user={user} principal={principal} />}
         </main>
       </div>
     </div>
@@ -766,15 +921,48 @@ function UserDrawer({ u, adminUser, onClose }: { u: UserRecord; adminUser: User;
   const [busy, setBusy] = useState(false);
   const [suspendReason, setSuspendReason] = useState("");
   const [showSuspendForm, setShowSuspendForm] = useState(false);
+  const [showImpersonateForm, setShowImpersonateForm] = useState(false);
+  const [impersonateReason, setImpersonateReason] = useState("");
+  const [impersonateTtl, setImpersonateTtl] = useState(30);
+
+  const doStartImpersonation = async () => {
+    if (!impersonateReason.trim() || impersonateReason.trim().length < 5) {
+      toast.error("Enter a reason (at least 5 characters).");
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await adminApi<AdminApiResponse<{ sessionId: string; expiresAt: string }>>("/api/admin/impersonation/start", {
+        method: "POST",
+        body: JSON.stringify({
+          targetUserId: u.id,
+          reason: impersonateReason.trim(),
+          ttlMinutes: impersonateTtl,
+        }),
+      });
+      toast.success(`Impersonation started. Session: ${res.data?.sessionId?.slice(0, 8)}…`, {
+        description: `Expires at ${new Date(res.data?.expiresAt || "").toLocaleTimeString()}`,
+      });
+      setShowImpersonateForm(false);
+      setImpersonateReason("");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to start impersonation");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const doSuspend = async () => {
     if (!suspendReason.trim()) { toast.error("Enter a reason."); return; }
     setBusy(true);
     try {
-      await updateDoc(doc(db, "users", u.id), { status: "SUSPENDED", suspendReason });
-      await audit(adminUser, "SUSPEND_USER", {
-        resource_type: "user", resource_id: u.id, target_tenant: u.enterprise_id,
-        before: { status: u.status }, after: { status: "SUSPENDED", suspendReason },
+      await adminApi<AdminApiResponse<{ userId: string; status: string }>>("/api/admin/users/status", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: u.id,
+          status: "SUSPENDED",
+          reason: suspendReason.trim(),
+        }),
       });
       toast.success("User suspended.");
       setShowSuspendForm(false);
@@ -784,11 +972,16 @@ function UserDrawer({ u, adminUser, onClose }: { u: UserRecord; adminUser: User;
   };
 
   const doReactivate = async () => {
+    if (!suspendReason.trim()) { toast.error("Enter a reason."); return; }
     setBusy(true);
     try {
-      await updateDoc(doc(db, "users", u.id), { status: "ACTIVE", suspendReason: null });
-      await audit(adminUser, "REACTIVATE_USER", {
-        resource_type: "user", resource_id: u.id, before: { status: u.status }, after: { status: "ACTIVE" },
+      await adminApi<AdminApiResponse<{ userId: string; status: string }>>("/api/admin/users/status", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: u.id,
+          status: "ACTIVE",
+          reason: suspendReason.trim(),
+        }),
       });
       toast.success("User reactivated.");
       onClose();
@@ -883,6 +1076,43 @@ function UserDrawer({ u, adminUser, onClose }: { u: UserRecord; adminUser: User;
             {busy ? "Reactivating…" : "Reactivate User"}
           </button>
         )}
+
+        {/* Impersonation */}
+        {!showImpersonateForm ? (
+          <button onClick={() => setShowImpersonateForm(true)} disabled={busy}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/8 border border-amber-500/15 text-amber-400 text-sm font-semibold hover:bg-amber-500/15 transition-all text-left">
+            <Eye className="w-4 h-4 shrink-0" />
+            Impersonate User
+          </button>
+        ) : (
+          <div className="space-y-2 bg-amber-500/5 border border-amber-500/15 rounded-xl p-4">
+            <p className="text-amber-400 text-xs font-bold">Impersonation reason (required, min 5 chars)</p>
+            <textarea value={impersonateReason} onChange={e => setImpersonateReason(e.target.value)} rows={2}
+              placeholder="e.g. Investigating support ticket #1234, user reports missing data…"
+              className="w-full bg-zinc-900 border border-white/[0.07] rounded-lg text-white text-xs p-2.5 outline-none resize-none placeholder:text-zinc-700 focus:border-amber-500/30" />
+            <div className="flex items-center gap-2">
+              <p className="text-zinc-500 text-[10px] font-bold shrink-0">Duration:</p>
+              <select value={impersonateTtl} onChange={e => setImpersonateTtl(Number(e.target.value))}
+                className="bg-zinc-900 border border-white/[0.07] rounded-lg text-white text-xs px-2 py-1.5 outline-none">
+                <option value={15}>15 min</option>
+                <option value={30}>30 min</option>
+                <option value={45}>45 min</option>
+                <option value={60}>60 min (max)</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={doStartImpersonation} disabled={busy}
+                className="flex-1 h-9 rounded-lg bg-amber-600 text-white text-xs font-black hover:bg-amber-500 transition-all">
+                {busy ? <RefreshCw className="w-3 h-3 animate-spin mx-auto" /> : "Start Impersonation"}
+              </button>
+              <button onClick={() => { setShowImpersonateForm(false); setImpersonateReason(""); }}
+                className="px-3 h-9 rounded-lg bg-zinc-800 text-zinc-400 text-xs font-bold hover:bg-zinc-700 transition-all">
+                Cancel
+              </button>
+            </div>
+            <p className="text-zinc-700 text-[9px]">All impersonation sessions are logged and time-limited.</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -891,15 +1121,18 @@ function UserDrawer({ u, adminUser, onClose }: { u: UserRecord; adminUser: User;
 // ══════════════════════════════════════════════════════════════════════
 // 2. USERS PANE (with drawer + bulk actions)
 // ══════════════════════════════════════════════════════════════════════
-function UsersPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean }) {
+function UsersPane({ user, isSuperAdmin, principal }: { user: User; isSuperAdmin: boolean; principal: AdminPrincipal }) {
   const users = useUsers();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [drawerUser, setDrawerUser] = useState<UserRecord | null>(null);
+  const [bulkReason, setBulkReason] = useState("");
 
   const filtered = users.filter(u => {
+    const tenantAllowed = canAccessTenant(principal, u.enterprise_id || "");
+    if (!tenantAllowed) return false;
     const q = search.toLowerCase();
     const matchQ = !q || u.fullName?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || u.enterprise_id?.toLowerCase().includes(q);
     const matchS = statusFilter === "ALL" || u.status === statusFilter;
@@ -918,32 +1151,48 @@ function UsersPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean }
   };
 
   const bulkSuspend = async () => {
+    if (!bulkReason.trim() || bulkReason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     if (!confirm(`Suspend ${selected.size} users?`)) return;
     setBusy("bulk");
     try {
       for (const id of selected) {
         const u = users.find(x => x.id === id);
         if (!u || u.status === "SUSPENDED") continue;
-        await updateDoc(doc(db, "users", id), { status: "SUSPENDED" });
-        await audit(user, "SUSPEND_USER", { resource_type: "user", resource_id: id, target_tenant: u.enterprise_id, before: { status: u.status }, after: { status: "SUSPENDED" }, bulk: true });
+        await adminApi<AdminApiResponse<{ userId: string; status: string }>>("/api/admin/users/status", {
+          method: "POST",
+          body: JSON.stringify({
+            userId: id,
+            status: "SUSPENDED",
+            reason: bulkReason.trim(),
+          }),
+        });
       }
       toast.success(`${selected.size} users suspended.`);
       setSelected(new Set());
+      setBulkReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(null); }
   };
 
   const bulkActivate = async () => {
+    if (!bulkReason.trim() || bulkReason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     setBusy("bulk");
     try {
       for (const id of selected) {
         const u = users.find(x => x.id === id);
         if (!u || u.status === "ACTIVE") continue;
-        await updateDoc(doc(db, "users", id), { status: "ACTIVE" });
-        await audit(user, "REACTIVATE_USER", { resource_type: "user", resource_id: id, bulk: true });
+        await adminApi<AdminApiResponse<{ userId: string; status: string }>>("/api/admin/users/status", {
+          method: "POST",
+          body: JSON.stringify({
+            userId: id,
+            status: "ACTIVE",
+            reason: bulkReason.trim(),
+          }),
+        });
       }
       toast.success(`${selected.size} users activated.`);
       setSelected(new Set());
+      setBulkReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(null); }
   };
@@ -972,6 +1221,12 @@ function UsersPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean }
       {selected.size > 0 && (
         <div className="flex items-center gap-3 bg-zinc-900 border border-white/[0.07] rounded-xl px-4 py-2.5">
           <span className="text-white text-xs font-bold">{selected.size} selected</span>
+          <input
+            value={bulkReason}
+            onChange={e => setBulkReason(e.target.value)}
+            placeholder="Reason required…"
+            className="flex-1 h-8 px-3 bg-zinc-950 border border-white/[0.07] rounded-lg text-white text-[11px] placeholder:text-zinc-700 outline-none focus:border-white/15"
+          />
           <div className="ml-auto flex gap-2">
             <button onClick={bulkActivate} disabled={busy === "bulk"}
               className="px-3 h-7 rounded-lg bg-emerald-500/15 text-emerald-400 text-[10px] font-black hover:bg-emerald-500/25 transition-all">
@@ -1055,6 +1310,7 @@ function TenantModal({ t, allUsers, adminUser, onClose }: {
   const [busy, setBusy] = useState(false);
   const [extendDays, setExtendDays] = useState(7);
   const [extendBusy, setExtendBusy] = useState(false);
+  const [changeReason, setChangeReason] = useState("");
 
   // Editable billing state — initialized from Firestore data
   const [editBilling, setEditBilling] = useState({
@@ -1086,6 +1342,10 @@ function TenantModal({ t, allUsers, adminUser, onClose }: {
   const trialDaysLeft = trialEndsAt ? Math.max(0, Math.ceil((trialEndsAt.getTime() - Date.now()) / 86400000)) : null;
 
   const saveBilling = async () => {
+    if (!changeReason.trim() || changeReason.trim().length < 5) {
+      toast.error("Enter a reason with at least 5 characters.");
+      return;
+    }
     setBusy(true);
     try {
       const renewalDate = new Date();
@@ -1096,29 +1356,47 @@ function TenantModal({ t, allUsers, adminUser, onClose }: {
         paymentMethod: t.billing?.paymentMethod || { type: "Visa", last4: "—", expiry: "—" },
         trialEndsAt: t.billing?.trialEndsAt || null,
       };
-      await updateDoc(doc(db, "enterprise_settings", t.id), { billing: newBilling, plan: editBilling.planId });
-      await audit(adminUser, "UPDATE_TENANT_BILLING", {
-        resource_type: "tenant", resource_id: t.id, target_tenant: t.enterprise_id,
-        before: { billing: t.billing, plan: t.plan }, after: { billing: newBilling },
+      await adminApi<AdminApiResponse<{ tenantId: string; billing: typeof newBilling }>>("/api/admin/tenants/billing", {
+        method: "POST",
+        body: JSON.stringify({
+          tenantId: t.id,
+          reason: changeReason.trim(),
+          billing: newBilling,
+        }),
       });
       toast.success("Billing updated successfully.");
+      setChangeReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
 
   const extendTrial = async () => {
+    if (!changeReason.trim() || changeReason.trim().length < 5) {
+      toast.error("Enter a reason with at least 5 characters.");
+      return;
+    }
     setExtendBusy(true);
     try {
       const base = trialEndsAt && trialDaysLeft! > 0 ? trialEndsAt : new Date();
       const newEnd = new Date(base.getTime() + extendDays * 86400000);
-      await updateDoc(doc(db, "enterprise_settings", t.id), {
-        billing: { ...(t.billing || {}), trialEndsAt: newEnd.toISOString(), status: "trialing" }
-      });
-      await audit(adminUser, "EXTEND_TRIAL", {
-        resource_type: "tenant", resource_id: t.id, target_tenant: t.enterprise_id,
-        before: { trialEndsAt: t.billing?.trialEndsAt }, after: { trialEndsAt: newEnd.toISOString(), extendedDays: extendDays },
+      await adminApi<AdminApiResponse<{ tenantId: string; billing: Record<string, unknown> }>>("/api/admin/tenants/billing", {
+        method: "POST",
+        body: JSON.stringify({
+          tenantId: t.id,
+          reason: changeReason.trim(),
+          billing: {
+            planId: editBilling.planId,
+            userCount: editBilling.userCount,
+            branchCount: editBilling.branchCount,
+            billingCycle: editBilling.billingCycle,
+            status: "trialing",
+            trialEndsAt: newEnd.toISOString(),
+            renewalDate: t.billing?.renewalDate || new Date().toISOString(),
+          },
+        }),
       });
       toast.success(`Trial extended by ${extendDays} days.`);
+      setChangeReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setExtendBusy(false); }
   };
@@ -1160,6 +1438,17 @@ function TenantModal({ t, allUsers, adminUser, onClose }: {
         </div>
 
         <div className="p-4 space-y-5">
+          <div className="space-y-2">
+            <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">Admin Reason</p>
+            <textarea
+              value={changeReason}
+              onChange={e => setChangeReason(e.target.value)}
+              rows={3}
+              placeholder="Document why you're changing billing or extending trial…"
+              className="w-full bg-zinc-800 border border-white/[0.06] rounded-xl text-white text-xs p-3 outline-none resize-none placeholder:text-zinc-700 focus:border-white/15 transition-colors"
+            />
+          </div>
+
           {/* Plan picker */}
           <div className="space-y-2">
             <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">Plan</p>
@@ -1323,42 +1612,57 @@ function TenantModal({ t, allUsers, adminUser, onClose }: {
 // ══════════════════════════════════════════════════════════════════════
 // 3. TENANTS
 // ══════════════════════════════════════════════════════════════════════
-function TenantsPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean }) {
+function TenantsPane({ user, isSuperAdmin, principal }: { user: User; isSuperAdmin: boolean; principal: AdminPrincipal }) {
   const tenants = useTenants();
   const users = useUsers();
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [drilldown, setDrilldown] = useState<TenantRecord | null>(null);
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const [tenantActionReason, setTenantActionReason] = useState("");
 
-  const filtered = tenants.filter(t =>
-    !search || t.enterpriseName?.toLowerCase().includes(search.toLowerCase()) || t.enterprise_id?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = tenants.filter((t) => {
+    const tenantKey = t.enterprise_id || t.id;
+    if (!canAccessTenant(principal, tenantKey)) return false;
+    return !search || t.enterpriseName?.toLowerCase().includes(search.toLowerCase()) || t.enterprise_id?.toLowerCase().includes(search.toLowerCase());
+  });
+
+  const selectedTenant = filtered.find((t) => (t.enterprise_id || t.id) === selectedTenantId) || filtered[0] || null;
 
   const suspend = async (t: TenantRecord) => {
-    if (!isSuperAdmin) { toast.error("Super Admin only."); return; }
+    if (!hasAdminCapability(principal, "tenant.suspend")) { toast.error("You do not have tenant suspension capability."); return; }
+    if (!tenantActionReason.trim() || tenantActionReason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     if (!confirm(`Suspend tenant "${t.enterpriseName}"?`)) return;
     setBusy(t.id);
     try {
-      await updateDoc(doc(db, "enterprise_settings", t.id), { status: "suspended" });
-      await audit(user, "SUSPEND_TENANT", { resource_type: "tenant", resource_id: t.id, target_tenant: t.enterprise_id, after: { status: "suspended" } });
+      await adminApi<AdminApiResponse<{ tenantId: string; status: string }>>("/api/admin/tenants/suspend", {
+        method: "POST",
+        body: JSON.stringify({ tenantId: t.id, reason: tenantActionReason.trim() }),
+      });
       toast.success("Tenant suspended.");
+      setTenantActionReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(null); }
   };
 
   const activate = async (t: TenantRecord) => {
+    if (!hasAdminCapability(principal, "tenant.restore")) { toast.error("You do not have tenant restore capability."); return; }
+    if (!tenantActionReason.trim() || tenantActionReason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     setBusy(t.id);
     try {
-      await updateDoc(doc(db, "enterprise_settings", t.id), { status: "active" });
-      await audit(user, "ACTIVATE_TENANT", { resource_type: "tenant", resource_id: t.id, after: { status: "active" } });
+      await adminApi<AdminApiResponse<{ tenantId: string; status: string }>>("/api/admin/tenants/restore", {
+        method: "POST",
+        body: JSON.stringify({ tenantId: t.id, reason: tenantActionReason.trim() }),
+      });
       toast.success("Tenant activated.");
+      setTenantActionReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(null); }
   };
 
   return (
     <Wrap>
-      <PageTitle title="Tenants" sub={`${tenants.length} organizations`} />
+      <PageTitle title="Tenant Control Center" sub={`${filtered.length} in scope · capability-based view`} />
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
@@ -1366,91 +1670,403 @@ function TenantsPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean
           className="w-full h-10 pl-9 pr-4 bg-zinc-900 border border-white/[0.07] rounded-xl text-white text-xs placeholder:text-zinc-700 outline-none focus:border-white/15 transition-colors" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filtered.map(t => {
-          const userCount = users.filter(u => u.enterprise_id === (t.enterprise_id || t.id)).length;
-          return (
-            <div key={t.id} className={cn("bg-zinc-900 border rounded-2xl p-5 space-y-4 hover:border-white/10 transition-all",
-              t.status === "suspended" ? "border-rose-500/20" : "border-white/[0.05]"
-            )}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/15 flex items-center justify-center text-blue-400 font-black text-sm shrink-0">
-                    {(t.enterpriseName || "?")[0].toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-white font-bold text-sm truncate">{t.enterpriseName}</p>
-                    <p className="text-zinc-700 text-[9px] font-mono truncate">{t.enterprise_id}</p>
-                  </div>
-                </div>
-                <span className={cn("text-[9px] font-black px-2 py-0.5 rounded-full shrink-0",
-                  t.status === "suspended" ? "bg-rose-500/15 text-rose-400" : "bg-emerald-500/15 text-emerald-400"
-                )}>{t.status || "active"}</span>
-              </div>
+      <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl p-4 space-y-2">
+        <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">Reason for next tenant action</p>
+        <textarea
+          value={tenantActionReason}
+          onChange={e => setTenantActionReason(e.target.value)}
+          rows={2}
+          placeholder="Required for suspend/restore and other high-impact control-plane actions…"
+          className="w-full bg-zinc-950 border border-white/[0.06] rounded-xl text-white text-xs p-3 outline-none resize-none placeholder:text-zinc-700 focus:border-white/15 transition-colors"
+        />
+      </div>
 
-              <div className="grid grid-cols-3 gap-1">
-                {[
-                  ["Users", userCount],
-                  ["Plan", PLAN_LIMITS[t.billing?.planId as keyof typeof PLAN_LIMITS]?.name || t.billing?.planId || "Free"],
-                  ["Billing", t.billing?.billingCycle || "—"]
-                ].map(([l, v]) => (
-                  <div key={l as string} className="bg-zinc-800/60 rounded-xl p-2 text-center">
-                    <p className="text-white font-black text-sm capitalize">{v}</p>
-                    <p className="text-zinc-700 text-[9px]">{l}</p>
+      <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-4">
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
+            {filtered.map(t => {
+              const userCount = users.filter(u => u.enterprise_id === (t.enterprise_id || t.id)).length;
+              const isSelected = selectedTenant && (selectedTenant.enterprise_id || selectedTenant.id) === (t.enterprise_id || t.id);
+              return (
+                <div key={t.id} className={cn("bg-zinc-900 border rounded-2xl p-5 space-y-4 hover:border-white/10 transition-all",
+                  t.status === "suspended" ? "border-rose-500/20" : "border-white/[0.05]",
+                  isSelected && "ring-1 ring-blue-500/30"
+                )}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/15 flex items-center justify-center text-blue-400 font-black text-sm shrink-0">
+                        {(t.enterpriseName || "?")[0].toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white font-bold text-sm truncate">{t.enterpriseName}</p>
+                        <p className="text-zinc-700 text-[9px] font-mono truncate">{t.enterprise_id}</p>
+                      </div>
+                    </div>
+                    <span className={cn("text-[9px] font-black px-2 py-0.5 rounded-full shrink-0",
+                      t.status === "suspended" ? "bg-rose-500/15 text-rose-400" : "bg-emerald-500/15 text-emerald-400"
+                    )}>{t.status || "active"}</span>
                   </div>
-                ))}
-              </div>
 
-              {/* Billing status + trial badge */}
-              {t.billing && (
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={cn("text-[9px] font-black px-2 py-0.5 rounded-full capitalize",
-                    t.billing.status === "active" ? "bg-emerald-500/15 text-emerald-400" :
-                    t.billing.status === "trialing" ? "bg-blue-500/15 text-blue-400" :
-                    t.billing.status === "past_due" ? "bg-amber-500/15 text-amber-400" :
-                    "bg-rose-500/15 text-rose-400"
-                  )}>{t.billing.status?.replace("_", " ")}</span>
-                  {t.billing.trialEndsAt && (() => {
-                    const daysLeft = Math.max(0, Math.ceil((new Date(t.billing!.trialEndsAt!).getTime() - Date.now()) / 86400000));
-                    return (
-                      <span className={cn("text-[9px] font-black px-2 py-0.5 rounded-full",
-                        daysLeft <= 3 ? "bg-rose-500/15 text-rose-400" : "bg-zinc-800 text-zinc-400"
-                      )}>
-                        {daysLeft > 0 ? `${daysLeft}d trial left` : "Trial expired"}
-                      </span>
-                    );
-                  })()}
-                </div>
-              )}
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      ["Users", userCount],
+                      ["Plan", PLAN_LIMITS[t.billing?.planId as keyof typeof PLAN_LIMITS]?.name || t.billing?.planId || "Free"],
+                      ["Billing", t.billing?.billingCycle || "—"]
+                    ].map(([l, v]) => (
+                      <div key={l as string} className="bg-zinc-800/60 rounded-xl p-2 text-center">
+                        <p className="text-white font-black text-sm capitalize">{v}</p>
+                        <p className="text-zinc-700 text-[9px]">{l}</p>
+                      </div>
+                    ))}
+                  </div>
 
-              <div className="flex items-center justify-between">
-                <button onClick={() => setDrilldown(t)}
-                  className="flex items-center gap-1.5 text-zinc-600 hover:text-white text-[10px] font-bold transition-colors">
-                  <ExternalLink className="w-3 h-3" /> View Details
-                </button>
-                <div className="flex gap-2">
-                  {t.status === "suspended" ? (
-                    <button onClick={() => activate(t)} disabled={busy === t.id}
-                      className="text-[10px] font-black text-emerald-400 px-3 py-1.5 rounded-lg bg-emerald-400/10 hover:bg-emerald-400/20 transition-all">
-                      {busy === t.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : "Activate"}
+                  {t.billing && (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={cn("text-[9px] font-black px-2 py-0.5 rounded-full capitalize",
+                        t.billing.status === "active" ? "bg-emerald-500/15 text-emerald-400" :
+                        t.billing.status === "trialing" ? "bg-blue-500/15 text-blue-400" :
+                        t.billing.status === "past_due" ? "bg-amber-500/15 text-amber-400" :
+                        "bg-rose-500/15 text-rose-400"
+                      )}>{t.billing.status?.replace("_", " ")}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <button onClick={() => setSelectedTenantId(t.enterprise_id || t.id)}
+                      className="flex items-center gap-1.5 text-zinc-600 hover:text-white text-[10px] font-bold transition-colors">
+                      <Command className="w-3 h-3" /> Open Control Center
                     </button>
-                  ) : isSuperAdmin ? (
-                    <button onClick={() => suspend(t)} disabled={busy === t.id}
-                      className="text-[10px] font-black text-rose-400 px-3 py-1.5 rounded-lg bg-rose-400/10 hover:bg-rose-400/20 transition-all">
-                      {busy === t.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : "Suspend"}
-                    </button>
-                  ) : null}
+                    <div className="flex gap-2">
+                      <button onClick={() => setDrilldown(t)}
+                        className="text-[10px] font-black text-zinc-300 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-all">
+                        Details
+                      </button>
+                      {t.status === "suspended" ? (
+                        <button onClick={() => activate(t)} disabled={busy === t.id}
+                          className="text-[10px] font-black text-emerald-400 px-3 py-1.5 rounded-lg bg-emerald-400/10 hover:bg-emerald-400/20 transition-all">
+                          {busy === t.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : "Restore"}
+                        </button>
+                      ) : hasAdminCapability(principal, "tenant.suspend") ? (
+                        <button onClick={() => suspend(t)} disabled={busy === t.id}
+                          className="text-[10px] font-black text-rose-400 px-3 py-1.5 rounded-lg bg-rose-400/10 hover:bg-rose-400/20 transition-all">
+                          {busy === t.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : "Suspend"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          );
-        })}
-        {filtered.length === 0 && <p className="col-span-3 text-zinc-700 text-center py-16">No tenants found.</p>}
+              );
+            })}
+            {filtered.length === 0 && <p className="col-span-2 text-zinc-700 text-center py-16">No tenants found.</p>}
+          </div>
+        </div>
+
+        <TenantControlCenter
+          tenant={selectedTenant}
+          users={users}
+          principal={principal}
+          onInspect={(tenant) => setDrilldown(tenant)}
+        />
       </div>
 
       {drilldown && (
         <TenantModal t={drilldown} allUsers={users} adminUser={user} onClose={() => setDrilldown(null)} />
       )}
+    </Wrap>
+  );
+}
+
+function TenantControlCenter({
+  tenant,
+  users,
+  principal,
+  onInspect,
+}: {
+  tenant: TenantRecord | null;
+  users: UserRecord[];
+  principal: AdminPrincipal;
+  onInspect: (tenant: TenantRecord) => void;
+}) {
+  if (!tenant) {
+    return (
+      <Card className="border border-white/[0.06] bg-zinc-900/90">
+        <CardHeader>
+          <CardTitle className="text-white">Tenant Control Center</CardTitle>
+          <CardDescription>Select a tenant to see its control plane view.</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  const tenantKey = tenant.enterprise_id || tenant.id;
+  const tenantUsers = users.filter((u) => u.enterprise_id === tenantKey);
+  const activeUsers = tenantUsers.filter((u) => u.status !== "SUSPENDED").length;
+  const securityScore = Math.max(42, 100 - tenantUsers.filter((u) => u.status === "SUSPENDED").length * 2);
+  const usageUsers = tenant.billing?.userCount ?? tenantUsers.length;
+  const usageBranches = tenant.billing?.branchCount ?? 1;
+
+  const actionChips = [
+    { label: "Suspend tenant", enabled: hasAdminCapability(principal, "tenant.suspend"), tone: "rose" },
+    { label: "Restore access", enabled: hasAdminCapability(principal, "tenant.restore"), tone: "emerald" },
+    { label: "Edit billing", enabled: hasAdminCapability(principal, "tenant.billing.write"), tone: "blue" },
+    { label: "Manage flags", enabled: hasAdminCapability(principal, "tenant.feature_flags.write"), tone: "amber" },
+  ];
+
+  return (
+    <div className="sticky top-6">
+      <Card className="border border-white/[0.06] bg-zinc-950/95 shadow-2xl shadow-black/20">
+        <CardHeader className="space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-white text-lg">{tenant.enterpriseName}</CardTitle>
+              <CardDescription className="text-zinc-500">{tenant.enterprise_id}</CardDescription>
+            </div>
+            <Badge variant={tenant.status === "suspended" ? "destructive" : "secondary"} className="uppercase">
+              {tenant.status || "active"}
+            </Badge>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="outline">Plan: {tenant.billing?.planId || tenant.plan || "starter"}</Badge>
+            <Badge variant="outline">Users: {usageUsers}</Badge>
+            <Badge variant="outline">Branches: {usageBranches}</Badge>
+            <Badge variant="outline">Security: {securityScore}/100</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="grid grid-cols-2 gap-3">
+            <AdminMetric title="Active Users" value={activeUsers} hint={`${tenantUsers.length} total`} />
+            <AdminMetric title="Billing Status" value={tenant.billing?.status || "trialing"} hint={tenant.billing?.billingCycle || "monthly"} />
+            <AdminMetric title="Trial / Renewal" value={tenant.billing?.trialEndsAt ? new Date(tenant.billing.trialEndsAt).toLocaleDateString() : (tenant.billing?.renewalDate ? new Date(tenant.billing.renewalDate).toLocaleDateString() : "—")} hint="commercial lifecycle" />
+            <AdminMetric title="Capability Scope" value={principal.scope.tenantIds?.length ? "Scoped" : "Global"} hint="access envelope" />
+          </div>
+
+          <Separator className="bg-white/[0.06]" />
+
+          <div className="space-y-3">
+            <SectionEyebrow>Lifecycle controls</SectionEyebrow>
+            <div className="grid grid-cols-2 gap-2">
+              {actionChips.map((action) => (
+                <div
+                  key={action.label}
+                  className={cn(
+                    "rounded-xl border px-3 py-3 text-xs font-semibold",
+                    action.enabled ? "border-white/[0.08] bg-zinc-900 text-white" : "border-white/[0.04] bg-zinc-950 text-zinc-600"
+                  )}
+                >
+                  {action.label}
+                  <p className="mt-1 text-[10px] text-zinc-600">{action.enabled ? "Ready for server-backed execution" : "Capability required"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <SectionEyebrow>Tenant posture</SectionEyebrow>
+            <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/70 p-4 space-y-3">
+              <TenantPostureRow label="Feature flags" value={hasAdminCapability(principal, "tenant.feature_flags.read") ? "Visible" : "Restricted"} />
+              <TenantPostureRow label="Billing controls" value={hasAdminCapability(principal, "tenant.billing.read") ? "Visible" : "Restricted"} />
+              <TenantPostureRow label="Security controls" value={hasAdminCapability(principal, "tenant.security.read") ? "Visible" : "Restricted"} />
+              <TenantPostureRow label="User management" value={hasAdminCapability(principal, "tenant.users.read") ? `${tenantUsers.length} in scope` : "Restricted"} />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <SectionEyebrow>Recent tenant users</SectionEyebrow>
+            <ScrollArea className="h-40 rounded-2xl border border-white/[0.06] bg-zinc-900/70">
+              <div className="p-3 space-y-2">
+                {tenantUsers.slice(0, 8).map((u) => (
+                  <div key={u.id} className="flex items-center justify-between rounded-xl bg-zinc-950 px-3 py-2">
+                    <div>
+                      <p className="text-white text-xs font-semibold">{u.fullName || u.email}</p>
+                      <p className="text-zinc-600 text-[10px]">{u.role || "owner"}</p>
+                    </div>
+                    <Badge variant={u.status === "SUSPENDED" ? "destructive" : "secondary"}>{u.status}</Badge>
+                  </div>
+                ))}
+                {tenantUsers.length === 0 && <p className="text-zinc-600 text-xs">No users mapped to this tenant.</p>}
+              </div>
+            </ScrollArea>
+          </div>
+
+          <Button variant="outline" className="w-full" onClick={() => onInspect(tenant)}>
+            <ArrowUpRight className="mr-2" />
+            Open full tenant drawer
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function AdminMetric({ title, value, hint }: { title: string; value: string | number; hint: string }) {
+  return (
+    <div className="rounded-2xl border border-white/[0.06] bg-zinc-900/70 p-3">
+      <p className="text-[10px] uppercase tracking-[0.18em] text-zinc-600">{title}</p>
+      <p className="mt-2 text-white text-lg font-black capitalize">{value}</p>
+      <p className="text-[10px] text-zinc-600">{hint}</p>
+    </div>
+  );
+}
+
+function SectionEyebrow({ children }: { children: React.ReactNode }) {
+  return <p className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">{children}</p>;
+}
+
+function TenantPostureRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-zinc-400">{label}</span>
+      <span className="text-white font-semibold">{value}</span>
+    </div>
+  );
+}
+
+function FeatureFlagsPane({ principal }: { principal: AdminPrincipal }) {
+  const canWrite = hasAdminCapability(principal, "tenant.feature_flags.write");
+  const [search, setSearch] = useState("");
+  const [reason, setReason] = useState("");
+  const [selectedTenant, setSelectedTenant] = useState("");
+  const [saving, setSaving] = useState<string | null>(null);
+  const [flagStates, setFlagStates] = useState<Record<string, boolean>>({
+    "ai-assistant": true,
+    "multi-branch-pos": true,
+    "advanced-analytics": false,
+  });
+  const mockFlags = [
+    { key: "ai-assistant", scope: "tenant", rollout: "42%", owner: "Growth" },
+    { key: "multi-branch-pos", scope: "plan", rollout: "100%", owner: "Core" },
+    { key: "advanced-analytics", scope: "tenant", rollout: "18%", owner: "BI" },
+  ].filter((flag) => !search || flag.key.includes(search.toLowerCase()));
+
+  const persistFlag = async (flagKey: string, nextValue: boolean) => {
+    if (!canWrite) return;
+    if (!selectedTenant.trim()) {
+      toast.error("Enter a tenant ID to target.");
+      return;
+    }
+    if (!reason.trim() || reason.trim().length < 5) {
+      toast.error("Enter a reason with at least 5 characters.");
+      return;
+    }
+
+    setSaving(flagKey);
+    try {
+      await adminApi<AdminApiResponse<{ tenantId: string; flags: Record<string, boolean> }>>("/api/admin/tenants/feature-flags", {
+        method: "POST",
+        body: JSON.stringify({
+          tenantId: selectedTenant.trim(),
+          reason: reason.trim(),
+          flags: {
+            ...flagStates,
+            [flagKey]: nextValue,
+          },
+        }),
+      });
+      setFlagStates((prev) => ({ ...prev, [flagKey]: nextValue }));
+      toast.success(`Updated ${flagKey} for ${selectedTenant}.`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update feature flag.");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  return (
+    <Wrap>
+      <PageTitle title="Feature Flags" sub="Capability-aware rollout management foundation" />
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-600" />
+        <Input value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 bg-zinc-900 border-white/[0.07] text-white" placeholder="Search flags…" />
+      </div>
+      <Card className="border border-white/[0.06] bg-zinc-900">
+        <CardContent className="space-y-3 py-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-600">Tenant target</p>
+              <Input value={selectedTenant} onChange={(e) => setSelectedTenant(e.target.value)} className="bg-zinc-950 border-white/[0.07] text-white" placeholder="tenant id…" />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-600">Reason</p>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} className="bg-zinc-950 border-white/[0.07] text-white" placeholder="Why is this rollout changing?" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      <div className="grid gap-3">
+        {mockFlags.map((flag) => (
+          <Card key={flag.key} className="border border-white/[0.06] bg-zinc-900">
+            <CardContent className="flex items-center justify-between gap-4 py-4">
+              <div>
+                <p className="text-white font-semibold">{flag.key}</p>
+                <p className="text-zinc-600 text-xs">{flag.scope} rollout · owner {flag.owner}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">{flag.rollout}</Badge>
+                <Button
+                  variant="outline"
+                  disabled={!canWrite || saving === flag.key}
+                  onClick={() => persistFlag(flag.key, !flagStates[flag.key])}
+                >
+                  {saving === flag.key ? "Saving…" : flagStates[flag.key] ? "Disable" : "Enable"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </Wrap>
+  );
+}
+
+function BillingOpsPane({ principal }: { principal: AdminPrincipal }) {
+  const tenants = useTenants();
+  const scoped = tenants.filter((tenant) => canAccessTenant(principal, tenant.enterprise_id || tenant.id));
+  const revenue = scoped.reduce((sum, tenant) => {
+    const planId = tenant.billing?.planId as keyof typeof PLAN_LIMITS | undefined;
+    if (!planId || !PLAN_LIMITS[planId]) return sum;
+    return sum + PLAN_LIMITS[planId].pricing.monthly;
+  }, 0);
+
+  return (
+    <Wrap>
+      <PageTitle title="Billing Ops" sub="Commercial control plane foundation" />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Kpi icon={CreditCard} label="Scoped Tenants" value={scoped.length} color="blue" />
+        <Kpi icon={TrendingUp} label="Est. MRR" value={`$${revenue.toLocaleString()}`} color="emerald" />
+        <Kpi icon={Clock} label="Past Due" value={scoped.filter((tenant) => tenant.billing?.status === "past_due").length} color="amber" />
+      </div>
+      <Card className="border border-white/[0.06] bg-zinc-900">
+        <CardHeader>
+          <CardTitle className="text-white">Next evolution</CardTitle>
+          <CardDescription>Server-backed plan overrides, credits, trial extensions, and payment recovery workflows.</CardDescription>
+        </CardHeader>
+      </Card>
+    </Wrap>
+  );
+}
+
+function IncidentsPane() {
+  const incidents = [
+    { id: "INC-2401", name: "AI provider latency spike", severity: "medium", status: "monitoring" },
+    { id: "INC-2397", name: "POS sync backlog", severity: "high", status: "resolved" },
+  ];
+
+  return (
+    <Wrap>
+      <PageTitle title="Incident Center" sub="Platform-wide incident coordination foundation" />
+      <div className="grid gap-3">
+        {incidents.map((incident) => (
+          <Card key={incident.id} className="border border-white/[0.06] bg-zinc-900">
+            <CardContent className="flex items-center justify-between py-4">
+              <div>
+                <p className="text-white font-semibold">{incident.id} · {incident.name}</p>
+                <p className="text-zinc-600 text-xs">Status: {incident.status}</p>
+              </div>
+              <Badge variant={incident.severity === "high" ? "destructive" : "outline"}>{incident.severity}</Badge>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </Wrap>
   );
 }
@@ -1522,9 +2138,32 @@ function AnalyticsPane() {
 // ══════════════════════════════════════════════════════════════════════
 // 5. SECURITY
 // ══════════════════════════════════════════════════════════════════════
-function SecurityPane() {
+function SecurityPane({ principal }: { principal?: AdminPrincipal }) {
   const logs = useAuditLogs(100);
   const users = useUsers();
+  const [approvalReason, setApprovalReason] = useState("");
+  const [approvalTarget, setApprovalTarget] = useState("");
+  const [impersonationSessions, setImpersonationSessions] = useState<any[]>([]);
+  const [loadingImpersonation, setLoadingImpersonation] = useState(false);
+
+  // Fetch active impersonation sessions
+  useEffect(() => {
+    if (!principal || !hasAdminCapability(principal, "impersonate")) return;
+    const fetchSessions = async () => {
+      setLoadingImpersonation(true);
+      try {
+        const res = await adminApi<AdminApiResponse<{ sessions: any[]; expiredCount: number }>>("/api/admin/impersonation/active", {
+          method: "GET",
+        });
+        setImpersonationSessions(res.data?.sessions || []);
+      } catch {
+        // Silently fail - user may not have capability
+      } finally {
+        setLoadingImpersonation(false);
+      }
+    };
+    fetchSessions();
+  }, [principal]);
 
   const checks = [
     { label: "Firestore rules — deny-all default",   ok: true,  detail: "Zero Trust rules deployed" },
@@ -1534,6 +2173,30 @@ function SecurityPane() {
     { label: "Role self-escalation blocked",          ok: true,  detail: "role field locked from self-write" },
     { label: "Cloud Functions (real IP capture)",     ok: false, detail: "Deploy functions/ for production ops" },
   ];
+
+  const requestApproval = async () => {
+    if (!approvalTarget.trim() || !approvalReason.trim() || approvalReason.trim().length < 5) {
+      toast.error("Enter target and a reason of at least 5 characters.");
+      return;
+    }
+    try {
+      await adminApi<AdminApiResponse<{ approvalId: string; status: string }>>("/api/admin/approvals/request", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "HIGH_RISK_SECURITY_REVIEW",
+          targetType: "tenant_or_user",
+          targetId: approvalTarget.trim(),
+          reason: approvalReason.trim(),
+          payload: { source: "security-center" },
+        }),
+      });
+      toast.success("Approval request submitted.");
+      setApprovalReason("");
+      setApprovalTarget("");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to submit approval.");
+    }
+  };
 
   return (
     <Wrap>
@@ -1561,9 +2224,75 @@ function SecurityPane() {
         ))}
       </div>
 
+      <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl p-5 space-y-4">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-blue-400" />
+          <p className="text-white font-bold text-sm">Security Operations</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {[
+            { label: "Admin MFA Coverage", value: "83%", hint: "Target 100% for privileged users" },
+            { label: "Dormant Admins", value: "2", hint: "Review inactive admins every 30 days" },
+            { label: "Active Impersonations", value: String(impersonationSessions.length), hint: "Only time-bound support sessions" },
+          ].map((item) => (
+            <div key={item.label} className="rounded-xl bg-zinc-950 border border-white/[0.05] p-4">
+              <p className="text-zinc-500 text-[10px] uppercase tracking-widest">{item.label}</p>
+              <p className="text-white font-black text-lg mt-2">{item.value}</p>
+              <p className="text-zinc-700 text-[10px] mt-1">{item.hint}</p>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1.3fr_auto] gap-3 items-end">
+          <div className="space-y-1.5">
+            <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">Approval target</p>
+            <Input value={approvalTarget} onChange={e => setApprovalTarget(e.target.value)} className="bg-zinc-950 border-white/[0.06] text-white" placeholder="tenant id or user id" />
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-zinc-600 text-[10px] font-black uppercase tracking-widest">Reason</p>
+            <Input value={approvalReason} onChange={e => setApprovalReason(e.target.value)} className="bg-zinc-950 border-white/[0.06] text-white" placeholder="Why this action needs review" />
+          </div>
+          <Button onClick={requestApproval} className="h-10 bg-white text-zinc-900 font-black hover:bg-zinc-100">
+            Request approval
+          </Button>
+        </div>
+      </div>
+
+      {/* Active Impersonation Sessions */}
+      {principal && hasAdminCapability(principal, "impersonate") && (
+        <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl overflow-hidden">
+          <div className="px-5 py-3 border-b border-white/[0.04] flex items-center gap-2">
+            <Eye className="w-4 h-4 text-amber-400" />
+            <p className="text-white font-bold text-sm">Impersonation Sessions</p>
+            {loadingImpersonation && <RefreshCw className="w-3 h-3 text-zinc-600 animate-spin ml-auto" />}
+          </div>
+          {impersonationSessions.length > 0 ? (
+            impersonationSessions.map((s: any) => (
+              <div key={s.id} className="px-5 py-3 flex items-center gap-3 border-b border-white/[0.03] last:border-0">
+                <div className="w-7 h-7 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0">
+                  <Eye className="w-3 h-3 text-amber-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-xs font-bold truncate">
+                    {s.adminEmail} → {s.targetEmail || s.targetUserId}
+                  </p>
+                  <p className="text-zinc-600 text-[9px] truncate">
+                    Reason: {s.reason} | Expires: {new Date(s.expiresAt).toLocaleTimeString()}
+                  </p>
+                </div>
+                <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 shrink-0">
+                  ACTIVE
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="px-5 py-8 text-zinc-700 text-xs text-center">No active impersonation sessions.</p>
+          )}
+        </div>
+      )}
+
       <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl overflow-hidden">
         <p className="px-5 py-3 text-white font-bold text-sm border-b border-white/[0.04]">High-Impact Actions</p>
-        {logs.filter(l => ["SUSPEND", "ROLE", "DELETE"].some(k => l.action.includes(k))).slice(0, 10).map(l => (
+        {logs.filter(l => ["SUSPEND", "ROLE", "DELETE", "IMPERSONATION", "IMPERSONATE"].some(k => l.action.includes(k))).slice(0, 10).map(l => (
           <div key={l.id} className="px-5 py-3 flex items-center gap-3 border-b border-white/[0.03] last:border-0">
             <AlertOctagon className="w-3.5 h-3.5 text-rose-400 shrink-0" />
             <div className="min-w-0">
@@ -1573,7 +2302,7 @@ function SecurityPane() {
             <p className="text-zinc-800 text-[9px] ml-auto shrink-0">{l.timestamp?.toDate?.()?.toLocaleString() || "—"}</p>
           </div>
         ))}
-        {logs.filter(l => ["SUSPEND", "ROLE", "DELETE"].some(k => l.action.includes(k))).length === 0 && (
+        {logs.filter(l => ["SUSPEND", "ROLE", "DELETE", "IMPERSONATION", "IMPERSONATE"].some(k => l.action.includes(k))).length === 0 && (
           <p className="px-5 py-10 text-zinc-700 text-xs text-center">No high-impact actions.</p>
         )}
       </div>
@@ -1696,38 +2425,48 @@ function ConfigPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean 
   const [announcement, setAnnouncement] = useState("");
   const [annType, setAnnType] = useState<"info" | "warning" | "critical">("info");
   const [sendingAnn, setSendingAnn] = useState(false);
+  const [reason, setReason] = useState("");
 
   const save = async () => {
     if (!isSuperAdmin) { toast.error("Super Admin only."); return; }
+    if (!reason.trim() || reason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     setSaving(true);
     try {
-      await setDoc(doc(db, "admin_meta", "feature_flags"), { ...flags, updated_at: new Date().toISOString() });
-      await audit(user, "UPDATE_FEATURE_FLAGS", { resource_type: "system_config", after: flags as any });
+      await adminApi<AdminApiResponse<typeof flags>>("/api/admin/platform/feature-flags", {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim(), flags }),
+      });
       toast.success("Configuration saved.");
+      setReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setSaving(false); }
   };
 
   const publishAnnouncement = async () => {
     if (!announcement.trim()) { toast.error("Enter announcement text."); return; }
+    if (!reason.trim() || reason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     setSendingAnn(true);
     try {
-      await setDoc(doc(db, "admin_meta", "announcement"), {
-        text: announcement, type: annType,
-        published_by: user.email, published_at: new Date().toISOString(), active: true,
+      await adminApi<AdminApiResponse<Record<string, unknown>>>("/api/admin/platform/announcement", {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim(), text: announcement, type: annType }),
       });
-      await audit(user, "PUBLISH_ANNOUNCEMENT", { resource_type: "system_config", after: { text: announcement, type: annType } });
       toast.success("Announcement published to all tenants.");
       setAnnouncement("");
+      setReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setSendingAnn(false); }
   };
 
   const clearAnnouncement = async () => {
+    if (!reason.trim() || reason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     try {
-      await setDoc(doc(db, "admin_meta", "announcement"), { active: false });
-      await audit(user, "CLEAR_ANNOUNCEMENT", { resource_type: "system_config" });
+      await adminApi<AdminApiResponse<{ active: boolean }>>("/api/admin/platform/announcement/clear", {
+        method: "POST",
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
       toast.success("Announcement cleared.");
+      setReason("");
     } catch (e: any) { toast.error(e.message); }
   };
 
@@ -1745,6 +2484,11 @@ function ConfigPane({ user, isSuperAdmin }: { user: User; isSuperAdmin: boolean 
       {/* Feature flags */}
       <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl p-5 space-y-3">
         <p className="text-white font-bold text-sm">Feature Flags</p>
+        {isSuperAdmin && (
+          <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+            placeholder="Reason required for platform configuration changes…"
+            className="w-full bg-zinc-800 border border-white/[0.06] rounded-xl text-white text-xs p-3 outline-none resize-none placeholder:text-zinc-700 focus:border-white/15 transition-colors" />
+        )}
         {Object.entries(flags).map(([k, v]) => (
           <div key={k} className="flex items-center justify-between py-2 border-b border-white/[0.03] last:border-0">
             <div>
@@ -1840,39 +2584,43 @@ function AdminsPane({ user }: { user: User }) {
   const [inviteRole, setInviteRole] = useState<"admin" | "super_admin">("admin");
   const [inviteUid, setInviteUid] = useState("");
   const [busy, setBusy] = useState(false);
+  const [reason, setReason] = useState("");
 
   const invite = async () => {
     if (!inviteEmail.trim() || !inviteUid.trim()) { toast.error("Enter both email and UID."); return; }
+    if (!reason.trim() || reason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     setBusy(true);
     try {
-      await setDoc(doc(db, "admin_users", inviteUid.trim()), {
-        email: inviteEmail.trim(),
-        role: inviteRole,
-        granted_at: new Date().toISOString(),
-        granted_by: user.email,
-      });
-      await audit(user, "GRANT_ADMIN_ACCESS", {
-        resource_type: "admin_user", resource_id: inviteUid.trim(),
-        after: { email: inviteEmail.trim(), role: inviteRole },
+      await adminApi<AdminApiResponse<{ uid: string; email: string; role: string }>>("/api/admin/admin-users/grant", {
+        method: "POST",
+        body: JSON.stringify({
+          uid: inviteUid.trim(),
+          email: inviteEmail.trim(),
+          role: inviteRole,
+          reason: reason.trim(),
+        }),
       });
       toast.success(`Admin access granted to ${inviteEmail}.`);
-      setInviteEmail(""); setInviteUid(""); setShowInvite(false);
+      setInviteEmail(""); setInviteUid(""); setReason(""); setShowInvite(false);
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
 
   const revoke = async (a: AdminUserRecord) => {
     if (a.id === user.uid) { toast.error("Cannot revoke your own access."); return; }
+    if (!reason.trim() || reason.trim().length < 5) { toast.error("Enter a reason with at least 5 characters."); return; }
     if (!confirm(`Revoke admin access for ${a.email}?`)) return;
     setBusy(true);
     try {
-      // Mark as revoked (don't delete so audit trail is preserved)
-      await updateDoc(doc(db, "admin_users", a.id), { role: "revoked", revoked_at: new Date().toISOString(), revoked_by: user.email });
-      await audit(user, "REVOKE_ADMIN_ACCESS", {
-        resource_type: "admin_user", resource_id: a.id, target_email: a.email,
-        before: { role: a.role }, after: { role: "revoked" },
+      await adminApi<AdminApiResponse<{ targetAdminId: string; role: string }>>("/api/admin/admin-users/revoke", {
+        method: "POST",
+        body: JSON.stringify({
+          targetAdminId: a.id,
+          reason: reason.trim(),
+        }),
       });
       toast.success(`Revoked access for ${a.email}.`);
+      setReason("");
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   };
@@ -1893,6 +2641,10 @@ function AdminsPane({ user }: { user: User }) {
           Admin accounts require a <strong>Firebase Auth UID</strong>. Create the Firebase Auth account first, then paste its UID here.
         </p>
       </div>
+
+      <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2}
+        placeholder="Reason required for admin access changes…"
+        className="w-full bg-zinc-900 border border-white/[0.06] rounded-xl text-white text-xs p-3 outline-none resize-none placeholder:text-zinc-700 focus:border-white/15 transition-colors" />
 
       <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-white/[0.04] flex items-center justify-between">
@@ -1963,6 +2715,11 @@ function AdminsPane({ user }: { user: User }) {
 function SupportPane() {
   const [subTab, setSubTab] = useState<"tickets" | "feedback">("tickets");
   const [notices, setNotices] = useState<any[]>([]);
+  const [impersonationReason, setImpersonationReason] = useState("");
+  const [impersonationTenant, setImpersonationTenant] = useState("");
+  const [impersonationUser, setImpersonationUser] = useState("");
+  const [impersonationTicket, setImpersonationTicket] = useState("");
+  const [activeImpersonation, setActiveImpersonation] = useState<{ sessionId: string; expiresAt: string; banner?: string } | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, "billing_notices"), where("status", "==", "PENDING"));
@@ -2030,6 +2787,56 @@ function SupportPane() {
     finally { setSending(false); }
   };
 
+  const startImpersonation = async () => {
+    if (!impersonationTenant.trim() || !impersonationUser.trim() || !impersonationReason.trim() || impersonationReason.trim().length < 5) {
+      toast.error("Tenant, user, and reason are required.");
+      return;
+    }
+    try {
+      const response = await adminApi<AdminApiResponse<{ sessionId: string; expiresAt: string; targetEmail?: string }>>("/api/admin/impersonation/start", {
+        method: "POST",
+        body: JSON.stringify({
+          tenantId: impersonationTenant.trim(),
+          targetUserId: impersonationUser.trim(),
+          ticketId: impersonationTicket.trim() || undefined,
+          reason: impersonationReason.trim(),
+          ttlMinutes: 15,
+        }),
+      });
+      setActiveImpersonation({
+        sessionId: response.data.sessionId,
+        expiresAt: response.data.expiresAt,
+        banner: `Impersonating ${response.data.targetEmail || impersonationUser.trim()} until ${new Date(response.data.expiresAt).toLocaleTimeString()}`,
+      });
+      toast.success("Impersonation session started.");
+      setImpersonationReason("");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to start impersonation.");
+    }
+  };
+
+  const endImpersonation = async () => {
+    if (!activeImpersonation) return;
+    if (!impersonationReason.trim() || impersonationReason.trim().length < 5) {
+      toast.error("Provide a reason to end the session.");
+      return;
+    }
+    try {
+      await adminApi<AdminApiResponse<{ sessionId: string; status: string }>>("/api/admin/impersonation/end", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionId: activeImpersonation.sessionId,
+          reason: impersonationReason.trim(),
+        }),
+      });
+      toast.success("Impersonation session ended.");
+      setActiveImpersonation(null);
+      setImpersonationReason("");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to end impersonation.");
+    }
+  };
+
   return (
     <Wrap>
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/[0.05] pb-6">
@@ -2056,6 +2863,33 @@ function SupportPane() {
               )}
             </button>
           ))}
+        </div>
+      </div>
+
+      <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-white font-bold text-sm">Secure Impersonation Console</p>
+            <p className="text-zinc-600 text-xs">Time-bound support sessions with explicit reason and optional ticket reference.</p>
+          </div>
+          {activeImpersonation && (
+            <Badge variant="destructive">Active until {new Date(activeImpersonation.expiresAt).toLocaleTimeString()}</Badge>
+          )}
+        </div>
+        {activeImpersonation && (
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 text-amber-300 text-xs font-semibold">
+            {activeImpersonation.banner}
+          </div>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <Input value={impersonationTenant} onChange={e => setImpersonationTenant(e.target.value)} className="bg-zinc-950 border-white/[0.06] text-white" placeholder="Tenant ID" />
+          <Input value={impersonationUser} onChange={e => setImpersonationUser(e.target.value)} className="bg-zinc-950 border-white/[0.06] text-white" placeholder="Target user ID" />
+          <Input value={impersonationTicket} onChange={e => setImpersonationTicket(e.target.value)} className="bg-zinc-950 border-white/[0.06] text-white" placeholder="Ticket ID (optional)" />
+          <Input value={impersonationReason} onChange={e => setImpersonationReason(e.target.value)} className="bg-zinc-950 border-white/[0.06] text-white" placeholder="Reason" />
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={startImpersonation} className="bg-white text-zinc-900 font-black hover:bg-zinc-100">Start session</Button>
+          <Button variant="outline" onClick={endImpersonation} disabled={!activeImpersonation}>End session</Button>
         </div>
       </div>
 
@@ -2307,6 +3141,303 @@ function SupportPane() {
               <p className="text-zinc-500 text-xs line-clamp-3">{f.message}</p>
             </div>
           ))}
+        </div>
+      )}
+    </Wrap>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// APPROVALS PANE
+// ══════════════════════════════════════════════════════════════════════
+interface ApprovalRequest {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  tenantId?: string;
+  reason: string;
+  payload?: Record<string, any>;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "CONSUMED";
+  requestedBy: string;
+  requestedByUid: string;
+  requestedAt: string | null;
+  expiresAt: string;
+  decidedBy?: string;
+  decidedAt?: string | null;
+  decisionReason?: string;
+}
+
+function ApprovalsPane({ user, principal }: { user: User; principal: AdminPrincipal }) {
+  const [subTab, setSubTab] = useState<"pending" | "history">("pending");
+  const [pending, setPending] = useState<ApprovalRequest[]>([]);
+  const [history, setHistory] = useState<ApprovalRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [rejectId, setRejectId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [approveId, setApproveId] = useState<string | null>(null);
+  const [approveReason, setApproveReason] = useState("");
+
+  const fetchPending = async () => {
+    try {
+      const res = await adminApi<{ success: boolean; data: ApprovalRequest[] }>("/api/admin/approvals/pending");
+      setPending(res.data || []);
+    } catch (e: any) {
+      toast.error(`Failed to load pending approvals: ${e.message}`);
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const res = await adminApi<{ success: boolean; data: ApprovalRequest[] }>("/api/admin/approvals/history");
+      setHistory(res.data || []);
+    } catch (e: any) {
+      toast.error(`Failed to load approval history: ${e.message}`);
+    }
+  };
+
+  useEffect(() => {
+    setLoading(true);
+    Promise.all([fetchPending(), fetchHistory()]).finally(() => setLoading(false));
+  }, []);
+
+  const handleApprove = async (id: string) => {
+    if (!approveReason.trim() || approveReason.length < 5) {
+      toast.error("Approval reason must be at least 5 characters.");
+      return;
+    }
+    setBusy(id);
+    try {
+      await adminApi("/api/admin/approvals/approve", {
+        method: "POST",
+        body: JSON.stringify({ approvalId: id, reason: approveReason }),
+      });
+      toast.success("Request approved successfully.");
+      setApproveId(null);
+      setApproveReason("");
+      await Promise.all([fetchPending(), fetchHistory()]);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to approve");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleReject = async (id: string) => {
+    if (!rejectReason.trim() || rejectReason.length < 5) {
+      toast.error("Rejection reason must be at least 5 characters.");
+      return;
+    }
+    setBusy(id);
+    try {
+      await adminApi("/api/admin/approvals/reject", {
+        method: "POST",
+        body: JSON.stringify({ approvalId: id, reason: rejectReason }),
+      });
+      toast.success("Request rejected.");
+      setRejectId(null);
+      setRejectReason("");
+      await Promise.all([fetchPending(), fetchHistory()]);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to reject");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const getActionLabel = (action: string) => {
+    const labels: Record<string, string> = {
+      TENANT_PERMANENT_DELETE: "Tenant Permanent Deletion",
+      MASS_USER_SUSPENSION: "Mass User Suspension (>5)",
+      ADMIN_CAPABILITY_ESCALATION: "Admin Capability Escalation",
+      PLATFORM_FEATURE_FLAG_CHANGE: "Platform Feature Flag Change",
+      DATA_EXPORT_ALL_TENANTS: "Data Export (All Tenants)",
+    };
+    return labels[action] || action;
+  };
+
+  const getTimeRemaining = (expiresAt: string) => {
+    const diff = new Date(expiresAt).getTime() - Date.now();
+    if (diff <= 0) return "Expired";
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${mins}m remaining`;
+  };
+
+  const statusColor = (status: string) => {
+    switch (status) {
+      case "APPROVED": case "CONSUMED": return "bg-emerald-500/15 text-emerald-400";
+      case "REJECTED": return "bg-rose-500/15 text-rose-400";
+      case "EXPIRED": return "bg-zinc-700/30 text-zinc-500";
+      default: return "bg-amber-500/15 text-amber-400";
+    }
+  };
+
+  return (
+    <Wrap>
+      <div className="flex items-center justify-between">
+        <PageTitle title="Approval Workflows" sub="Dual-admin approval for critical platform actions" />
+        <button onClick={() => { setLoading(true); Promise.all([fetchPending(), fetchHistory()]).finally(() => setLoading(false)); }}
+          className="p-2 rounded-xl bg-zinc-900 border border-white/[0.07] text-zinc-500 hover:text-white transition-colors">
+          <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
+        </button>
+      </div>
+
+      {/* Sub-tabs */}
+      <div className="flex gap-1">
+        {(["pending", "history"] as const).map(t => (
+          <button key={t} onClick={() => setSubTab(t)}
+            className={cn("px-4 h-9 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all",
+              subTab === t ? "bg-white text-zinc-900" : "bg-zinc-900 border border-white/[0.07] text-zinc-600 hover:text-white"
+            )}>
+            {t === "pending" ? `Pending (${pending.length})` : "History"}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20">
+          <RefreshCw className="w-5 h-5 text-zinc-700 animate-spin" />
+        </div>
+      ) : subTab === "pending" ? (
+        <div className="space-y-3">
+          {pending.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <FileCheck className="w-8 h-8 text-zinc-800 mb-3" />
+              <p className="text-zinc-600 text-sm font-bold">No pending approvals</p>
+              <p className="text-zinc-700 text-xs mt-1">All clear — no critical actions awaiting review.</p>
+            </div>
+          ) : (
+            pending.map(req => {
+              const isSelf = req.requestedByUid === user.uid;
+              return (
+                <div key={req.id} className="bg-zinc-900 border border-white/[0.06] rounded-2xl p-5 space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 uppercase">Pending</span>
+                        <span className="text-[9px] text-zinc-700 font-mono">#{req.id.slice(-8).toUpperCase()}</span>
+                      </div>
+                      <p className="text-white font-black text-sm">{getActionLabel(req.action)}</p>
+                      <p className="text-zinc-500 text-xs">{req.reason}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-[10px] text-zinc-600 font-bold">
+                        <Clock className="w-3 h-3 inline mr-1" />
+                        {getTimeRemaining(req.expiresAt)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div>
+                      <p className="text-[9px] text-zinc-700 font-black uppercase tracking-widest">Target</p>
+                      <p className="text-xs text-zinc-400 font-mono truncate">{req.targetType}: {req.targetId}</p>
+                    </div>
+                    <div>
+                      <p className="text-[9px] text-zinc-700 font-black uppercase tracking-widest">Requester</p>
+                      <p className="text-xs text-zinc-400 truncate">{req.requestedBy}</p>
+                    </div>
+                    {req.tenantId && (
+                      <div>
+                        <p className="text-[9px] text-zinc-700 font-black uppercase tracking-widest">Tenant</p>
+                        <p className="text-xs text-zinc-400 font-mono truncate">{req.tenantId}</p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-[9px] text-zinc-700 font-black uppercase tracking-widest">Requested</p>
+                      <p className="text-xs text-zinc-400">{req.requestedAt ? new Date(req.requestedAt).toLocaleString() : "—"}</p>
+                    </div>
+                  </div>
+
+                  {isSelf ? (
+                    <div className="flex items-center gap-2 bg-zinc-800/50 border border-white/[0.05] rounded-xl px-4 py-2.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <p className="text-amber-300 text-xs font-medium">You submitted this request — another admin must approve.</p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 pt-1">
+                      {approveId === req.id ? (
+                        <div className="flex-1 flex items-center gap-2">
+                          <input value={approveReason} onChange={e => setApproveReason(e.target.value)}
+                            placeholder="Approval reason (min 5 chars)…"
+                            className="flex-1 h-9 px-3 bg-zinc-950 border border-white/[0.07] rounded-lg text-white text-xs placeholder:text-zinc-700 outline-none focus:border-emerald-500/30" />
+                          <button onClick={() => handleApprove(req.id)} disabled={busy === req.id}
+                            className="px-3 h-9 rounded-lg bg-emerald-500 text-white text-[10px] font-black hover:bg-emerald-600 transition-all disabled:opacity-50">
+                            {busy === req.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : "Confirm"}
+                          </button>
+                          <button onClick={() => { setApproveId(null); setApproveReason(""); }}
+                            className="px-3 h-9 rounded-lg bg-zinc-800 text-zinc-500 text-[10px] font-bold hover:bg-zinc-700 transition-all">Cancel</button>
+                        </div>
+                      ) : rejectId === req.id ? (
+                        <div className="flex-1 flex items-center gap-2">
+                          <input value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                            placeholder="Rejection reason (min 5 chars)…"
+                            className="flex-1 h-9 px-3 bg-zinc-950 border border-white/[0.07] rounded-lg text-white text-xs placeholder:text-zinc-700 outline-none focus:border-rose-500/30" />
+                          <button onClick={() => handleReject(req.id)} disabled={busy === req.id}
+                            className="px-3 h-9 rounded-lg bg-rose-500 text-white text-[10px] font-black hover:bg-rose-600 transition-all disabled:opacity-50">
+                            {busy === req.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : "Reject"}
+                          </button>
+                          <button onClick={() => { setRejectId(null); setRejectReason(""); }}
+                            className="px-3 h-9 rounded-lg bg-zinc-800 text-zinc-500 text-[10px] font-bold hover:bg-zinc-700 transition-all">Cancel</button>
+                        </div>
+                      ) : (
+                        <>
+                          <button onClick={() => setApproveId(req.id)}
+                            className="px-4 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 text-[10px] font-black hover:bg-emerald-500/25 transition-all flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                          </button>
+                          <button onClick={() => setRejectId(req.id)}
+                            className="px-4 h-9 rounded-xl bg-rose-500/15 text-rose-400 text-[10px] font-black hover:bg-rose-500/25 transition-all flex items-center gap-1.5">
+                            <XCircle className="w-3.5 h-3.5" /> Reject
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {history.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <History className="w-8 h-8 text-zinc-800 mb-3" />
+              <p className="text-zinc-600 text-sm font-bold">No approval history yet</p>
+            </div>
+          ) : (
+            <div className="bg-zinc-900 border border-white/[0.05] rounded-2xl overflow-auto">
+              <table className="w-full text-xs min-w-[640px]">
+                <thead>
+                  <tr className="border-b border-white/[0.05]">
+                    {["Action", "Requester", "Status", "Decided By", "Date", "Reason"].map(h => (
+                      <th key={h} className="px-4 py-3 text-left text-[9px] font-black text-zinc-700 uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.03]">
+                  {history.map(h => (
+                    <tr key={h.id} className="hover:bg-white/[0.015] transition-colors">
+                      <td className="px-4 py-3">
+                        <p className="text-white font-bold text-xs">{getActionLabel(h.action)}</p>
+                        <p className="text-zinc-700 text-[9px] font-mono">#{h.id.slice(-8).toUpperCase()}</p>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-400">{h.requestedBy}</td>
+                      <td className="px-4 py-3">
+                        <span className={cn("text-[9px] font-black px-2 py-0.5 rounded-full uppercase", statusColor(h.status))}>{h.status}</span>
+                      </td>
+                      <td className="px-4 py-3 text-zinc-400">{h.decidedBy || "—"}</td>
+                      <td className="px-4 py-3 text-zinc-600 text-[9px]">{h.decidedAt ? new Date(h.decidedAt).toLocaleString() : h.requestedAt ? new Date(h.requestedAt).toLocaleString() : "—"}</td>
+                      <td className="px-4 py-3 text-zinc-500 max-w-[200px] truncate">{h.decisionReason || h.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </Wrap>

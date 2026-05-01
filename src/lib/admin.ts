@@ -1,13 +1,137 @@
 import { auth, db, doc, getDoc } from "@/lib/firebase";
-import { onSnapshot, collection, query, where, orderBy, limit, addDoc, serverTimestamp } from "firebase/firestore";
+import { onSnapshot, collection, query, orderBy, limit, addDoc, serverTimestamp } from "firebase/firestore";
 
 // ── Admin Role Types ────────────────────────────────────────────────
 export type AdminRole = "super_admin" | "admin";
+
+export type AdminCapability =
+  | "platform.read"
+  | "platform.configure"
+  | "tenant.read"
+  | "tenant.update"
+  | "tenant.suspend"
+  | "tenant.restore"
+  | "tenant.billing.read"
+  | "tenant.billing.write"
+  | "tenant.feature_flags.read"
+  | "tenant.feature_flags.write"
+  | "tenant.security.read"
+  | "tenant.security.write"
+  | "tenant.users.read"
+  | "user.read"
+  | "user.update"
+  | "user.suspend"
+  | "support.read"
+  | "support.respond"
+  | "audit.read"
+  | "analytics.read"
+  | "admin.manage"
+  | "impersonate";
+
+export interface AdminScope {
+  tenantIds?: string[];
+  regions?: string[];
+  environments?: Array<"production" | "staging">;
+}
 
 export interface AdminClaims {
   role: AdminRole;
   granted_at: string;
   granted_by: string;
+}
+
+export interface AdminPrincipal {
+  id: string;
+  email: string;
+  role: AdminRole;
+  granted_at: string;
+  granted_by: string;
+  capabilities: AdminCapability[];
+  scope: AdminScope;
+}
+
+export interface AdminApiResponse<T> {
+  success: boolean;
+  data: T;
+  auditId?: string;
+}
+
+export const ROLE_CAPABILITIES: Record<AdminRole, AdminCapability[]> = {
+  super_admin: [
+    "platform.read",
+    "platform.configure",
+    "tenant.read",
+    "tenant.update",
+    "tenant.suspend",
+    "tenant.restore",
+    "tenant.billing.read",
+    "tenant.billing.write",
+    "tenant.feature_flags.read",
+    "tenant.feature_flags.write",
+    "tenant.security.read",
+    "tenant.security.write",
+    "tenant.users.read",
+    "user.read",
+    "user.update",
+    "user.suspend",
+    "support.read",
+    "support.respond",
+    "audit.read",
+    "analytics.read",
+    "admin.manage",
+    "impersonate",
+  ],
+  admin: [
+    "platform.read",
+    "tenant.read",
+    "tenant.update",
+    "tenant.billing.read",
+    "tenant.feature_flags.read",
+    "tenant.security.read",
+    "tenant.users.read",
+    "user.read",
+    "user.update",
+    "support.read",
+    "support.respond",
+    "audit.read",
+    "analytics.read",
+  ],
+};
+
+export function buildAdminPrincipal(input: {
+  id: string;
+  email: string;
+  role: AdminRole;
+  granted_at: string;
+  granted_by?: string;
+  capabilities?: AdminCapability[];
+  scope?: AdminScope;
+}): AdminPrincipal {
+  return {
+    id: input.id,
+    email: input.email,
+    role: input.role,
+    granted_at: input.granted_at,
+    granted_by: input.granted_by || "system",
+    capabilities: input.capabilities?.length ? input.capabilities : ROLE_CAPABILITIES[input.role],
+    scope: input.scope || {},
+  };
+}
+
+export function hasAdminCapability(
+  principal: Pick<AdminPrincipal, "capabilities"> | null | undefined,
+  capability: AdminCapability
+) {
+  return Boolean(principal?.capabilities.includes(capability));
+}
+
+export function canAccessTenant(
+  principal: Pick<AdminPrincipal, "scope"> | null | undefined,
+  tenantId: string
+) {
+  if (!principal) return false;
+  if (!principal.scope.tenantIds?.length) return true;
+  return principal.scope.tenantIds.includes(tenantId);
 }
 
 // ── Verify Admin Access (client-side gate, Firestore rules enforce server-side) ──
@@ -47,6 +171,57 @@ export async function getAdminClaims(): Promise<AdminClaims | null> {
     console.error("[AdminLib] getAdminClaims failed:", error);
     return null;
   }
+}
+
+export async function getAdminPrincipal(): Promise<AdminPrincipal | null> {
+  const user = auth.currentUser;
+  if (!user) return null;
+
+  const claims = await getAdminClaims();
+  if (!claims) return null;
+
+  try {
+    const adminDoc = await getDoc(doc(db, "admin_users", user.uid));
+    const data = adminDoc.exists() ? (adminDoc.data() as any) : {};
+    return buildAdminPrincipal({
+      id: user.uid,
+      email: user.email || data.email || "",
+      role: claims.role,
+      granted_at: claims.granted_at,
+      granted_by: claims.granted_by,
+      capabilities: data.capabilities,
+      scope: data.scope,
+    });
+  } catch {
+    return buildAdminPrincipal({
+      id: user.uid,
+      email: user.email || "",
+      role: claims.role,
+      granted_at: claims.granted_at,
+      granted_by: claims.granted_by,
+    });
+  }
+}
+
+export async function adminApi<T>(path: string, init?: RequestInit): Promise<T> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Not authenticated");
+
+  const token = await user.getIdToken();
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers || {}),
+    },
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.error || "Admin request failed");
+  }
+  return payload as T;
 }
 
 // ── Write an immutable audit log entry ──────────────────────────────
@@ -166,11 +341,23 @@ export interface TenantRecord {
   enterpriseName: string;
   industry?: string;
   teamSize?: string;
-  setupCompleted: boolean;
+  setupCompleted?: boolean;
   createdAt: string;
-  status?: "active" | "suspended" | "trial";
+  status?: string;
   plan?: string;
   userCount?: number;
+  contactEmail?: string;
+  billing?: {
+    planId: string;
+    userCount: number;
+    branchCount: number;
+    billingCycle: "monthly" | "yearly";
+    renewalDate: string;
+    status: "active" | "past_due" | "canceled" | "trialing";
+    trialEndsAt?: string;
+    paymentMethod?: { type: string; last4: string; expiry: string };
+    lastVerifiedAt?: any;
+  };
 }
 
 export interface UserRecord {
@@ -184,4 +371,100 @@ export interface UserRecord {
   createdAt: string;
   lastLogin?: string;
   emailVerified?: boolean;
+  phone?: string;
+}
+
+// ── Portal Types ────────────────────────────────────────────────────
+export type AdminTab =
+  | "dashboard" | "tenants" | "users" | "security" | "audit"
+  | "support" | "analytics" | "flags" | "billing" | "incidents"
+  | "config" | "admins";
+
+export type AuditEntry = AuditLogEntry;
+
+export interface AdminUserRecord {
+  id: string;
+  email: string;
+  role: "super_admin" | "admin";
+  granted_at: string;
+  granted_by?: string;
+}
+
+export interface FeedbackItem {
+  id: string;
+  type: "idea" | "bug" | "praise" | "other";
+  subject: string;
+  message: string;
+  rating: number;
+  user_email: string;
+  enterprise_id: string;
+  createdAt: any;
+}
+
+export interface SupportTicket {
+  id: string;
+  category: string;
+  subject: string;
+  message: string;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  priority?: "low" | "medium" | "high" | "critical";
+  user_email: string;
+  enterprise_id: string;
+  createdAt: any;
+  metadata?: any;
+}
+
+export interface TicketReply {
+  id: string;
+  message: string;
+  sender_email: string;
+  sender_type: "ADMIN" | "USER";
+  createdAt: any;
+}
+
+// ── Convenience audit writer (thin wrapper) ─────────────────────────
+export async function audit(
+  adminUser: { uid: string; email: string | null },
+  action: string,
+  payload: Record<string, unknown> = {}
+) {
+  await addDoc(collection(db, "admin_audit_logs"), {
+    action,
+    admin_uid: adminUser.uid,
+    admin_email: adminUser.email,
+    timestamp: serverTimestamp(),
+    ...payload,
+  });
+}
+
+// ── React hooks for real-time admin data ────────────────────────────
+import { useState, useEffect } from "react";
+
+export function useUsers() {
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  useEffect(() => subscribeToAllUsers(setUsers), []);
+  return users;
+}
+
+export function useTenants() {
+  const [tenants, setTenants] = useState<TenantRecord[]>([]);
+  useEffect(() => subscribeToAllTenants(setTenants), []);
+  return tenants;
+}
+
+export function useAuditLogs(count = 50) {
+  const [logs, setLogs] = useState<AuditLogEntry[]>([]);
+  useEffect(() => subscribeToRecentAuditLogs(setLogs, count), [count]);
+  return logs;
+}
+
+export function useAdminUsers() {
+  const [admins, setAdmins] = useState<AdminUserRecord[]>([]);
+  useEffect(() => {
+    const q = query(collection(db, "admin_users"), orderBy("granted_at", "desc"));
+    return onSnapshot(q, (snap) => {
+      setAdmins(snap.docs.map((d) => ({ id: d.id, ...d.data() } as AdminUserRecord)));
+    });
+  }, []);
+  return admins;
 }
