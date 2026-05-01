@@ -442,6 +442,10 @@ const TERMS_CONTENT = (
         <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-rose-500/30">3. Termination Logic</h4>
         <p>Accounts in arrears for &gt;30 days will be placed in read-only mode. Failure to settle balance within 90 days results in permanent data archival and eventual purging.</p>
       </section>
+      <section>
+        <h4 className="text-sm font-black text-zinc-900 uppercase tracking-widest mb-2 italic underline decoration-blue-500/30">4. No Refund Policy</h4>
+        <p>All subscription payments, digital products, and service fees are strictly non-refundable once the transaction is processed. We do not provide credits or prorated refunds for partially used billing cycles.</p>
+      </section>
     </div>
   </>
 );

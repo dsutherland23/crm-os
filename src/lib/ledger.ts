@@ -49,7 +49,16 @@ export function recordFinancialEventBatch(batch: any, params: {
   const createEntries = () => {
     switch (sourceType) {
       case "POS_TRANSACTION":
-        entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount, type: "DEBIT", account: LedgerAccount.CASH, source_id: sourceId, source_type: sourceType, description, metadata });
+        const paidAmount = Number(metadata?.paid_amount || amount);
+        const balanceDue = Number(metadata?.balance_due || 0);
+        
+        if (paidAmount > 0) {
+          entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: paidAmount, type: "DEBIT", account: LedgerAccount.CASH, source_id: sourceId, source_type: sourceType, description, metadata });
+        }
+        if (balanceDue > 0) {
+          entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: balanceDue, type: "DEBIT", account: LedgerAccount.RECEIVABLE, source_id: sourceId, source_type: sourceType, description: `${description} (Charged to Account)`, metadata });
+        }
+        
         entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: netAmount, type: "CREDIT", account: LedgerAccount.SALES, source_id: sourceId, source_type: sourceType, description, metadata });
         if (taxAmount > 0) entries.push({ enterprise_id: enterpriseId, timestamp: serverTimestamp(), amount: taxAmount, type: "CREDIT", account: LedgerAccount.TAX_LIABILITY, source_id: sourceId, source_type: sourceType, description: `GCT collected from ${sourceType}`, metadata });
         break;
@@ -70,6 +79,7 @@ export function recordFinancialEventBatch(batch: any, params: {
     batch.set(doc(ledgerCol), entry);
   });
 
+  // Move summary update out of batch to prevent permission errors from blocking the primary transaction
   const summaryRef = doc(db, "financial_summaries", enterpriseId);
   const updates: any = { last_updated: serverTimestamp() };
   if (["POS_TRANSACTION"].includes(sourceType)) {
@@ -80,7 +90,10 @@ export function recordFinancialEventBatch(batch: any, params: {
     updates.net_profit = increment(-Math.abs(netAmount));
   }
 
-  batch.update(summaryRef, updates);
+  // Fire and forget (or log failure) so it doesn't block the atomic batch commit
+  updateDoc(summaryRef, updates).catch(err => {
+    console.warn("Financial summary update skipped (likely permission restriction):", err);
+  });
 }
 
 /**

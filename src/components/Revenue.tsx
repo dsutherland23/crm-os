@@ -119,7 +119,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PrintableInvoice } from "./PrintableInvoice";
 import { PaymentsTable } from "./revenue/PaymentsTable";
-import { WiPayService } from "@/lib/wipay-service";
+import { WiPayService } from "@/lib/wipay";
 
 export default function Revenue() {
   const { setPendingAction, consumeAction } = usePendingAction();
@@ -372,29 +372,30 @@ export default function Revenue() {
     setWiPayStatus("INITIALIZING");
 
     try {
-      const response = await WiPayService.createPayment({
-        tenantId: enterpriseId,
-        customerId: invoice.customer_id,
-        invoiceId: invoice.id,
-        amount: invoice.total_amount,
-        customerName: invoice.customer_name || "Customer",
-        customerEmail: invoice.customer_email || "",
-        config: config,
-        returnUrl: `${window.location.origin}/settings?tab=billing&payment=success` // Return to billing/settings page
+      setWiPayStatus("REDIRECTING");
+      
+      // WiPay static redirect (Browser-level Form POST)
+      WiPayService.createRedirect({
+        accountNumber: config.account_number,
+        apiKey: config.api_key,
+        currency: config.currency || "USD",
+        environment: config.environment || "sandbox",
+        total: invoice.total_amount,
+        orderId: `INV-${invoice.id.substring(0,8)}-${Date.now()}`,
+        name: invoice.customer_name || "Valued Customer",
+        email: invoice.customer_email || "billing@orivocrm.pro",
+        returnUrl: `${window.location.origin}/settings?tab=billing&payment=success`,
+        responseUrl: "https://us-central1-crm-os.cloudfunctions.net/wipayWebhook",
+        data: JSON.stringify({
+          tenant_id: enterpriseId,
+          customer_id: invoice.customer_id,
+          invoice_id: invoice.id
+        })
       });
 
-      if (response.status === "success" && response.url) {
-        setWiPayStatus("REDIRECTING");
-        setTimeout(() => {
-          window.location.href = response.url!;
-        }, 1500);
-      } else {
-        setWiPayStatus("ERROR");
-        toast.error(response.message || "Failed to initialize WiPay");
-      }
     } catch (err) {
       setWiPayStatus("ERROR");
-      toast.error("An unexpected error occurred");
+      toast.error("An unexpected error occurred during handoff");
     }
   };
 
@@ -1258,7 +1259,8 @@ export default function Revenue() {
   const netProfit = financialSummary?.net_profit || (totalRevenue - totalExpenses);
   const netProfitMargin = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : "0.0";
   
-  const accountsReceivable = invoices.filter(inv => inv.status === "PENDING" || inv.status === "OVERDUE").reduce((acc, curr) => acc + (curr.total || 0), 0);
+  const accountsReceivable = invoices.filter(inv => inv.status === "PENDING" || inv.status === "OVERDUE").reduce((acc, curr) => acc + (curr.total || 0), 0) + 
+                             posTransactions.filter(tx => (tx.balance_due || tx.debt || 0) > 0.01).reduce((acc, curr) => acc + (curr.balance_due || curr.debt || 0), 0);
   const accountsPayable = expenses.filter(exp => exp.status === "PENDING").reduce((acc, curr) => acc + (curr.amount || 0), 0);
 
   const cashFlowData = React.useMemo(() => {
@@ -4073,10 +4075,7 @@ export default function Revenue() {
         </div>
       )}
 
-    </div>
-    </ScrollArea>
-  );
-}
+
 
       {/* WiPay Handoff Dialog */}
       <Dialog open={isWiPayHandoffOpen} onOpenChange={setIsWiPayHandoffOpen}>
@@ -4130,8 +4129,15 @@ export default function Revenue() {
             }
           `}} />
 
-          <DialogFooter className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest justify-center">
-            Locked & Encrypted via AES-256
+          <DialogFooter className="flex flex-col items-center gap-1">
+            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-[0.2em]">No Refund Policy</span>
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+              Locked & Encrypted via AES-256
+            </span>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+    </ScrollArea>
+  );
+}

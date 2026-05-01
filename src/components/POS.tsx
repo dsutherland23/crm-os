@@ -953,7 +953,8 @@ export default function POS() {
         }
       });
 
-      const evaluateReplenishment = async (productId: string, currentQty: number, currentBatch: any) => {
+      const evaluateReplenishment = async (productId: string, currentQty: number) => {
+        // Run in background to avoid blocking the main transaction flow
         try {
           const product = products.find(p => p.id === productId);
           if (!product || !product.auto_reorder || !product.supplier_id) return;
@@ -975,8 +976,10 @@ export default function POS() {
           const suggestedQty = Math.max(minStock * 2, 20);
           const totalCost = (product.cost || 0) * suggestedQty;
           
+          // Use a separate write for replenishment so it doesn't block the POS sale if it fails
+          const replenishBatch = writeBatch(db);
           const poRef = doc(collection(db, 'purchase_orders'));
-          currentBatch.set(poRef, {
+          replenishBatch.set(poRef, {
             enterprise_id: enterpriseId,
             supplier_id: product.supplier_id,
             status: 'AUTODRAFT',
@@ -996,7 +999,7 @@ export default function POS() {
           });
 
           const notifRef = doc(collection(db, 'notifications'));
-          currentBatch.set(notifRef, {
+          replenishBatch.set(notifRef, {
             enterprise_id: enterpriseId,
             title: 'Autonomous Replenishment Triggered',
             message: `Stock level for ${product.name} is low (${currentQty}). A draft PO has been generated for review.`,
@@ -1006,8 +1009,11 @@ export default function POS() {
             read: false,
             action_link: '/inventory?tab=suppliers'
           });
+
+          await replenishBatch.commit();
         } catch (error) {
-          console.error('Replenishment evaluation failure:', error);
+          console.error('Non-blocking replenishment evaluation failure:', error);
+          // We do NOT rethrow here, as we want the POS sale to proceed even if PO creation fails
         }
       };
 
@@ -1025,7 +1031,7 @@ export default function POS() {
               quantity: increment(qtyAdjustment)
             });
             if (!isReturnMode && newQty <= (item.product.min_stock_level || 10)) {
-              await evaluateReplenishment(item.product.id, newQty, batch);
+              evaluateReplenishment(item.product.id, newQty);
             }
           }
         }
@@ -1063,7 +1069,8 @@ export default function POS() {
       if (cartDiscount && !isReturnMode) {
         const campaign = campaigns.find(c => c.id === cartDiscount.id);
         if (campaign && campaign.one_time_per_customer && selectedCustomer?.id) {
-          batch.set(doc(collection(db, "customer_campaign_usage")), {
+          // Record usage asynchronously to avoid blocking the main sale if permissions are restrictive
+          addDoc(collection(db, "customer_campaign_usage"), {
             customer_id: selectedCustomer.id,
             customer_name: selectedCustomer.name,
             campaign_id: campaign.id,
@@ -1073,6 +1080,8 @@ export default function POS() {
             enterprise_id: enterpriseId,
             staff_name: selectedAdmin?.name || "System",
             staff_id: selectedAdmin?.id || "system"
+          }).catch(err => {
+            console.warn("Customer campaign usage recording failed (permission issue):", err);
           });
         }
       }
@@ -1871,10 +1880,15 @@ Notes: ${closeRegisterNotes || 'None'}
                         <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Active Account</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                       <div className="text-right"><p className="text-[10px] font-black text-emerald-600">{selectedCustomer.points || 0} PTS</p></div>
-                       <ChevronRight className="w-4 h-4 text-zinc-300 group-hover:text-blue-500 transition-colors" />
-                    </div>
+                     <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <p className="text-[10px] font-black text-emerald-600">{selectedCustomer.points || 0} PTS</p>
+                          {(selectedCustomer.balance || 0) > 0.01 && (
+                            <p className="text-[9px] font-black text-rose-500 uppercase tracking-tighter">Owes {formatCurrency(selectedCustomer.balance)}</p>
+                          )}
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-zinc-300 group-hover:text-blue-500 transition-colors" />
+                     </div>
                   </div>
                 ) : (
                   <div className="flex items-center gap-3">
@@ -1978,7 +1992,7 @@ Notes: ${closeRegisterNotes || 'None'}
                 </div>
                 <div className="flex justify-between text-2xl font-black pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
               </div>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 xs:grid-cols-4 gap-2">
                 <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CARD"); }}><CreditCard className="w-4 h-4 mr-2" />Card</Button>
                 <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CASH"); }}><Banknote className="w-4 h-4 mr-2" />Cash</Button>
                 <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-12 font-bold text-xs", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => { setPaymentMethod("SPLIT"); }}><Split className="w-4 h-4 mr-2" />Split</Button>
@@ -2045,7 +2059,7 @@ Notes: ${closeRegisterNotes || 'None'}
               {paymentMethod === "CASH" && (
                 <div className="space-y-3">
                   <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Quick Tender</p>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 xs:grid-cols-4 gap-2">
                     {[Math.ceil(total), Math.ceil(total/5)*5, Math.ceil(total/10)*10, Math.ceil(total/20)*20].filter((v, i, a) => a.indexOf(v) === i).slice(0,4).map(amt => (
                       <button key={amt} onClick={() => setSmartCashTendered(amt)} className={cn("h-12 rounded-xl border-2 font-black text-xs transition-all active:scale-95", smartCashTendered === amt ? "bg-emerald-600 border-emerald-600 text-white" : "bg-white border-zinc-200 text-zinc-900")}>{formatCurrency(amt)}</button>
                     ))}
@@ -2726,10 +2740,15 @@ Date: ${lastTransaction?.date}
                       <p className="text-xs text-zinc-500 font-medium">{customer.phone || customer.email || 'No contact info'}</p>
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex flex-col items-end gap-1">
                     <Badge variant="outline" className="bg-emerald-50 text-emerald-600 border-emerald-100 font-black text-[10px]">
                       {customer.points || 0} PTS
                     </Badge>
+                    {(customer.balance || 0) > 0.01 && (
+                      <Badge variant="outline" className="bg-rose-50 text-rose-600 border-rose-100 font-black text-[9px] uppercase">
+                        Owes {formatCurrency(customer.balance)}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               ))}

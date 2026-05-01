@@ -811,7 +811,7 @@ export default function Auth() {
 
           {/* Heading */}
           <div className="space-y-2 text-center">
-            <h1 className="text-3xl sm:text-4xl font-black text-zinc-900 tracking-tight leading-tight uppercase">
+            <h1 className="text-2xl sm:text-4xl font-black text-zinc-900 tracking-tight leading-tight uppercase">
               {isLogin ? (isStaffMode ? "Staff Login" : "Welcome back") : STEPS[step - 1].label}
             </h1>
             <p className="text-zinc-500 text-sm font-medium">

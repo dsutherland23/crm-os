@@ -71,13 +71,13 @@ export default function VerificationGate({ user }: { user: User }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 bg-zinc-950 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center p-4 sm:p-6 bg-zinc-950 relative overflow-y-auto py-20">
       {/* Premium Cinematic Background */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,#18181b,0%,#09090b_100%)]" />
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 rounded-full blur-[140px] animate-pulse" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-600/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: "1s" }} />
 
-      <Card className="max-w-[480px] w-full p-8 sm:p-12 border-white/5 bg-zinc-900/50 backdrop-blur-3xl shadow-[0_48px_96px_-24px_rgba(0,0,0,0.5)] rounded-[3rem] relative z-10 border">
+      <Card className="max-w-[480px] w-full p-6 sm:p-12 border-white/5 bg-zinc-900/50 backdrop-blur-3xl shadow-[0_48px_96px_-24px_rgba(0,0,0,0.5)] rounded-[2.5rem] sm:rounded-[3rem] relative z-10 border">
         
         {/* Floating Logo / Icon Section */}
         <div className="absolute -top-12 left-1/2 -translate-x-1/2">

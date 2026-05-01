@@ -2137,7 +2137,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         {/* ── BILLING TAB ─────────────────────────────────────────── */}
         <TabsContent value="billing" className="space-y-8">
           {/* Hero Header */}
-          <div className="rounded-3xl overflow-hidden bg-gradient-to-br from-zinc-900 via-blue-950 to-indigo-950 border border-zinc-800 p-10 relative">
+          <div className="rounded-3xl overflow-hidden bg-gradient-to-br from-zinc-900 via-blue-950 to-indigo-950 border border-zinc-800 p-6 sm:p-10 relative">
             <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
             <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-indigo-600/10 rounded-full blur-[80px] pointer-events-none" />
             <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
@@ -2200,8 +2200,8 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                   <CardTitle className="text-base font-bold">What's Included</CardTitle>
                   <CardDescription>Compare features across all plans.</CardDescription>
                 </CardHeader>
-                <CardContent className="p-0">
-                  <div className="divide-y divide-zinc-100">
+                <CardContent className="p-0 overflow-x-auto custom-scrollbar">
+                  <div className="divide-y divide-zinc-100 min-w-[600px] sm:min-w-0">
                     {[
                       { feature: "Contacts / Customers", starter: "500", pro: "5,000", enterprise: "Unlimited" },
                       { feature: "Branches", starter: PLAN_LIMITS.starter.maxBranches, pro: PLAN_LIMITS["business-pro"].maxBranches, enterprise: "Unlimited" },
@@ -2254,13 +2254,8 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                       {new Date(billing.renewalDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-500">Billing cycle</span>
-                    <span className="font-bold text-zinc-900 capitalize">{billing.billingCycle}</span>
-                  </div>
                 </CardContent>
               </Card>
-              <BankTransferCard />
             </div>
           </div>
         </TabsContent>
@@ -2317,241 +2312,4 @@ function PaymentSuccessDialog({ open, onClose, planName }: any) {
   );
 }
 
-// ── Bank Transfer Card Component ─────────────────────────────────────
-function BankTransferCard() {
-  const [mode, setMode] = useState<"local" | "international">("local");
-  const [showNotify, setShowNotify] = useState(false);
 
-  const copy = (val: string) => {
-    navigator.clipboard.writeText(val);
-    toast.success("Copied to clipboard");
-  };
-
-  const details = mode === "local" ? {
-    holder: "DAAN SUTHERLAND",
-    bank: "FCIB",
-    branch: "NEW KINGSTON",
-    transit: "09676",
-    type: "Savings",
-    acc: "1002141453",
-    note: "Jamaica Local Transfer"
-  } : {
-    holder: "DAAN SUTHERLAND",
-    bank: "FCIB",
-    swift: "FCIBJMKN",
-    type: "Savings",
-    acc: "1002141453",
-    note: "International Wire Transfer"
-  };
-
-  return (
-    <Card className="card-modern overflow-hidden border-indigo-100/50">
-      <div className="bg-gradient-to-r from-indigo-50/50 to-blue-50/50 px-6 py-4 border-b border-indigo-100/50 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
-            <Landmark className="w-4 h-4" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-zinc-900">Bank Transfer</h3>
-            <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Manual Payment Option</p>
-          </div>
-        </div>
-        <div className="flex bg-zinc-200/50 p-0.5 rounded-lg">
-          {(["local", "international"] as const).map(m => (
-            <button key={m} onClick={() => setMode(m)}
-              className={cn("px-3 py-1 rounded-md text-[10px] font-black uppercase transition-all",
-                mode === m ? "bg-white text-indigo-600 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
-              )}>{m}</button>
-          ))}
-        </div>
-      </div>
-
-      <CardContent className="p-6 space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {[
-            ["Account Holder", details.holder],
-            ["Bank Name", details.bank],
-            ...(mode === "local" ? [
-              ["Branch", (details as any).branch],
-              ["Transit", (details as any).transit]
-            ] : [
-              ["SWIFT Code", (details as any).swift]
-            ]),
-            ["Account Type", details.type],
-            ["Account Number", details.acc]
-          ].map(([l, v]) => (
-            <div key={l} className="group relative">
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">{l}</p>
-              <div className="flex items-center justify-between bg-zinc-50 border border-zinc-100 rounded-xl px-3 py-2 transition-all hover:border-indigo-200 hover:bg-white">
-                <span className="text-sm font-black text-zinc-900 tabular-nums">{v}</span>
-                <button onClick={() => copy(v)} className="p-1.5 text-zinc-400 hover:text-indigo-600 transition-colors">
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="bg-amber-50/50 border border-amber-100 rounded-2xl p-4 flex gap-3">
-          <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-          <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
-            <strong>Important:</strong> After completing your transfer, please click the button below to notify our billing team and upload your receipt for faster activation.
-          </p>
-        </div>
-
-        <Button onClick={() => setShowNotify(true)}
-          className="w-full h-12 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-sm shadow-xl shadow-indigo-600/20 transition-all flex items-center gap-2">
-          <CheckCircle className="w-4 h-4" /> Notify Payment & Upload Receipt
-        </Button>
-      </CardContent>
-
-      {showNotify && <PaymentNotificationModal onClose={() => setShowNotify(false)} />}
-    </Card>
-  );
-}
-
-// ── Payment Notification Modal ───────────────────────────────────────
-function PaymentNotificationModal({ onClose }: { onClose: () => void }) {
-  const { enterpriseId, billing } = useModules();
-  const [busy, setBusy] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState(billing.planId || "starter");
-  const [cycle, setCycle] = useState(billing.billingCycle || "monthly");
-  const [amount, setAmount] = useState("");
-  const [ref, setRef] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) {
-      setFile(f);
-      const reader = new FileReader();
-      reader.onloadend = () => setPreview(reader.result as string);
-      reader.readAsDataURL(f);
-    }
-  };
-
-  const submit = async () => {
-    if (!amount) { toast.error("Please enter the amount paid."); return; }
-    if (!file && !preview) { toast.error("Please upload your transfer receipt."); return; }
-
-    setBusy(true);
-    try {
-      const noticeId = `PAY-${Date.now()}`;
-      await addDoc(collection(db, "billing_notices"), {
-        enterprise_id: enterpriseId,
-        noticeId,
-        amount: parseFloat(amount),
-        reference: ref,
-        status: "PENDING",
-        submittedAt: new Date().toISOString(),
-        planId: selectedPlan,
-        billingCycle: cycle,
-        receiptData: preview, 
-      });
-
-      toast.success("Payment notification submitted!", {
-        description: "Our billing team will verify your transfer and update your account within 24 hours."
-      });
-      onClose();
-    } catch (e: any) {
-      toast.error(e.message || "Failed to submit notice.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[480px] rounded-[2.5rem] border-zinc-200/60 p-0 overflow-hidden bg-white shadow-2xl">
-        <div className="bg-zinc-950 p-8 text-center relative overflow-hidden shrink-0">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/20 rounded-full blur-3xl" />
-          <div className="relative z-10 flex flex-col items-center">
-            <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 flex items-center justify-center text-white mb-4">
-              <FileUp className="w-8 h-8" />
-            </div>
-            <h2 className="text-xl font-black text-white uppercase tracking-widest">Submit Payment Proof</h2>
-            <p className="text-zinc-500 text-xs mt-2">Upload your bank transfer receipt for manual verification.</p>
-          </div>
-        </div>
-
-        <div className="p-8 space-y-6 max-h-[70vh] overflow-y-auto custom-scrollbar">
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Subscription Plan</label>
-                <select value={selectedPlan} onChange={e => setSelectedPlan(e.target.value)}
-                  className="w-full h-12 px-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-xs font-black text-zinc-900 outline-none focus:border-indigo-600 transition-all appearance-none cursor-pointer">
-                  <option value="starter">STARTER — ${PLAN_LIMITS.starter.pricing.monthly}</option>
-                  <option value="business-pro">BUSINESS PRO — ${PLAN_LIMITS["business-pro"].pricing.monthly}</option>
-                  <option value="enterprise">ENTERPRISE — ${PLAN_LIMITS.enterprise.pricing.monthly}</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Billing Cycle</label>
-                <select value={cycle} onChange={e => setCycle(e.target.value as any)}
-                  className="w-full h-12 px-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-xs font-black text-zinc-900 outline-none focus:border-indigo-600 transition-all appearance-none cursor-pointer">
-                  <option value="monthly">MONTHLY</option>
-                  <option value="yearly">YEARLY (10% OFF)</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Amount Paid (USD)</label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
-                <input type="number" value={amount} onChange={e => setAmount(e.target.value)}
-                  className="w-full h-12 pl-8 pr-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-sm font-black text-zinc-900 outline-none focus:border-indigo-600 transition-all"
-                  placeholder="0.00" />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Transaction Reference</label>
-              <input type="text" value={ref} onChange={e => setRef(e.target.value)}
-                className="w-full h-12 px-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-sm font-black text-zinc-900 outline-none focus:border-indigo-600 transition-all"
-                placeholder="TRX-123456789" />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Transfer Receipt</label>
-              {!preview ? (
-                <label className="flex flex-col items-center justify-center w-full h-32 bg-zinc-50 border-2 border-dashed border-zinc-200 rounded-[2rem] cursor-pointer hover:bg-zinc-100 hover:border-indigo-300 transition-all">
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6 text-zinc-400">
-                    <ImageIcon className="w-8 h-8 mb-2" />
-                    <p className="text-[10px] font-bold uppercase tracking-wider">Click to upload JPG, PNG or PDF</p>
-                  </div>
-                  <input type="file" className="hidden" accept="image/*,.pdf" onChange={handleFile} />
-                </label>
-              ) : (
-                <div className="relative rounded-[2rem] overflow-hidden border border-zinc-200 aspect-[16/9]">
-                  {file?.type === "application/pdf" ? (
-                    <div className="w-full h-full bg-zinc-100 flex flex-col items-center justify-center text-zinc-500">
-                      <FileUp className="w-10 h-10 mb-2" />
-                      <p className="text-xs font-bold">{file.name}</p>
-                    </div>
-                  ) : (
-                    <img src={preview} className="w-full h-full object-cover" />
-                  )}
-                  <button onClick={() => { setFile(null); setPreview(null); }}
-                    className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black transition-colors">
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex gap-3 pt-4">
-            <Button variant="ghost" onClick={onClose} className="flex-1 h-12 rounded-2xl font-bold text-zinc-500">Cancel</Button>
-            <Button onClick={submit} disabled={busy}
-              className="flex-1 h-12 rounded-2xl bg-zinc-900 hover:bg-zinc-800 text-white font-black shadow-xl shadow-zinc-900/20">
-              {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit Proof"}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}

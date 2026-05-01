@@ -175,6 +175,70 @@ export default function Inventory() {
     status: 'ACTIVE'
   });
 
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
+
+  const getProductStock = (productId: string, branchId: string) => {
+    if (branchId === 'all') {
+      return inventory
+        .filter(i => i.product_id === productId)
+        .reduce((sum, item) => sum + (item.quantity || 0), 0);
+    }
+    const item = inventory.find(i => i.product_id === productId && i.branch_id === branchId);
+    return item ? item.quantity : 0;
+  };
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const sortedProducts = useMemo(() => {
+    let items = [...products];
+    
+    // 1. Initial filter by active branch availability
+    items = items.filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch));
+    
+    // 2. Search & Category Filter
+    items = items.filter(p => {
+      const name = (p.name || "").toLowerCase();
+      const sku = (p.sku || "").toLowerCase();
+      const category = (p.category || "").toLowerCase();
+      const term = searchTerm.toLowerCase();
+      const matchesSearch = !term || name.includes(term) || sku.includes(term) || category.includes(term);
+      const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
+      return matchesSearch && matchesCat;
+    });
+
+    // 3. Sorting
+    items.sort((a, b) => {
+      let aVal: any = a[sortConfig.key] ?? '';
+      let bVal: any = b[sortConfig.key] ?? '';
+
+      // Handle specific calculated or normalized keys
+      if (sortConfig.key === 'local_stock') {
+        aVal = getProductStock(a.id, activeBranch);
+        bVal = getProductStock(b.id, activeBranch);
+      } else if (sortConfig.key === 'enterprise_stock') {
+        aVal = getProductStock(a.id, 'all');
+        bVal = getProductStock(b.id, 'all');
+      } else if (sortConfig.key === 'price') {
+        aVal = a.retail_price || a.price || 0;
+        bVal = b.retail_price || b.price || 0;
+      }
+      
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return items;
+  }, [products, inventory, activeBranch, searchTerm, categoryFilter, sortConfig]);
+
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [isSavingPO, setIsSavingPO] = useState(false);
@@ -296,26 +360,32 @@ export default function Inventory() {
     }
   };
 
-  const getProductStock = (productId: string, branchId: string) => {
-    if (branchId === 'all') {
-      return inventory
-        .filter(i => i.product_id === productId)
-        .reduce((sum, item) => sum + (item.quantity || 0), 0);
-    }
-    const item = inventory.find(i => i.product_id === productId && i.branch_id === branchId);
-    return item ? item.quantity : 0;
-  };
+  const totalSKUs = useMemo(() => products.length, [products]);
 
-  const totalSKUs = products.length;
-  const lowStockItems = products.filter(p => {
-    const total = getProductStock(p.id, 'all');
-    return total <= (p.min_stock_level || 10);
-  }).length;
-  const inTransit = movements.filter(m => m.status === 'IN_TRANSIT').length;
-  const inventoryValue = products.reduce((sum, p) => {
-    const total = getProductStock(p.id, 'all');
-    return sum + (total * (p.cost || p.retail_price || p.price || 0));
-  }, 0);
+  const lowStockItems = useMemo(() => {
+    return products.filter(p => {
+      const stock = getProductStock(p.id, activeBranch);
+      return stock <= (p.min_stock_level || 5);
+    }).length;
+  }, [products, inventory, activeBranch]);
+
+  const inTransit = useMemo(() => {
+    return movements.filter(m => {
+      const isPending = m.status === 'IN_TRANSIT' || m.status === 'PENDING';
+      if (activeBranch === 'all') return isPending;
+      // Movement is relevant if it's from or to the active branch
+      const branchName = branches.find(b => b.id === activeBranch)?.name;
+      return isPending && (m.from === branchName || m.to === branchName);
+    }).length;
+  }, [movements, activeBranch, branches]);
+
+  const inventoryValue = useMemo(() => {
+    return products.reduce((sum, p) => {
+      const stock = getProductStock(p.id, activeBranch);
+      const unitVal = p.cost || p.retail_price || p.price || 0;
+      return sum + (stock * unitVal);
+    }, 0);
+  }, [products, inventory, activeBranch]);
 
   const generateSKU = (category: string) => {
     if (!category) {
@@ -1126,31 +1196,31 @@ export default function Inventory() {
     if (selectedProducts.length === 0) return;
     setIsBatchDeleting(true);
     try {
-      // Parallelise all Firestore lookups to avoid serial await-in-loop
-      const [inventorySnaps, batchSnaps, movementSnaps] = await Promise.all([
-        Promise.all(selectedProducts.map(id =>
-          getDocs(query(collection(db, 'inventory'), where('product_id', '==', id), where('enterprise_id', '==', enterpriseId)))
-        )),
-        Promise.all(selectedProducts.map(id =>
-          getDocs(query(collection(db, 'inventory_batches'), where('product_id', '==', id), where('enterprise_id', '==', enterpriseId)))
-        )),
-        Promise.all(selectedProducts.map(id =>
-          getDocs(query(collection(db, 'inventory_movements'), where('product_id', '==', id), where('enterprise_id', '==', enterpriseId)))
-        ))
-      ]);
+      const allRefs: any[] = selectedProducts.map(id => doc(db, 'products', id));
+      
+      // We need to find all associated records to purge.
+      // To avoid "Too many outstanding requests", we chunk the lookups using 'in' queries.
+      const LOOKUP_CHUNK = 30; // Firestore 'in' limit
+      
+      for (let i = 0; i < selectedProducts.length; i += LOOKUP_CHUNK) {
+        const chunk = selectedProducts.slice(i, i + LOOKUP_CHUNK);
+        
+        const [invSnap, batchSnap, movSnap] = await Promise.all([
+          getDocs(query(collection(db, 'inventory'), where('product_id', 'in', chunk), where('enterprise_id', '==', enterpriseId))),
+          getDocs(query(collection(db, 'inventory_batches'), where('product_id', 'in', chunk), where('enterprise_id', '==', enterpriseId))),
+          getDocs(query(collection(db, 'inventory_movements'), where('product_id', 'in', chunk), where('enterprise_id', '==', enterpriseId)))
+        ]);
 
-      const allRefs: any[] = [
-        ...selectedProducts.map(id => doc(db, 'products', id)),
-        ...inventorySnaps.flatMap(snap => snap.docs.map(d => d.ref)),
-        ...batchSnaps.flatMap(snap => snap.docs.map(d => d.ref)),
-        ...movementSnaps.flatMap(snap => snap.docs.map(d => d.ref)),
-      ];
+        invSnap.docs.forEach(d => allRefs.push(d.ref));
+        batchSnap.docs.forEach(d => allRefs.push(d.ref));
+        movSnap.docs.forEach(d => allRefs.push(d.ref));
+      }
 
       // Commit in chunks of 500 to respect Firestore limits
-      const CHUNK = 500;
-      for (let i = 0; i < allRefs.length; i += CHUNK) {
+      const COMMIT_CHUNK = 500;
+      for (let i = 0; i < allRefs.length; i += COMMIT_CHUNK) {
         const batch = writeBatch(db);
-        allRefs.slice(i, i + CHUNK).forEach(ref => batch.delete(ref));
+        allRefs.slice(i, i + COMMIT_CHUNK).forEach(ref => batch.delete(ref));
         await batch.commit();
       }
 
@@ -1241,9 +1311,12 @@ export default function Inventory() {
      if (selectedSuppliers.length === 0) return;
      setIsBatchDeletingSuppliers(true);
      try {
-       const batch = writeBatch(db);
-       selectedSuppliers.forEach(id => batch.delete(doc(db, 'suppliers', id)));
-       await batch.commit();
+       const CHUNK = 500;
+       for (let i = 0; i < selectedSuppliers.length; i += CHUNK) {
+         const batch = writeBatch(db);
+         selectedSuppliers.slice(i, i + CHUNK).forEach(id => batch.delete(doc(db, 'suppliers', id)));
+         await batch.commit();
+       }
        toast.success(`${selectedSuppliers.length} partners removed`);
        setSelectedSuppliers([]);
        fetchData();
@@ -2458,7 +2531,7 @@ export default function Inventory() {
                               getProductStock(p.id, activeBranch),
                               getProductStock(p.id, "all"),
                               p.retail_price || p.price || 0,
-                              getProductStock(p.id, "all") === 0 ? "Out of Stock" : getProductStock(p.id, "all") <= (p.min_stock || 10) ? "Low Stock" : "In Stock"
+                              getProductStock(p.id, "all") === 0 ? "Out of Stock" : getProductStock(p.id, "all") <= (p.min_stock_level || 5) ? "Low Stock" : "In Stock"
                             ])
                         ];
                         const csv = rows.map(r => r.map(String).join(",")).join("\n");
@@ -2495,27 +2568,54 @@ export default function Inventory() {
                             <input 
                               type="checkbox" 
                               className="rounded-md border-zinc-300 text-blue-600 focus:ring-blue-500 h-4 w-4 bg-white"
-                              checked={products.length > 0 && selectedProducts.length === products.filter(p => {
-                                const name = (p.name || "").toLowerCase();
-                                const sku = (p.sku || "").toLowerCase();
-                                const term = searchTerm.toLowerCase();
-                                return !term || name.includes(term) || sku.includes(term);
-                              }).length}
-                              onChange={() => {
-                                const filtered = products.filter(p => {
-                                  const name = (p.name || "").toLowerCase();
-                                  const sku = (p.sku || "").toLowerCase();
-                                  const term = searchTerm.toLowerCase();
-                                  return !term || name.includes(term) || sku.includes(term);
-                                });
-                                toggleSelectAll(filtered);
-                              }}
+                              checked={sortedProducts.length > 0 && selectedProducts.length === sortedProducts.length}
+                              onChange={() => toggleSelectAll(sortedProducts)}
                             />
                         </TableHead>
-                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Asset Identification</TableHead>
-                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Local Stock</TableHead>
-                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Enterprise Stock</TableHead>
-                        <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Unit Value</TableHead>
+                        <TableHead 
+                          className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 cursor-pointer hover:text-zinc-900 transition-colors group"
+                          onClick={() => handleSort('name')}
+                        >
+                          <div className="flex items-center gap-1">
+                            Asset Identification
+                            <span className={cn("transition-opacity", sortConfig.key === 'name' ? "opacity-100" : "opacity-0 group-hover:opacity-40")}>
+                              {sortConfig.key === 'name' && sortConfig.direction === 'desc' ? <TrendingUp className="w-3 h-3 rotate-180" /> : <TrendingUp className="w-3 h-3" />}
+                            </span>
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 cursor-pointer hover:text-zinc-900 transition-colors group"
+                          onClick={() => handleSort('local_stock')}
+                        >
+                          <div className="flex items-center gap-1">
+                            Local Stock
+                            <span className={cn("transition-opacity", sortConfig.key === 'local_stock' ? "opacity-100" : "opacity-0 group-hover:opacity-40")}>
+                              {sortConfig.key === 'local_stock' && sortConfig.direction === 'desc' ? <TrendingUp className="w-3 h-3 rotate-180" /> : <TrendingUp className="w-3 h-3" />}
+                            </span>
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 cursor-pointer hover:text-zinc-900 transition-colors group"
+                          onClick={() => handleSort('enterprise_stock')}
+                        >
+                          <div className="flex items-center gap-1">
+                            Enterprise Stock
+                            <span className={cn("transition-opacity", sortConfig.key === 'enterprise_stock' ? "opacity-100" : "opacity-0 group-hover:opacity-40")}>
+                              {sortConfig.key === 'enterprise_stock' && sortConfig.direction === 'desc' ? <TrendingUp className="w-3 h-3 rotate-180" /> : <TrendingUp className="w-3 h-3" />}
+                            </span>
+                          </div>
+                        </TableHead>
+                        <TableHead 
+                          className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 cursor-pointer hover:text-zinc-900 transition-colors group"
+                          onClick={() => handleSort('price')}
+                        >
+                          <div className="flex items-center gap-1">
+                            Unit Value
+                            <span className={cn("transition-opacity", sortConfig.key === 'price' ? "opacity-100" : "opacity-0 group-hover:opacity-40")}>
+                              {sortConfig.key === 'price' && sortConfig.direction === 'desc' ? <TrendingUp className="w-3 h-3 rotate-180" /> : <TrendingUp className="w-3 h-3" />}
+                            </span>
+                          </div>
+                        </TableHead>
                         <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Lifecycle</TableHead>
                         <TableHead className="font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6">Partner</TableHead>
                         <TableHead className="text-right font-black text-[10px] uppercase tracking-widest text-zinc-500 py-6 pr-6">Management</TableHead>
@@ -2534,18 +2634,7 @@ export default function Inventory() {
                             <TableCell className="pr-6" />
                           </TableRow>
                         ))
-                      ) : products
-                          .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
-                          .filter(p => {
-                            const name = (p.name || "").toLowerCase();
-                            const sku = (p.sku || "").toLowerCase();
-                            const category = (p.category || "").toLowerCase();
-                            const term = searchTerm.toLowerCase();
-                            const matchesSearch = !term || name.includes(term) || sku.includes(term) || category.includes(term);
-                            const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
-                            return matchesSearch && matchesCat;
-                          })
-                          .length === 0 ? (
+                      ) : sortedProducts.length === 0 ? (
                           <TableRow>
                             <TableCell colSpan={8} className="py-24 text-center">
                               <div className="flex flex-col items-center gap-4 text-zinc-400">
@@ -2567,18 +2656,7 @@ export default function Inventory() {
                             </TableCell>
                           </TableRow>
                         ) : (
-                        products
-                          .filter(p => activeBranch === "all" || inventory.some(i => i.product_id === p.id && i.branch_id === activeBranch))
-                          .filter(p => {
-                            const name = (p.name || "").toLowerCase();
-                            const sku = (p.sku || "").toLowerCase();
-                            const category = (p.category || "").toLowerCase();
-                            const term = searchTerm.toLowerCase();
-                            const matchesSearch = !term || name.includes(term) || sku.includes(term) || category.includes(term);
-                            const matchesCat = categoryFilter === "all" || p.category === categoryFilter;
-                            return matchesSearch && matchesCat;
-                          })
-                          .map((item) => {
+                        sortedProducts.map((item) => {
                             const branchStock = getProductStock(item.id, activeBranch);
                             const totalStock = getProductStock(item.id, "all");
                             const expiringBatch = inventoryBatches.find(b => {

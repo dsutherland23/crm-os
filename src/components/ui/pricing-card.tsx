@@ -10,16 +10,17 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import NumberFlow from "@number-flow/react";
 import { AnimatePresence, motion } from "motion/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useModules } from "@/context/ModuleContext";
 import { toast } from "sonner";
 import { WiPayService, defaultWiPayConfig } from "@/lib/wipay";
 import { CreditCardIcon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import { PLAN_LIMITS } from "@/constants/plan-limits";
-import { RefreshCw, ShieldCheck, Zap } from "lucide-react";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { RefreshCw, ShieldCheck, Zap, Landmark, FileUp, Image as ImageIcon, Trash2, Globe, Copy, CheckCircle2, ChevronRight, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { db, addDoc, collection, serverTimestamp } from "@/lib/firebase";
+import { recordAuditLog } from "@/lib/audit";
 
 const plans = Object.values(PLAN_LIMITS);
 
@@ -78,6 +79,16 @@ function PricingCard() {
   const [isHandoffOpen, setIsHandoffOpen] = useState(false);
   const [handoffStep, setHandoffStep] = useState(0);
   const [isSummaryOpen, setIsSummaryOpen] = useState(false);
+  
+  // Consolidation State
+  const [paymentMethod, setPaymentMethod] = useState<"card" | "bank">("card");
+  const [bankMode, setBankMode] = useState<"local" | "international">("local");
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const [isSubmittingBank, setIsSubmittingBank] = useState(false);
+  const [bankRef, setBankRef] = useState("");
+  const [isSuccess, setIsSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleWiPayCheckout = async () => {
     setIsSummaryOpen(false);
@@ -126,20 +137,143 @@ function PricingCard() {
 
   const calculateBreakdown = () => {
     const plan = PLAN_LIMITS[selectedPlan as keyof typeof PLAN_LIMITS];
+    if (!plan) return { base: 0, users: 0, branches: 0, total: 0, extraUsers: 0, extraBranches: 0 };
+    
     const extraUsers = Math.max(0, (userCounts[selectedPlan] ?? plan.maxUsers) - plan.maxUsers);
     const extraBranches = Math.max(0, (branchCounts[selectedPlan] ?? plan.maxBranches) - plan.maxBranches);
     const basePrice = billingCycle === "monthly" ? plan.pricing.monthly : plan.pricing.yearly;
     const userAddonPrice = billingCycle === "monthly" ? plan.addons.userMonthly : plan.addons.userYearly;
     const branchAddonPrice = billingCycle === "monthly" ? plan.addons.branchMonthly : plan.addons.branchYearly;
     
+    const total = basePrice + (extraUsers * userAddonPrice) + (extraBranches * branchAddonPrice);
+    
     return {
       base: basePrice,
       users: extraUsers * userAddonPrice,
       branches: extraBranches * branchAddonPrice,
-      total: basePrice + (extraUsers * userAddonPrice) + (extraBranches * branchAddonPrice),
+      total: total,
       extraUsers,
       extraBranches
     };
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      setProofFile(f);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const img = new Image();
+        img.src = reader.result as string;
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx?.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL("image/jpeg", 0.7);
+          setProofPreview(compressed);
+        };
+      };
+      reader.readAsDataURL(f);
+    }
+  };
+
+  const handleBankSubmit = async () => {
+    console.log("[PricingCard] Initiating Bank Submit...", { enterpriseId, selectedPlan, billingCycle });
+    
+    if (!proofPreview) {
+      toast.error("Please upload your transfer receipt proof.");
+      return;
+    }
+
+    if (!enterpriseId) {
+      toast.error("Account verification error. Please refresh and try again.");
+      console.error("[PricingCard] Missing enterpriseId during bank submit");
+      return;
+    }
+    
+    setIsSubmittingBank(true);
+    try {
+      const breakdown = calculateBreakdown();
+      const finalAmount = billingCycle === "yearly" ? breakdown.total * 12 : breakdown.total;
+      
+      const noticeRef = await addDoc(collection(db, "billing_notices"), {
+        enterprise_id: enterpriseId,
+        noticeId: `PAY-${Date.now()}`,
+        amount: finalAmount,
+        reference: bankRef || "MANUAL_BT",
+        status: "PENDING",
+        submittedAt: new Date().toISOString(),
+        planId: selectedPlan,
+        billingCycle: billingCycle,
+        receiptData: proofPreview,
+        userCount: userCounts[selectedPlan],
+        branchCount: branchCounts[selectedPlan],
+        created_at: serverTimestamp()
+      });
+
+      console.log("[PricingCard] Notice created:", noticeRef.id);
+
+      await recordAuditLog({
+        enterpriseId,
+        action: "BILLING_PAYMENT_SUBMITTED",
+        details: `Manual bank transfer notice submitted for ${selectedPlan} plan ($${finalAmount.toFixed(2)}).`,
+        severity: "INFO",
+        type: "BILLING",
+        metadata: { noticeId: noticeRef.id, planId: selectedPlan, amount: finalAmount }
+      });
+
+      toast.success("Payment notification submitted!");
+      
+      setIsSuccess(true);
+      setProofPreview(null);
+      setProofFile(null);
+      setBankRef("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch (err: any) {
+      console.error("[PricingCard] Bank Submit Error:", err);
+      toast.error(err.message || "Failed to submit payment notice.");
+    } finally {
+      setIsSubmittingBank(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success("Copied to clipboard");
+  };
+
+  const bankDetails = bankMode === "local" ? {
+    holder: "DAAN SUTHERLAND",
+    bank: "FCIB",
+    branch: "NEW KINGSTON",
+    transit: "09676",
+    acc: "1002141453",
+    note: "Jamaica Local Transfer"
+  } : {
+    holder: "DAAN SUTHERLAND",
+    bank: "FCIB",
+    swift: "FCIBJMKN",
+    acc: "1002141453",
+    note: "International Wire Transfer"
   };
 
 
@@ -223,7 +357,7 @@ function PricingCard() {
                 }`}
               >
                 <div className="p-5">
-                  <div className="flex justify-between items-start">
+                  <div className="flex flex-col sm:flex-row justify-between items-start gap-2 sm:gap-4">
                     <div className="flex gap-4">
                       <div className="mt-1 shrink-0">
                         <div
@@ -260,7 +394,7 @@ function PricingCard() {
                         </p>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-left sm:text-right w-full sm:w-auto mt-2 sm:mt-0">
                       <div className="flex flex-col items-end">
                         <AnimatePresence mode="wait" initial={false}>
                           {billingCycle === "monthly" ? (
@@ -441,7 +575,7 @@ function PricingCard() {
       </div>
 
       <AnimatePresence>
-        {(isChanged || selectedPlan === "starter") && (
+        {selectedPlan && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -453,8 +587,8 @@ function PricingCard() {
               disabled={isSaving}
               className="w-full h-12 bg-zinc-900 text-white rounded-xl font-bold shadow-xl shadow-black/10 hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 group"
             >
-              <HugeiconsIcon icon={CreditCardIcon} size={18} className="group-hover:scale-110 transition-transform" />
-              Pay with WiPay
+              <Zap className="w-4 h-4 fill-amber-400 text-amber-400 group-hover:scale-110 transition-transform" />
+              Proceed to Checkout
             </button>
             {isChanged && (
               <button
@@ -469,55 +603,232 @@ function PricingCard() {
         )}
       </AnimatePresence>
 
-      {/* Modern Checkout Summary Dialog */}
-      <Dialog open={isSummaryOpen} onOpenChange={setIsSummaryOpen}>
-        <DialogContent className="rounded-[2.5rem] p-0 max-w-md overflow-hidden border-none shadow-2xl bg-white">
-          <div className="bg-zinc-950 p-8 text-center relative overflow-hidden shrink-0">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-600/20 rounded-full blur-3xl" />
-            <h2 className="text-xl font-black text-white uppercase tracking-widest relative z-10">Checkout Summary</h2>
-            <p className="text-zinc-500 text-[10px] font-bold mt-1 uppercase tracking-widest relative z-10">Review your subscription</p>
-          </div>
-          
-          <div className="p-8 space-y-6">
-            <div className="space-y-3">
-              <div className="flex justify-between items-center py-2 border-b border-zinc-100">
-                <div>
-                  <p className="text-sm font-black text-zinc-900 capitalize">{selectedPlan} Plan</p>
-                  <p className="text-[10px] text-zinc-500 font-bold uppercase">Billed {billingCycle}</p>
+      <Dialog open={isSummaryOpen} onOpenChange={(val) => {
+        setIsSummaryOpen(val);
+        if (!val) {
+          // Reset success state when closing
+          setTimeout(() => setIsSuccess(false), 300);
+        }
+      }}>
+        <DialogContent className="rounded-[2.5rem] p-0 max-w-xl overflow-hidden border-none shadow-2xl bg-white">
+          <AnimatePresence mode="wait">
+            {isSuccess ? (
+              <motion.div 
+                key="success-view"
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="p-12 text-center space-y-8"
+              >
+                <div className="w-24 h-24 bg-emerald-500/10 rounded-[2.5rem] border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-500">
+                  <CheckCircle2 className="w-12 h-12" />
                 </div>
-                <p className="text-sm font-black text-zinc-900">${calculateBreakdown().base.toFixed(2)}</p>
-              </div>
-              
-              {calculateBreakdown().extraUsers > 0 && (
-                <div className="flex justify-between items-center py-2 border-b border-zinc-100">
-                  <p className="text-xs font-bold text-zinc-600">+{calculateBreakdown().extraUsers} User Seats</p>
-                  <p className="text-xs font-bold text-zinc-900">${calculateBreakdown().users.toFixed(2)}</p>
+                <div className="space-y-3">
+                  <h2 className="text-2xl font-black text-zinc-900 uppercase tracking-tight">Submission Received!</h2>
+                  <p className="text-sm font-medium text-zinc-500 leading-relaxed px-4">
+                    Your payment notice has been logged. Our billing team will verify the transfer and activate your <span className="font-black text-zinc-900">{selectedPlan}</span> plan within 24 hours.
+                  </p>
                 </div>
-              )}
+                <div className="bg-zinc-50 rounded-3xl p-6 border border-zinc-100 flex flex-col gap-2">
+                   <div className="flex justify-between items-center text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                     <span>Status</span>
+                     <span className="text-emerald-600">Pending Review</span>
+                   </div>
+                   <div className="flex justify-between items-center text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                     <span>Estimated Time</span>
+                     <span className="text-zinc-900">~ 2-4 Hours</span>
+                   </div>
+                </div>
+                <Button onClick={() => setIsSummaryOpen(false)} className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black text-sm">
+                  Back to Dashboard
+                </Button>
+              </motion.div>
+            ) : (
+              <motion.div key="main-content" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <div className="bg-zinc-950 p-8 text-center relative overflow-hidden shrink-0">
+                  <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-600/10 rounded-full blur-3xl" />
+                  <h2 className="text-xl font-black text-white uppercase tracking-[0.2em] relative z-10">Checkout Summary</h2>
+                  <p className="text-zinc-500 text-[10px] font-bold mt-2 uppercase tracking-[0.3em] relative z-10">Select your preferred payment method</p>
+                </div>
+                
+                <div className="p-8 space-y-8 max-h-[75vh] overflow-y-auto custom-scrollbar">
+                  {/* Step 1: Order Details */}
+                  <div className="space-y-4">
+                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Order Details</p>
+                    <div className="bg-zinc-50 rounded-3xl p-5 border border-zinc-100 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-bold text-zinc-900 capitalize">{selectedPlan} Plan</span>
+                        <span className="text-sm font-black text-zinc-900">${calculateBreakdown().base.toFixed(2)}</span>
+                      </div>
+                      {(calculateBreakdown().extraUsers > 0 || calculateBreakdown().extraBranches > 0) && (
+                        <div className="space-y-2 pt-2 border-t border-zinc-200/50">
+                          {calculateBreakdown().extraUsers > 0 && (
+                            <div className="flex justify-between items-center text-[11px] text-zinc-500">
+                              <span>+{calculateBreakdown().extraUsers} Additional Users</span>
+                              <span>${calculateBreakdown().users.toFixed(2)}</span>
+                            </div>
+                          )}
+                          {calculateBreakdown().extraBranches > 0 && (
+                            <div className="flex justify-between items-center text-[11px] text-zinc-500">
+                              <span>+{calculateBreakdown().extraBranches} Additional Branches</span>
+                              <span>${calculateBreakdown().branches.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex justify-between items-center pt-3 border-t border-zinc-200 text-indigo-600">
+                        <span className="text-sm font-black uppercase tracking-widest">Total Due ({billingCycle})</span>
+                        <span className="text-xl font-black">${(billingCycle === 'yearly' ? calculateBreakdown().total * 12 : calculateBreakdown().total).toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
 
-              {calculateBreakdown().extraBranches > 0 && (
-                <div className="flex justify-between items-center py-2 border-b border-zinc-100">
-                  <p className="text-xs font-bold text-zinc-600">+{calculateBreakdown().extraBranches} Branch Licenses</p>
-                  <p className="text-xs font-bold text-zinc-900">${calculateBreakdown().branches.toFixed(2)}</p>
-                </div>
-              )}
+                  {/* Step 2: Payment Method Selector */}
+                  <div className="space-y-4">
+                    <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Payment Method</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <button 
+                        onClick={() => setPaymentMethod("card")}
+                        className={cn(
+                          "flex flex-col gap-3 p-5 rounded-3xl border-2 transition-all text-left group",
+                          paymentMethod === "card" ? "border-indigo-600 bg-indigo-50/30" : "border-zinc-100 bg-white hover:border-zinc-200"
+                        )}
+                      >
+                        <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center transition-colors", paymentMethod === "card" ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-500 group-hover:bg-zinc-200")}>
+                          <HugeiconsIcon icon={CreditCardIcon} size={20} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-zinc-900">Card Payment</p>
+                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">WiPay Secure Gateway</p>
+                        </div>
+                      </button>
 
-              <div className="flex justify-between items-center pt-4">
-                <p className="text-lg font-black text-zinc-900">Total Due</p>
-                <div className="text-right">
-                  <p className="text-2xl font-black text-indigo-600">${calculateBreakdown().total.toFixed(2)}</p>
-                  <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">Secure USD Payment</p>
-                </div>
-              </div>
-            </div>
+                      <button 
+                        onClick={() => setPaymentMethod("bank")}
+                        className={cn(
+                          "flex flex-col gap-3 p-5 rounded-3xl border-2 transition-all text-left group",
+                          paymentMethod === "bank" ? "border-indigo-600 bg-indigo-50/30" : "border-zinc-100 bg-white hover:border-zinc-200"
+                        )}
+                      >
+                        <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center transition-colors", paymentMethod === "bank" ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-500 group-hover:bg-zinc-200")}>
+                          <Landmark className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-zinc-900">Bank Transfer</p>
+                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">Manual Deposit / Wire</p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
 
-            <Button onClick={handleWiPayCheckout} className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black shadow-xl shadow-zinc-900/20 text-sm">
-              Confirm & Pay Securely
-            </Button>
-            <p className="text-[10px] text-center text-zinc-400 font-medium px-4 leading-relaxed">
-              By clicking confirm, you will be securely redirected to WiPay's Caribbean payment gateway to complete your transaction.
-            </p>
-          </div>
+                  {/* Step 3: Payment Method Specific Content */}
+                  <AnimatePresence mode="wait">
+                    {paymentMethod === "card" ? (
+                      <motion.div 
+                        key="card-info"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-4"
+                      >
+                        <div className="p-5 bg-indigo-50/30 rounded-3xl border border-indigo-100 flex gap-4">
+                          <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center text-indigo-600 shrink-0 shadow-sm border border-indigo-50">
+                            <ShieldCheck className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-zinc-900">Secure Caribbean Gateway</p>
+                            <p className="text-[10px] text-zinc-500 leading-relaxed mt-1">We use WiPay to ensure your data is encrypted. Supports Visa, MasterCard, and local debit cards.</p>
+                          </div>
+                        </div>
+                        <Button onClick={handleWiPayCheckout} className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black shadow-xl shadow-zinc-900/20 text-sm gap-2">
+                          Pay via Secure Card
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
+                      </motion.div>
+                    ) : (
+                      <motion.div 
+                        key="bank-info"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="space-y-6"
+                      >
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Bank Details</p>
+                            <div className="flex bg-zinc-100 p-0.5 rounded-lg border border-zinc-200">
+                              <button onClick={() => setBankMode("local")} className={cn("px-3 py-1 rounded-md text-[9px] font-black transition-all", bankMode === "local" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}>LOCAL</button>
+                              <button onClick={() => setBankMode("international")} className={cn("px-3 py-1 rounded-md text-[9px] font-black transition-all", bankMode === "international" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700")}>INTL</button>
+                            </div>
+                          </div>
+                          
+                          <div className="bg-zinc-50 rounded-3xl border border-zinc-200 p-6 space-y-4">
+                            {Object.entries(bankDetails).map(([key, value]) => (
+                              <div key={key} className="flex justify-between items-center group/item">
+                                <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{key}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-zinc-900">{value}</span>
+                                  <button onClick={() => copyToClipboard(value)} className="opacity-0 group-hover/item:opacity-100 transition-opacity p-1 text-indigo-600 hover:bg-indigo-50 rounded-md">
+                                    <Copy className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Submit Proof of Payment</p>
+                          <div className="grid grid-cols-1 gap-4">
+                            <div className="space-y-1.5">
+                              <input 
+                                type="text" 
+                                value={bankRef} 
+                                onChange={e => setBankRef(e.target.value)}
+                                placeholder="Transaction ID / Reference Number"
+                                className="w-full h-12 px-4 bg-zinc-50 border border-zinc-200 rounded-2xl text-xs font-black text-zinc-900 outline-none focus:border-indigo-600 transition-all"
+                              />
+                            </div>
+                            {!proofPreview ? (
+                              <label className="flex flex-col items-center justify-center w-full h-32 bg-zinc-50 border-2 border-dashed border-zinc-200 rounded-[2.5rem] cursor-pointer hover:bg-zinc-100 hover:border-indigo-300 transition-all">
+                                <div className="flex flex-col items-center justify-center pt-5 pb-6 text-zinc-400">
+                                  <ImageIcon className="w-8 h-8 mb-2" />
+                                  <p className="text-[10px] font-bold uppercase tracking-wider">Upload Transfer Receipt</p>
+                                </div>
+                                <input ref={fileInputRef} type="file" className="hidden" accept="image/*,.pdf" onChange={handleFile} />
+                              </label>
+                            ) : (
+                              <div className="relative rounded-[2rem] overflow-hidden border border-zinc-200 aspect-[2/1] group">
+                                <img src={proofPreview} className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                  <button onClick={() => { setProofFile(null); setProofPreview(null); }} className="w-10 h-10 rounded-full bg-white text-rose-600 flex items-center justify-center hover:scale-110 active:scale-95 transition-all">
+                                    <Trash2 className="w-5 h-5" />
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <Button onClick={handleBankSubmit} disabled={isSubmittingBank || !proofPreview} className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black shadow-xl shadow-zinc-900/20 text-sm gap-2">
+                          {isSubmittingBank ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Submit Payment Notice"}
+                          <CheckCircle2 className="w-4 h-4" />
+                        </Button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="flex items-center gap-3 p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                    <Info className="w-4 h-4 text-zinc-400 shrink-0" />
+                    <p className="text-[9px] text-zinc-500 font-medium leading-relaxed">
+                      By proceeding, you agree to Orivo's Terms of Service. 
+                      <span className="font-bold text-zinc-900"> No Refund Policy</span> applies to all digital subscriptions.
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </DialogContent>
       </Dialog>
 

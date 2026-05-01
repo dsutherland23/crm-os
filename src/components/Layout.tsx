@@ -83,6 +83,8 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
   const [overridePin, setOverridePin] = useState("");
   const [overrideError, setOverrideError] = useState("");
   const [staffList, setStaffList] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const { activeBranch, setActiveBranch } = useModules();
 
   // ── Sidebar Theme ──────────────────────────────────────────────────────────
   const SIDEBAR_THEMES = [
@@ -114,7 +116,11 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
       query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
       (snap) => setStaffList(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)))
     );
-    return () => unsub();
+    const unsubBranches = onSnapshot(
+      query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)),
+      (snap) => setBranches(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)))
+    );
+    return () => { unsub(); unsubBranches(); };
   }, [enterpriseId]);
 
   const handleOverridePin = (digit: string) => {
@@ -270,6 +276,25 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
           {/* Navigation */}
           <div className="flex-1 px-4 overflow-y-auto overscroll-contain transition-all duration-300 hide-scrollbar scroll-smooth">
             <div className="space-y-6 py-4">
+              {/* Mobile Only Branch Switcher */}
+              <div className="lg:hidden px-4 py-4 bg-zinc-800/30 rounded-2xl border border-zinc-700/30 mb-2">
+                <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-3">Operating Location</p>
+                <select 
+                  value={activeBranch} 
+                  onChange={(e) => {
+                    setActiveBranch(e.target.value);
+                    setIsMobileOpen(false);
+                  }}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none cursor-pointer"
+                >
+                  <option value="all">Global Operations</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <p className="text-[9px] text-zinc-500 mt-2 font-medium">Affects inventory & POS data visibility.</p>
+              </div>
+
               <div>
                 <p className="px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-4">Main Menu</p>
                 <nav className="space-y-1">
@@ -849,7 +874,7 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
         )}
       </AnimatePresence>
 
-      <header className="sticky top-0 z-30 flex h-20 w-full items-center justify-between px-6 lg:px-10 bg-zinc-50/80 backdrop-blur-xl border-b border-zinc-200/50">
+      <header className="sticky top-0 z-30 flex h-20 w-full items-center justify-between px-4 lg:px-10 bg-zinc-50/80 backdrop-blur-xl border-b border-zinc-200/50">
       <div className="flex items-center gap-6 flex-1">
         <Button 
           variant="ghost" 
