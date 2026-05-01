@@ -36,7 +36,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useModules } from "@/context/ModuleContext";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { db, collection, query, onSnapshot, orderBy, limit, where, doc, auth } from "@/lib/firebase";
+import { db, collection, query, onSnapshot, orderBy, limit, where, doc, auth, getDocs } from "@/lib/firebase";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { usePendingAction } from "@/context/PendingActionContext";
 
@@ -341,56 +341,46 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
       setLoadingMap((p) => ({ ...p, transactions: false }));
     }
 
-    // 2. Customers – only subscribe if user has CRM access
-    let unsubCustomers = () => {};
+    // 2. Customers – one-time read (dashboard only needs a snapshot count)
     if (canCRM) {
-      unsubCustomers = onSnapshot(
-        query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(10)),
-        (snap) => {
+      getDocs(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(10)))
+        .then((snap) => {
           setCustomers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
           setLoadingMap((p) => ({ ...p, customers: false }));
-        },
-        (err) => {
-          console.error("Customers listener:", err);
+        })
+        .catch((err) => {
+          console.error("Customers fetch:", err);
           setErrorMap((p) => ({ ...p, customers: err.code }));
           setLoadingMap((p) => ({ ...p, customers: false }));
-        }
-      );
+        });
     } else {
       setLoadingMap((p) => ({ ...p, customers: false }));
     }
 
-    // 3. Inventory – only subscribe if user has inventory access
-    let unsubInv = () => {};
+    // 3. Inventory – one-time read (real-time stock not needed on dashboard)
     if (canInventory) {
       const invQuery =
         activeBranch === "all"
           ? query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(1000))
           : query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), where("branch_id", "==", activeBranch), limit(1000));
 
-      unsubInv = onSnapshot(
-        invQuery,
-        (snap) => {
+      getDocs(invQuery)
+        .then((snap) => {
           setInventory(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
           setLoadingMap((p) => ({ ...p, inventory: false }));
-        },
-        (err) => {
-          console.error("Inventory listener:", err);
+        })
+        .catch((err) => {
+          console.error("Inventory fetch:", err);
           setErrorMap((p) => ({ ...p, inventory: err.code }));
           setLoadingMap((p) => ({ ...p, inventory: false }));
-        }
-      );
+        });
 
-      // 3b. Products – needed to calculate inventory value (prices are here)
-      const prodQuery = query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(1000));
-      const unsubProd = onSnapshot(
-        prodQuery,
-        (snap) => {
+      // 3b. Products – one-time read for inventory value calculation
+      getDocs(query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(1000)))
+        .then((snap) => {
           setProducts(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        },
-        (err) => console.error("Products listener:", err)
-      );
-      subscriptionRef.current.push(unsubProd);
+        })
+        .catch((err) => console.error("Products fetch:", err));
     } else {
       setLoadingMap((p) => ({ ...p, inventory: false }));
     }
@@ -427,7 +417,7 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
       setLoadingMap((p) => ({ ...p, logs: false }));
     }
 
-    subscriptionRef.current = [unsubTx, unsubCustomers, unsubInv, unsubLogs, unsubStats];
+    subscriptionRef.current = [unsubTx, unsubLogs, unsubStats];
   }, [activeBranch, enterpriseId, hasPermission]);
 
   useEffect(() => {
@@ -553,9 +543,14 @@ export default function Dashboard({ setActiveTab }: { setActiveTab?: (tab: strin
     setIsRegenerating(true);
     subscribe();
     try {
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Authentication required");
       const res = await fetch("/api/cron/aggregate-dashboard", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ enterpriseId }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

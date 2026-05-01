@@ -298,20 +298,6 @@ export default function POS() {
   const [sessionStats, setSessionStats] = useState({ sales: 0, tax: 0, discounts: 0, cash: 0, card: 0, split: 0 });
   const [loyaltySettings, setLoyaltySettings] = useState({ pointsPerDollar: 1, pointsRequiredForReward: 100, rewardValue: 5 });
 
-  useEffect(() => {
-    if (!enterpriseId) return;
-    const unsub = onSnapshot(doc(db, "loyalty_settings", enterpriseId), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setLoyaltySettings({
-          pointsRequiredForReward: data.pointsRequiredForReward || 100,
-          rewardValue: data.rewardValue || 5
-        });
-      }
-    }, () => { });
-    return () => unsub();
-  }, [enterpriseId]);
-
   const handleBillCountChange = (denom: number, value: string) => {
     const newCounts = { ...billCounts, [denom]: value };
     setBillCounts(newCounts);
@@ -340,7 +326,8 @@ export default function POS() {
       where("enterprise_id", "==", enterpriseId),
       limit(50)
     );
-    const unsub = onSnapshot(q, (snapshot) => {
+    // One-time read — history doesn't change while viewing
+    getDocs(q).then((snapshot) => {
       const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
       docs.sort((a, b) => {
         const tA = new Date(a.startTime).getTime() || 0;
@@ -348,8 +335,7 @@ export default function POS() {
         return tB - tA;
       });
       setShiftHistory(docs.slice(0, 20));
-    });
-    return () => unsub();
+    }).catch((err) => console.error("shift history fetch:", err));
   }, [enterpriseId, isShiftHistoryOpen]);
 
   useEffect(() => {
@@ -365,11 +351,10 @@ export default function POS() {
 
   useEffect(() => {
     if (!enterpriseId) return;
-    const unsubStaff = onSnapshot(
-      query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
-      (snapshot) => {
+    // Staff roster — one-time read (staff changes are rare during POS sessions)
+    getDocs(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")))
+      .then((snapshot) => {
         const dbStaff = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
-        // SECURITY: Never store raw PIN in client state. Only keep display & auth-lookup fields.
         setStaffList(dbStaff.map(s => ({
           id: s.id,
           name: s.name,
@@ -377,20 +362,18 @@ export default function POS() {
           payGrade: s.payGrade,
           branches: s.branches,
           status: s.status,
-          // PIN is intentionally omitted here. Validation happens server-side via Firestore lookup.
-          _pinHash: s.pin, // kept only for local PIN entry flow; not exposed to UI
+          _pinHash: s.pin,
           initials: (s.name || '').substring(0, 2).toUpperCase()
         })));
-      },
-      (err) => console.error("staff sync error:", err)
-    );
+      })
+      .catch((err) => console.error("staff fetch error:", err));
+
     const unsubSessions = onSnapshot(
       query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH", "IN_MEETING"])),
       (snapshot) => setActiveSessions(snapshot.docs.map(d => ({ id: d.id, ...d.data() }))),
       (err) => console.error("sessions sync error:", err)
     );
     return () => {
-      unsubStaff();
       unsubSessions();
     };
   }, [enterpriseId]);
@@ -429,13 +412,13 @@ export default function POS() {
         setLoading(false);
       }
     );
-    const unsubCampaigns = onSnapshot(
-      query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
-      (snapshot) => {
+    // Campaigns change rarely — one-time read instead of real-time listener
+    getDocs(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")))
+      .then((snapshot) => {
         if (isMounted) setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      },
-      (err) => console.error("campaigns sync error:", err)
-    );
+      })
+      .catch((err) => console.error("campaigns fetch error:", err));
+
     const unsubInventory = onSnapshot(
       query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(1500)),
       (snapshot) => {
@@ -446,7 +429,6 @@ export default function POS() {
     return () => {
       isMounted = false;
       unsubProducts?.();
-      unsubCampaigns?.();
       unsubInventory?.();
     };
   }, [enterpriseId, isAuthorized]);

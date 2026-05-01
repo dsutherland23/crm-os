@@ -262,6 +262,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   }
   const [editingRole, setEditingRole] = useState<any>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [resetConfirmText, setResetConfirmText] = useState("");
   const [isKeysDialogOpen, setIsKeysDialogOpen] = useState(false);
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_TEST_API_KEY || "sk_test_1234567890abcdef1234567890abcdef");
   const [commissionPin, setCommissionPin] = useState("1234");
@@ -399,9 +400,28 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
     if (!hasPermission('settings', 'admin')) {
       toast.error('Only administrators can execute a factory reset.');
       setIsResetDialogOpen(false);
+      setResetConfirmText("");
+      return;
+    }
+    if (resetConfirmText !== "RESET") {
+      toast.error('Please type RESET to confirm.');
       return;
     }
     setIsResetDialogOpen(false);
+    setResetConfirmText("");
+
+    // Pre-action audit log (recorded BEFORE destruction in case purge fails midway)
+    try {
+      await recordAuditLog({
+        enterpriseId,
+        action: "FACTORY_RESET_INITIATED",
+        details: "Administrator initiated a complete enterprise-wide data purge.",
+        severity: "CRITICAL",
+        type: "SYSTEM"
+      });
+    } catch (e) {
+      console.warn("Pre-action audit log failed:", e);
+    }
     
     const collectionsToWipe = [
       "invoices", "expenses", "quotes", "recurring_billing",
@@ -2158,7 +2178,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                 <p className="text-sm font-bold text-zinc-900">Reset All Enterprise Data</p>
                 <p className="text-xs text-zinc-500">Wipe all transactions, customers, and inventory across all branches.</p>
               </div>
-              <Dialog open={isResetDialogOpen} onOpenChange={setIsResetDialogOpen}>
+              <Dialog open={isResetDialogOpen} onOpenChange={(open) => { setIsResetDialogOpen(open); if (!open) setResetConfirmText(""); }}>
                 <DialogTrigger
                   render={
                     <button className={cn(buttonVariants({ variant: "destructive" }), "rounded-xl font-bold px-8 h-11 border-none cursor-pointer")}>
@@ -2170,12 +2190,21 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                   <DialogHeader>
                     <DialogTitle className="font-bold text-xl text-rose-600">Reset All Enterprise Data</DialogTitle>
                     <DialogDescription>
-                      This action is irreversible. It will wipe all transactions, customers, and inventory across all branches.
+                      This action is <strong>irreversible</strong>. It will permanently wipe all transactions, customers, and inventory across all branches. Type <strong>RESET</strong> below to confirm.
                     </DialogDescription>
                   </DialogHeader>
+                  <div className="mt-4">
+                    <Input
+                      placeholder='Type "RESET" to confirm'
+                      value={resetConfirmText}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setResetConfirmText(e.target.value)}
+                      className="rounded-xl h-11 font-mono text-center text-lg tracking-widest border-rose-200 focus:ring-rose-500/20"
+                      autoComplete="off"
+                    />
+                  </div>
                   <DialogFooter className="mt-6">
-                    <Button variant="outline" className="rounded-xl h-11 font-bold" onClick={() => setIsResetDialogOpen(false)}>Cancel</Button>
-                    <Button variant="destructive" className="rounded-xl h-11 font-bold" onClick={handleResetData}>Yes, Reset Data</Button>
+                    <Button variant="outline" className="rounded-xl h-11 font-bold" onClick={() => { setIsResetDialogOpen(false); setResetConfirmText(""); }}>Cancel</Button>
+                    <Button variant="destructive" className="rounded-xl h-11 font-bold" onClick={handleResetData} disabled={resetConfirmText !== "RESET"}>Yes, Reset Data</Button>
                   </DialogFooter>
                 </DialogContent>
               </Dialog>

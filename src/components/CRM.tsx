@@ -109,7 +109,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { createPortal } from "react-dom";
 
 import { db, auth, handleFirestoreError, OperationType, collection, onSnapshot, query, orderBy, doc, updateDoc, arrayUnion, arrayRemove, where, addDoc, serverTimestamp, deleteDoc, writeBatch, getStorage, ref, uploadBytes, getDownloadURL, limit, increment as fStoreIncrement } from "@/lib/firebase";
-import { deleteObject } from "firebase/storage";
+// firebase/storage deleteObject is imported dynamically where used to avoid pulling storage SDK into CRM chunk
 import { recordFinancialEvent } from "@/lib/ledger";
 import { recordAuditLog } from "@/lib/audit";
 import { usePendingAction } from "@/context/PendingActionContext";
@@ -577,7 +577,7 @@ export default function CRM() {
         reader.readAsDataURL(file);
       });
 
-      const storageRef = ref(getStorage(), `enterprise/${enterpriseId}/customers/${selectedCustomer?.id || 'unknown'}/profiles/photo_${Date.now()}.jpg`);
+      const storageRef = await ref(await getStorage(), `enterprise/${enterpriseId}/customers/${selectedCustomer?.id || 'unknown'}/profiles/photo_${Date.now()}.jpg`);
       
       const uploadTask = (async () => {
         await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
@@ -766,8 +766,9 @@ export default function CRM() {
         const data = d.data();
         if (data.storagePath) {
           try {
-            const storage = getStorage();
-            const fileRef = ref(storage, data.storagePath);
+            const storage = await getStorage();
+            const fileRef = await ref(storage, data.storagePath);
+            const { deleteObject } = await import("firebase/storage");
             await deleteObject(fileRef);
           } catch (storageErr) {
             console.warn("Storage deletion failed (likely already gone):", storageErr);
@@ -1150,8 +1151,8 @@ export default function CRM() {
     }
 
     try {
-      const storage = getStorage();
-      storageRef = ref(storage, `enterprise/${enterpriseId}/customers/${selectedCustomer.id}/docs/${Date.now()}_${fileToUpload.name}`);
+      const storage = await getStorage();
+      storageRef = await ref(storage, `enterprise/${enterpriseId}/customers/${selectedCustomer.id}/docs/${Date.now()}_${fileToUpload.name}`);
       await uploadBytes(storageRef, fileToUpload);
       const url = await getDownloadURL(storageRef);
 
@@ -1172,6 +1173,7 @@ export default function CRM() {
       } catch (firestoreError) {
         // Rollback: remove the already-uploaded Storage file to prevent orphaning
         try {
+          const { deleteObject } = await import("firebase/storage");
           await deleteObject(storageRef);
         } catch (_) { /* best-effort cleanup */ }
         throw firestoreError;
@@ -1229,9 +1231,14 @@ export default function CRM() {
       - [Action 1]
       - [Action 2]`;
 
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Authentication required");
       const res = await fetch("/api/ai/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ prompt })
       });
 
@@ -1304,9 +1311,14 @@ export default function CRM() {
       
       The email should be concise, helpful, and encourage them to connect or check out our latest offers.`;
 
+      const token = await auth.currentUser?.getIdToken();
+      if (!token) throw new Error("Authentication required");
       const res = await fetch("/api/ai/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ prompt })
       });
 

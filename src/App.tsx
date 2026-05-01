@@ -8,35 +8,36 @@ import { auth, db, doc, onSnapshot, setDoc, addDoc, collection } from "@/lib/fir
 import { toast } from "sonner";
 import { getMockUser } from "./lib/auth-mock";
 
-import Dashboard from "./components/Dashboard";
-import AIInsights from "./components/AIInsights";
-import CRM from "./components/CRM";
-import POS from "./components/POS";
-import Settings from "./components/Settings";
-import Analytics from "./components/Analytics";
-import AuditLogs from "./components/AuditLogs";
+// Auth gates — static (needed immediately on load)
 import Auth from "./components/Auth";
-import StaffManager from "./components/StaffManager";
 import VerificationGate from "./components/VerificationGate";
 import AdminPortal from "./components/AdminPortal";
-import Support from "./components/Support";
 import { SocialHub } from "./components/SocialHub";
+import AuthActionHandler from "./components/AuthActionHandler";
 
 // Heavy data-intensive modules — lazy loaded so Firestore listeners only mount
 // when the user actually navigates to that tab, preventing boot-time OOM risk.
-const Inventory = lazy(() => import("./components/Inventory"));
-const Revenue   = lazy(() => import("./components/Revenue"));
-const Groups    = lazy(() => import("./components/Groups"));
-const Loyalty   = lazy(() => import("./components/Loyalty"));
-const Suppliers = lazy(() => import("./components/Suppliers"));
-const Workflow  = lazy(() => import("./components/Workflow"));
+const Dashboard    = lazy(() => import("./components/Dashboard"));
+const AIInsights   = lazy(() => import("./components/AIInsights"));
+const CRM          = lazy(() => import("./components/CRM"));
+const POS          = lazy(() => import("./components/POS"));
+const Settings     = lazy(() => import("./components/Settings"));
+const Analytics    = lazy(() => import("./components/Analytics"));
+const AuditLogs    = lazy(() => import("./components/AuditLogs"));
+const StaffManager = lazy(() => import("./components/StaffManager"));
+const Support      = lazy(() => import("./components/Support"));
+const Inventory    = lazy(() => import("./components/Inventory"));
+const Revenue      = lazy(() => import("./components/Revenue"));
+const Groups       = lazy(() => import("./components/Groups"));
+const Loyalty      = lazy(() => import("./components/Loyalty"));
+const Suppliers    = lazy(() => import("./components/Suppliers"));
+const Workflow     = lazy(() => import("./components/Workflow"));
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { PendingActionProvider } from "./context/PendingActionContext";
 import { Sparkles, Activity } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import AuthActionHandler from "./components/AuthActionHandler";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { TrialBanner } from "@/components/ui/trial-banner";
 import { motion, AnimatePresence } from "motion/react";

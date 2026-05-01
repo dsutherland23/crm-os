@@ -49,7 +49,7 @@ import {
   limit,
   orderBy
 } from '@/lib/firebase';
-import * as XLSX from 'xlsx';
+// xlsx is dynamically imported where used to reduce chunk size
 import { recordFinancialEvent } from '@/lib/ledger';
 import { toast } from 'sonner';
 import { cn } from "@/lib/utils";
@@ -429,8 +429,8 @@ export default function Inventory() {
     };
 
     // Shared header-detection for any spreadsheet with decorative top rows
-    const buildRowsFromSheet = (worksheet: any) => {
-      const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+    const buildRowsFromSheet = (worksheet: any, XLSXLib: any) => {
+      const rows = XLSXLib.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
       const headerKeywords = ['STOCK', 'ITEM', 'NAME', 'SKU', 'PRODUCT', 'PRICE', 'RETAIL', 'QTY', 'QUANTITY'];
       let headerRowIndex = rows.findIndex(row =>
         row && row.some(cell =>
@@ -626,11 +626,12 @@ export default function Inventory() {
       reader.readAsText(file);
     } else if (['xlsx', 'xls', 'ods'].includes(fileExt || '')) {
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         try {
+          const XLSX = await import('xlsx');
           const workbook = XLSX.read(e.target?.result, { type: 'binary' });
           const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-          processData(buildRowsFromSheet(worksheet));
+          processData(buildRowsFromSheet(worksheet, XLSX));
         } catch (err: any) {
           toast.error(`Spreadsheet parse error: ${err.message}`, { id: loadingToast });
         }
@@ -1575,7 +1576,7 @@ export default function Inventory() {
     );
 
     try {
-      const storageRef = ref(getStorage(), `products/${Date.now()}_${file.name.replace(/\s+/g, '_')}`);
+      const storageRef = await ref(await getStorage(), `products/${Date.now()}_${file.name.replace(/\s+/g, '_')}`);
       
       const uploadTask = (async () => {
         const uploadResult = await uploadBytes(storageRef, file);
@@ -4087,7 +4088,7 @@ export default function Inventory() {
                     setCapturedImages(prev => [localUrl, ...prev]);
                     setIsCapturing(false);
                     try {
-                      const storageRef = ref(getStorage(), `products/sc_${Date.now()}.jpg`);
+                      const storageRef = await ref(await getStorage(), `products/sc_${Date.now()}.jpg`);
                       await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
                       const url = await getDownloadURL(storageRef);
                       setProductForm(prev => ({ ...prev, image_url: url }));

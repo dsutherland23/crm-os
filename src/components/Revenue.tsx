@@ -82,12 +82,14 @@ import { toast } from "sonner";
 import { 
   collection, 
   onSnapshot, 
+  getDocs,
   limit,
   orderBy,
   query, 
   addDoc, 
   updateDoc, 
   setDoc,
+  getDoc,
   doc, 
   serverTimestamp,
   where,
@@ -360,7 +362,8 @@ export default function Revenue() {
   const handleInitiateWiPay = async (invoice: any) => {
     // 1. Get Merchant Config from enterprise_settings
     const entSnap = await getDoc(doc(db, "enterprise_settings", enterpriseId));
-    const config = entSnap.data()?.billing?.wipay_config;
+    const entData = entSnap.data() as { billing?: { wipay_config?: any } } | undefined;
+    const config = entData?.billing?.wipay_config;
 
     if (!config || !config.account_number || !config.api_key) {
       toast.error("WiPay merchant account not configured. Please visit settings.");
@@ -689,14 +692,37 @@ export default function Revenue() {
   useEffect(() => {
     if (!enterpriseId) return;
 
-    // FIX: Added limit() + orderBy() caps to all listeners.
-    // Previously unbounded — would download ALL records to the browser on every
-    // load, causing OOM crashes and unbounded Firebase read billing at scale.
+    // Helper for one-time reads with sort
+    const fetchAndSet = async (
+      col: string,
+      limitN: number,
+      setter: (docs: any[]) => void,
+      sortFn?: (a: any, b: any) => number
+    ) => {
+      try {
+        const snap = await getDocs(query(collection(db, col), where("enterprise_id", "==", enterpriseId), limit(limitN)));
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        if (sortFn) docs.sort(sortFn);
+        setter(docs);
+      } catch (err) {
+        console.error(`${col} fetch:`, err);
+      }
+    };
+
+    // One-time reads for data that doesn't need real-time on the finance module
+    fetchAndSet("expenses", 500, setExpenses, (a, b) => new Date(b.date || b.timestamp || 0).getTime() - new Date(a.date || a.timestamp || 0).getTime());
+    fetchAndSet("quotes", 300, setQuotes, (a, b) => new Date(b.created_at || b.timestamp || 0).getTime() - new Date(a.created_at || a.timestamp || 0).getTime());
+    fetchAndSet("recurring_billing", 200, setRecurring, (a, b) => new Date(a.next_billing_date || 0).getTime() - new Date(b.next_billing_date || 0).getTime());
+    fetchAndSet("customers", 500, setCustomers);
+    fetchAndSet("products", 500, (docs) => { setProducts(docs); setLoading(false); });
+    fetchAndSet("staff", 200, setStaff);
+    fetchAndSet("bankAccounts", 50, setBankAccounts);
+
+    // Real-time listeners only for core financial data
     const unsubInvoices = onSnapshot(
       query(collection(db, "invoices"), where("enterprise_id", "==", enterpriseId), limit(500)),
       (snapshot) => {
         const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        // Local sort to avoid composite index requirement and assertion errors
         docs.sort((a, b) => new Date(b.due_date || 0).getTime() - new Date(a.due_date || 0).getTime());
         setInvoices(docs);
         setLoading(false);
@@ -705,59 +731,15 @@ export default function Revenue() {
         setLoading(false);
       });
 
-    const unsubExpenses = onSnapshot(
-      query(collection(db, "expenses"), where("enterprise_id", "==", enterpriseId), limit(500)),
-      (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        docs.sort((a, b) => new Date(b.date || b.timestamp || 0).getTime() - new Date(a.date || a.timestamp || 0).getTime());
-        setExpenses(docs);
-      }, (error) => console.error("expenses:", error));
-
-    const unsubQuotes = onSnapshot(
-      query(collection(db, "quotes"), where("enterprise_id", "==", enterpriseId), limit(300)),
-      (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        docs.sort((a, b) => new Date(b.created_at || b.timestamp || 0).getTime() - new Date(a.created_at || a.timestamp || 0).getTime());
-        setQuotes(docs);
-      }, (error) => console.error("quotes:", error));
-
     const unsubPos = onSnapshot(
       query(collection(db, "transactions"), where("enterprise_id", "==", enterpriseId), limit(500)),
       (snapshot) => {
         const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        // Local sort to avoid composite index requirement and assertion errors
         docs.sort((a, b) => new Date(b.timestamp || b.created_at || 0).getTime() - new Date(a.timestamp || a.created_at || 0).getTime());
         setPosTransactions(docs);
       }, (error) => {
         console.error("pos transactions query failed:", error);
       });
-
-    const unsubRecurring = onSnapshot(
-      query(collection(db, "recurring_billing"), where("enterprise_id", "==", enterpriseId), limit(200)),
-      (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
-        docs.sort((a, b) => new Date(a.next_billing_date || 0).getTime() - new Date(b.next_billing_date || 0).getTime());
-        setRecurring(docs);
-      }, (error) => console.error("recurring:", error));
-
-    const unsubCustomers = onSnapshot(
-      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), limit(500)),
-      (snapshot) => {
-        setCustomers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, (error) => console.error("customers:", error));
-
-    const unsubProducts = onSnapshot(
-      query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(500)),
-      (snapshot) => {
-        setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        setLoading(false);
-      }, (error) => console.error("products:", error));
-
-    const unsubStaff = onSnapshot(
-      query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), limit(200)),
-      (snapshot) => {
-        setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, (error) => console.error("staff:", error));
 
     const unsubSessions = onSnapshot(
       query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), limit(500)),
@@ -767,12 +749,6 @@ export default function Revenue() {
         setSessions(docs);
       }, (error) => console.error("sessions:", error));
 
-    const unsubBankAccounts = onSnapshot(
-      query(collection(db, "bankAccounts"), where("enterprise_id", "==", enterpriseId), limit(50)),
-      (snapshot) => {
-        setBankAccounts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      }, (error) => console.error("bankAccounts:", error));
-
     const unsubSummary = onSnapshot(doc(db, "financial_summaries", enterpriseId), (snapshot) => {
       if (snapshot.exists()) {
         setFinancialSummary(snapshot.data());
@@ -781,15 +757,8 @@ export default function Revenue() {
 
     return () => {
       unsubInvoices();
-      unsubExpenses();
-      unsubQuotes();
       unsubPos();
-      unsubRecurring();
-      unsubCustomers();
-      unsubProducts();
-      unsubStaff();
       unsubSessions();
-      unsubBankAccounts();
       unsubSummary();
     };
   }, [enterpriseId]);

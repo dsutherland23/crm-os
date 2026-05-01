@@ -51,19 +51,8 @@ export const db = dbInstance;
 export const functions = functionsInstance;
 export { appInstance as default };
 
-// Proactively clean up any stale Firestore IndexedDB databases left from previous sessions.
-(async () => {
-  try {
-    const dbs = await indexedDB.databases();
-    for (const { name } of dbs) {
-      if (name && name.startsWith('firestore/')) {
-        indexedDB.deleteDatabase(name);
-      }
-    }
-  } catch {
-    // indexedDB.databases() not supported in all browsers
-  }
-})();
+// IndexedDB cleanup removed — deleting Firestore caches on boot destroys
+// offline persistence benefits and forces unnecessary full network re-fetches.
 
 // Toggle this to switch between Live and Mock databases
 const USE_LIVE_DB = true; 
@@ -123,13 +112,28 @@ export const deleteDoc = (ref: any) =>
 export const setDoc = (ref: any, data: any, options?: any) =>
   isMock() ? demoFs.mockUpdateDoc(ref, data) : fs.setDoc(ref, data, options);
 
-import * as storageFs from 'firebase/storage';
-
-// ── STORAGE ENGINE ──────────────────────────────────────────
-export const getStorage = () => storageFs.getStorage(appInstance);
-export const ref = (storage: any, path: string) => storageFs.ref(storage, path);
-export const uploadBytes = (ref: any, data: any, metadata?: any) => storageFs.uploadBytes(ref, data, metadata);
-export const getDownloadURL = (ref: any) => storageFs.getDownloadURL(ref);
+// ── STORAGE ENGINE (lazy-loaded to reduce initial bundle) ───
+let _storageFs: typeof import('firebase/storage') | null = null;
+const loadStorage = async () => {
+  if (!_storageFs) _storageFs = await import('firebase/storage');
+  return _storageFs;
+};
+export const getStorage = async () => {
+  const s = await loadStorage();
+  return s.getStorage(appInstance);
+};
+export const ref = async (storage: any, path: string) => {
+  const s = await loadStorage();
+  return s.ref(storage, path);
+};
+export const uploadBytes = async (refObj: any, data: any, metadata?: any) => {
+  const s = await loadStorage();
+  return s.uploadBytes(refObj, data, metadata);
+};
+export const getDownloadURL = async (refObj: any) => {
+  const s = await loadStorage();
+  return s.getDownloadURL(refObj);
+};
 
 export enum OperationType {
   CREATE = 'create',
