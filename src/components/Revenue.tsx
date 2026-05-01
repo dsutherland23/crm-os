@@ -116,14 +116,10 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PrintableInvoice } from "./PrintableInvoice";
+import { PaymentsTable } from "./revenue/PaymentsTable";
+import { WiPayService } from "@/lib/wipay-service";
 
 export default function Revenue() {
   const { setPendingAction, consumeAction } = usePendingAction();
@@ -172,6 +168,11 @@ export default function Revenue() {
   const [pettyCashReplenishAmount, setPettyCashReplenishAmount] = useState("");
   const [targetInvoiceForCredit, setTargetInvoiceForCredit] = useState<any>(null);
   const [creditNoteData, setCreditNoteData] = useState({ reason: "", amount: 0, isRefund: false });
+
+  // WiPay Integration States
+  const [isWiPayHandoffOpen, setIsWiPayHandoffOpen] = useState(false);
+  const [wiPayStatus, setWiPayStatus] = useState<"IDLE" | "INITIALIZING" | "REDIRECTING" | "ERROR">("IDLE");
+  const [activePaymentInvoice, setActivePaymentInvoice] = useState<any>(null);
 
 
 
@@ -353,6 +354,47 @@ export default function Revenue() {
       toast.error('Failed to issue credit note');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleInitiateWiPay = async (invoice: any) => {
+    // 1. Get Merchant Config from enterprise_settings
+    const entSnap = await getDoc(doc(db, "enterprise_settings", enterpriseId));
+    const config = entSnap.data()?.billing?.wipay_config;
+
+    if (!config || !config.account_number || !config.api_key) {
+      toast.error("WiPay merchant account not configured. Please visit settings.");
+      return;
+    }
+
+    setActivePaymentInvoice(invoice);
+    setIsWiPayHandoffOpen(true);
+    setWiPayStatus("INITIALIZING");
+
+    try {
+      const response = await WiPayService.createPayment({
+        tenantId: enterpriseId,
+        customerId: invoice.customer_id,
+        invoiceId: invoice.id,
+        amount: invoice.total_amount,
+        customerName: invoice.customer_name || "Customer",
+        customerEmail: invoice.customer_email || "",
+        config: config,
+        returnUrl: `${window.location.origin}/settings?tab=billing&payment=success` // Return to billing/settings page
+      });
+
+      if (response.status === "success" && response.url) {
+        setWiPayStatus("REDIRECTING");
+        setTimeout(() => {
+          window.location.href = response.url!;
+        }, 1500);
+      } else {
+        setWiPayStatus("ERROR");
+        toast.error(response.message || "Failed to initialize WiPay");
+      }
+    } catch (err) {
+      setWiPayStatus("ERROR");
+      toast.error("An unexpected error occurred");
     }
   };
 
@@ -1573,6 +1615,7 @@ export default function Revenue() {
               <TabsTrigger value="invoices" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Invoices</TabsTrigger>
               <TabsTrigger value="quotes" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Quotes</TabsTrigger>
               <TabsTrigger value="recurring" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Recurring</TabsTrigger>
+              <TabsTrigger value="payments" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Payments</TabsTrigger>
               <TabsTrigger value="expenses" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Expenses</TabsTrigger>
               <TabsTrigger value="payroll" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm whitespace-nowrap">Payroll & Commissions</TabsTrigger>
               <TabsTrigger value="tax" className="rounded-lg px-6 font-bold text-xs data-[state=active]:bg-white data-[state=active]:shadow-sm">Compliance</TabsTrigger>
@@ -1700,6 +1743,11 @@ export default function Revenue() {
                             }}>
                               <ArrowUpRight className="w-4 h-4" /> Issue Credit Note
                             </DropdownMenuItem>
+                            {inv.status !== 'PAID' && (
+                              <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-blue-600 font-bold" onClick={() => handleInitiateWiPay(inv)}>
+                                <CreditCard className="w-4 h-4" /> Pay via WiPay
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem className="flex items-center gap-2 py-2 cursor-pointer text-rose-600 focus:text-rose-600" onClick={async () => {
                               try {
                                 await updateDoc(doc(db, 'invoices', inv.id), { status: 'VOIDED' });
@@ -1741,6 +1789,10 @@ export default function Revenue() {
               </Table>
             </div>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="payments">
+          <PaymentsTable />
         </TabsContent>
 
         <TabsContent value="quotes" className="space-y-6">
@@ -4026,3 +4078,60 @@ export default function Revenue() {
   );
 }
 
+      {/* WiPay Handoff Dialog */}
+      <Dialog open={isWiPayHandoffOpen} onOpenChange={setIsWiPayHandoffOpen}>
+        <DialogContent className="max-w-md rounded-[2rem] border-zinc-200 p-8">
+          <DialogHeader className="items-center text-center">
+            <div className="w-20 h-20 bg-blue-50 rounded-3xl flex items-center justify-center mb-4 relative overflow-hidden">
+               <div className="absolute inset-0 bg-blue-500/10 animate-pulse" />
+               <CreditCard className="w-10 h-10 text-blue-600 relative z-10" />
+            </div>
+            <DialogTitle className="text-2xl font-black">WiPay Secure Checkout</DialogTitle>
+            <DialogDescription className="text-zinc-500 font-medium">
+              Redirecting you to our secure payment gateway to process your {formatCurrency(activePaymentInvoice?.total_amount || 0)} payment.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-8 flex flex-col items-center gap-4">
+             {wiPayStatus === "INITIALIZING" && (
+               <>
+                 <div className="flex items-center gap-2">
+                   <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                   <span className="text-sm font-bold text-zinc-900">Preparing secure session...</span>
+                 </div>
+                 <div className="w-full h-1.5 bg-zinc-100 rounded-full overflow-hidden">
+                   <div className="h-full bg-blue-600 w-1/3 animate-[loading-bar_2s_infinite]" />
+                 </div>
+               </>
+             )}
+             {wiPayStatus === "REDIRECTING" && (
+               <>
+                 <div className="flex items-center gap-2">
+                   <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                   <span className="text-sm font-bold text-emerald-600">Ready! Handing off to WiPay...</span>
+                 </div>
+                 <div className="w-full h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                   <div className="h-full bg-emerald-500 w-full animate-pulse" />
+                 </div>
+               </>
+             )}
+             {wiPayStatus === "ERROR" && (
+               <div className="text-center space-y-2">
+                 <p className="text-rose-500 font-bold text-sm">Failed to connect to WiPay.</p>
+                 <Button variant="outline" size="sm" onClick={() => setIsWiPayHandoffOpen(false)}>Close</Button>
+               </div>
+             )}
+          </div>
+
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes loading-bar {
+              0% { transform: translateX(-100%); }
+              100% { transform: translateX(300%); }
+            }
+          `}} />
+
+          <DialogFooter className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest justify-center">
+            Locked & Encrypted via AES-256
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>

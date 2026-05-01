@@ -108,8 +108,8 @@ export default function StaffManager() {
 
     const loadingToast = toast.loading(`Provisioning portal access for ${newUser.name}...`);
     try {
-      // Prefix with enterpriseId to prevent cross-enterprise invite collisions
-      const inviteId = `${enterpriseId}_${email.replace(/[^a-z0-9]/g, '_')}`;
+      // Use clean email slug as ID so it's discoverable by Auth module during login
+      const inviteId = email.replace(/[^a-z0-9]/g, '_');
 
       await setDoc(doc(db, "staff_invites", inviteId), {
         fullName: newUser.name,

@@ -102,7 +102,14 @@ function PricingCard() {
         currency: "USD"
       });
 
-      const checkoutUrl = await wipay.getCheckoutUrl({
+      // Step 2: Finalizing
+      await new Promise(r => setTimeout(r, 800));
+      setHandoffStep(2);
+
+      // Step 3: Redirecting
+      await new Promise(r => setTimeout(r, 500));
+      
+      wipay.redirectToCheckout({
         total: billingCycle === "yearly" ? total * 12 : total,
         orderId: `SUB-${enterpriseId || "NEW"}-${Date.now()}`,
         customerName: enterpriseId || "Valued Merchant",
@@ -110,16 +117,9 @@ function PricingCard() {
         returnUrl: window.location.href + "?payment=success",
         responseUrl: "https://us-central1-crm-os.cloudfunctions.net/wipayWebhook",
       });
-
-      // Step 2: Finalizing
-      await new Promise(r => setTimeout(r, 1200));
-      setHandoffStep(2);
-
-      // Step 3: Redirecting
-      await new Promise(r => setTimeout(r, 1000));
-      window.location.href = checkoutUrl;
     } catch (err) {
-      toast.error("Handshake failed. Please try again.");
+      console.error("WiPay Handoff Error:", err);
+      toast.error("Handshake failed. Please check your connection.");
       setIsHandoffOpen(false);
     }
   };
@@ -441,7 +441,7 @@ function PricingCard() {
       </div>
 
       <AnimatePresence>
-        {isChanged && (
+        {(isChanged || selectedPlan === "starter") && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -454,15 +454,17 @@ function PricingCard() {
               className="w-full h-12 bg-zinc-900 text-white rounded-xl font-bold shadow-xl shadow-black/10 hover:bg-zinc-800 transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2 group"
             >
               <HugeiconsIcon icon={CreditCardIcon} size={18} className="group-hover:scale-110 transition-transform" />
-              Upgrade with WiPay
+              Pay with WiPay
             </button>
-            <button
-              onClick={handleUpdate}
-              disabled={isSaving}
-              className="w-full h-10 text-zinc-500 rounded-xl font-bold text-xs uppercase tracking-widest hover:text-zinc-900 transition-all disabled:opacity-50"
-            >
-              Update Config
-            </button>
+            {isChanged && (
+              <button
+                onClick={handleUpdate}
+                disabled={isSaving}
+                className="w-full h-10 text-zinc-500 rounded-xl font-bold text-xs uppercase tracking-widest hover:text-zinc-900 transition-all disabled:opacity-50"
+              >
+                Update Config
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

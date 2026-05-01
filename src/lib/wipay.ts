@@ -35,14 +35,20 @@ export class WiPayService {
   }
 
   /**
-   * Generates the hosted payment URL for the customer to complete payment.
+   * Redirects the user to WiPay using a hidden form POST.
+   * This is the most reliable way to ensure all parameters are received.
    */
-  public async getCheckoutUrl(request: WiPayPaymentRequest): Promise<string> {
+  public redirectToCheckout(request: WiPayPaymentRequest): void {
     const endpoint = TERRITORY_ENDPOINTS[this.config.currency] || TERRITORY_ENDPOINTS.TTD;
     
-    // WiPay expects a POST request or a URL with query params for the hosted gateway.
-    // Most integrations use a direct redirect with form data or query params.
-    const params = new URLSearchParams({
+    const countryCodeMap: Record<string, string> = {
+      TTD: "TT",
+      USD: "TT",
+      JMD: "JM",
+      BBD: "BB"
+    };
+
+    const payload: Record<string, string> = {
       account_number: this.config.accountNumber,
       api_key: this.config.apiKey,
       total: request.total.toFixed(2),
@@ -53,11 +59,31 @@ export class WiPayService {
       return_url: request.returnUrl,
       response_url: request.responseUrl,
       currency: this.config.currency,
+      country_code: countryCodeMap[this.config.currency] || "TT",
+      origin: "OrivoCRM",
       environment: this.config.environment,
-      fee_payer: "merchant", // or 'customer'
-    });
+      fee_structure: "customer_pay",
+      fee_payer: "customer",
+      method: "credit_card",
+      type: "card",
+      avs: "0",
+    };
 
-    return `${endpoint}?${params.toString()}`;
+    // Create a hidden form and submit it
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = endpoint;
+
+    for (const [key, value] of Object.entries(payload)) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = key;
+      input.value = value;
+      form.appendChild(input);
+    }
+
+    document.body.appendChild(form);
+    form.submit();
   }
 
   /**

@@ -274,7 +274,16 @@ export default function Auth() {
     } catch (error: any) {
       const code = error.code;
       if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
-        triggerError({ auth: "Invalid email or password. Please try again." });
+        // Check for staff invite to provide helpful guidance
+        const cleanEmail = email.trim().toLowerCase();
+        const inviteId = cleanEmail.replace(/[^a-z0-9]/g, '_');
+        const inviteSnap = await getDoc(doc(db, "staff_invites", inviteId));
+        
+        if (inviteSnap.exists()) {
+          triggerError({ auth: "Staff account detected. Please use the 'Staff Portal' tab to activate your access." });
+        } else {
+          triggerError({ auth: "Invalid email or password. Please try again." });
+        }
       } else if (code === "auth/too-many-requests") {
         triggerError({ auth: "Too many attempts. Please wait a few minutes." });
       } else {
