@@ -11,6 +11,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.url.includes('firebasestorage.googleapis.com') || 
       e.request.url.includes('firestore.googleapis.com') ||
       e.request.url.includes('identitytoolkit.googleapis.com') ||
+      e.request.url.includes('cloudfunctions.net') ||
       e.request.url.includes('googleapis.com')) {
     return;
   }

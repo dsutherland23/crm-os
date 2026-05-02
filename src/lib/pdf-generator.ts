@@ -4,25 +4,37 @@ import { BrandingConfig } from '@/context/ModuleContext';
 
 interface ReceiptData {
   id: string;
-  type?: 'SALE' | 'PAYMENT';
+  type?: 'SALE' | 'PAYMENT' | 'RETURN';
   customerName: string;
   customerAddress?: string;
   customerPhone?: string;
   customerEmail?: string;
   date: string;
+  cashierName?: string | null;
   paymentMethod?: string;
+  refundMethod?: string | null;
   receipt_id?: string;
   reference_number?: string;
+  originalTransactionId?: string | null;
+  // Financial fields
   items: Array<{
     name: string;
     qty: number;
     price: number;
+    discount?: { type: string; value: number };
   }>;
   subtotal: number;
+  discountAmount?: number;
+  discountName?: string | null;
+  taxRate?: number;
   tax: number;
   total: number;
+  // Balance fields
+  balanceDeducted?: number;
+  netRefundPaid?: number;
   previous_balance?: number;
   new_balance?: number;
+  exchangePolicy?: string;
 }
 
 /**
@@ -63,19 +75,23 @@ export const generateProfessionalReceipt = async (
   const pageHeight = doc.internal.pageSize.height;
   const margin = 20;
 
+  const isReturn = data.type === 'RETURN';
+  const isPayment = data.type === 'PAYMENT';
+  const hasDeduction = (data.balanceDeducted || 0) > 0;
+
   // 1. Branding & Visual Style
-  const primaryColor: [number, number, number] = [15, 23, 42]; // Slate 900 (More Professional)
-  const accentColor: [number, number, number] = [59, 130, 246]; // Orivo Blue
+  const primaryColor: [number, number, number] = isReturn ? [153, 27, 27] : [15, 23, 42]; // Red-800 for returns, Slate-900 for others
+  const accentColor: [number, number, number] = isReturn ? [220, 38, 38] : [59, 130, 246]; // Red-600 or Orivo Blue
   
   // Sidebar Accent
   doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.rect(0, 0, 4, pageHeight, 'F');
 
   // Header Background (Modern Subtle)
-  doc.setFillColor(248, 250, 252);
+  doc.setFillColor(isReturn ? 254 : 248, isReturn ? 242 : 250, isReturn ? 242 : 252); // Soft red background for returns
   doc.rect(4, 0, pageWidth - 4, 40, 'F');
   
-  // Add Company Logo (Better Positioning)
+  // Add Company Logo
   if (branding.logo) {
     const base64Logo = await imageUrlToBase64(branding.logo);
     if (base64Logo) {
@@ -83,33 +99,34 @@ export const generateProfessionalReceipt = async (
     }
   }
 
-  // Company Name & Info (Anchored)
+  // Company Name & Info
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.setFontSize(22);
   doc.setFont('helvetica', 'bold');
   const companyNameX = branding.logo ? margin + 28 : margin;
-  doc.text(branding.name.toUpperCase(), companyNameX, 20);
+  doc.text(branding.name.toUpperCase(), companyNameX, 18);
   
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text((branding as any).tagline || 'OFFICIAL ENTERPRISE PARTNER', companyNameX, 26);
+  doc.text((branding as any).tagline || 'OFFICIAL ENTERPRISE PARTNER', companyNameX, 24);
   
-  // Document Type & Orivo Seal (Right Aligned)
-  doc.setFontSize(36);
-  doc.setTextColor(241, 245, 249);
+  // Document Type Header
+  doc.setFontSize(32);
+  doc.setTextColor(isReturn ? 254 : 241, isReturn ? 226 : 245, isReturn ? 226 : 249);
   doc.setFont('helvetica', 'bold');
-  doc.text(data.type === 'PAYMENT' ? 'RECEIPT' : 'INVOICE', pageWidth - 10, 28, { align: 'right' });
+  const headerText = isReturn ? 'RETURN' : isPayment ? 'RECEIPT' : 'SALE';
+  doc.text(headerText, pageWidth - 10, 28, { align: 'right' });
 
-  // 2. Transaction Details Grid (Balanced Horizontal Alignment)
+  // 2. Transaction Details Grid
   const gridY = 55;
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.text('DOCUMENT INFO', margin, gridY);
-  doc.text('CUSTOMER INFO', pageWidth / 2, gridY);
+  doc.text('DOCUMENT PROTOCOL', margin, gridY);
+  doc.text('RECIPIENT DETAILS', pageWidth / 2, gridY);
   
-  doc.setDrawColor(226, 232, 240);
+  doc.setDrawColor(isReturn ? 252 : 226, isReturn ? 165 : 232, isReturn ? 165 : 240);
   doc.line(margin, gridY + 2, pageWidth - margin, gridY + 2);
 
   doc.setFontSize(9);
@@ -117,11 +134,19 @@ export const generateProfessionalReceipt = async (
   doc.setTextColor(71, 85, 105);
   
   const detailsY = gridY + 8;
-  doc.text(`Ref: ${data.receipt_id || data.id.substring(0, 8)}`, margin, detailsY);
+  doc.text(`Doc ID: #${(data.receipt_id || data.id).substring(0, 12).toUpperCase()}`, margin, detailsY);
   doc.text(`Date: ${data.date}`, margin, detailsY + 5);
-  doc.text(`Method: ${data.paymentMethod || 'CASH'}`, margin, detailsY + 10);
+  doc.text(`Method: ${(isReturn ? data.refundMethod || data.paymentMethod : data.paymentMethod || 'CASH').toUpperCase()}`, margin, detailsY + 10);
+  if (data.cashierName) doc.text(`Cashier: ${data.cashierName.toUpperCase()}`, margin, detailsY + 15);
+  if (isReturn && data.originalTransactionId) {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(accentColor[0], accentColor[1], accentColor[2]);
+    doc.text(`ORIGINAL REF: #${data.originalTransactionId.substring(0, 12).toUpperCase()}`, margin, detailsY + 20);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+  }
 
-  // Customer Details (Precisely Aligned)
+  // Customer Details
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
   doc.setFont('helvetica', 'bold');
   doc.text(data.customerName, pageWidth / 2, detailsY);
@@ -129,10 +154,11 @@ export const generateProfessionalReceipt = async (
   doc.setTextColor(71, 85, 105);
   if (data.customerPhone) doc.text(data.customerPhone, pageWidth / 2, detailsY + 5);
   if (data.customerEmail) doc.text(data.customerEmail, pageWidth / 2, detailsY + 10);
+  if (data.customerAddress) doc.text(data.customerAddress, pageWidth / 2, detailsY + 15);
 
-  // 3. Items Table (Professional Ledger Style)
+  // 3. Items Table
   autoTable(doc, {
-    startY: gridY + 25,
+    startY: gridY + 35,
     margin: { left: margin },
     head: [['DESCRIPTION', 'QTY', 'UNIT PRICE', 'TOTAL']],
     body: data.items.map((item) => {
@@ -142,17 +168,17 @@ export const generateProfessionalReceipt = async (
         item.name,
         qty,
         `$${price.toFixed(2)}`,
-        `$${(qty * price).toFixed(2)}`
+        `${isReturn ? '-' : ''}$${(qty * price).toFixed(2)}`
       ];
     }),
     theme: 'plain',
     headStyles: { 
-      fillColor: [248, 250, 252], 
+      fillColor: isReturn ? [254, 242, 242] : [248, 250, 252], 
       textColor: primaryColor, 
       fontStyle: 'bold', 
       fontSize: 9,
       lineWidth: { bottom: 0.5 },
-      lineColor: [203, 213, 225]
+      lineColor: isReturn ? [252, 165, 165] : [203, 213, 225]
     },
     styles: { fontSize: 9, cellPadding: 5, textColor: [51, 65, 85] },
     columnStyles: {
@@ -161,62 +187,92 @@ export const generateProfessionalReceipt = async (
       2: { halign: 'right', cellWidth: 35 },
       3: { halign: 'right', cellWidth: 35, fontStyle: 'bold' }
     },
-    didDrawPage: (data) => {
-      // Add thin line at the bottom of the table
-      doc.setDrawColor(203, 213, 225);
-      doc.line(margin, (data as any).cursor.y, pageWidth - margin, (data as any).cursor.y);
+    didDrawPage: (dt) => {
+      doc.setDrawColor(isReturn ? 252 : 203, isReturn ? 165 : 213, isReturn ? 165 : 225);
+      doc.line(margin, (dt as any).cursor.y, pageWidth - margin, (dt as any).cursor.y);
     }
   });
 
-  // 4. Financial Summary & Balance (Anchored Right Box)
-  const finalY = (doc as any).lastAutoTable.finalY + 12;
+  // 4. Financial Summary
+  const finalY = (doc as any).lastAutoTable.finalY + 10;
   const summaryX = pageWidth - margin - 50;
 
-  // Background for Totals (Subtle)
-  doc.setFillColor(248, 250, 252);
-  doc.rect(summaryX - 5, finalY - 8, 55, 18, 'F');
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  
+  // Financial Rows
+  const rows = [
+    { label: 'SUBTOTAL:', value: `$${(Number(data.subtotal) || Number(data.total) || 0).toFixed(2)}` },
+    data.discountAmount ? { label: `DISCOUNT (${data.discountName || 'Applied'}):`, value: `-$${data.discountAmount.toFixed(2)}`, color: [21, 128, 61] } : null,
+    data.taxRate ? { label: `TAX (${data.taxRate}%):`, value: `$${(data.tax || 0).toFixed(2)}` } : null
+  ].filter(Boolean) as any[];
 
+  rows.forEach((row, idx) => {
+    const y = finalY + (idx * 5);
+    doc.setTextColor(row.color ? row.color[0] : 100, row.color ? row.color[1] : 116, row.color ? row.color[2] : 139);
+    doc.text(row.label, summaryX, y);
+    doc.text(row.value, pageWidth - margin, y, { align: 'right' });
+  });
+
+  const totalY = finalY + (rows.length * 5) + 4;
+  doc.setFillColor(isReturn ? 254 : 248, isReturn ? 242 : 250, isReturn ? 242 : 252);
+  doc.rect(summaryX - 5, totalY - 4, 55, 8, 'F');
+  
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-  doc.text('TOTAL AMOUNT:', summaryX, finalY + 2);
-  doc.setFontSize(12);
-  doc.text(`$${(Number(data.total) || 0).toFixed(2)}`, pageWidth - margin, finalY + 2, { align: 'right' });
+  doc.text(isReturn ? 'GROSS REFUND:' : 'TOTAL AMOUNT:', summaryX, totalY + 1.5);
+  doc.setFontSize(11);
+  doc.text(`${isReturn ? '-' : ''}$${(Number(data.total) || 0).toFixed(2)}`, pageWidth - margin, totalY + 1.5, { align: 'right' });
 
-  // Balance History Box (Modern Card Style)
-  if (data.type === 'PAYMENT' && data.previous_balance !== undefined) {
-    const balanceY = finalY + 25;
-    doc.setDrawColor(241, 245, 249);
+  // 5. Account Settlement Summary (Specific for Payments or Returns with deductions)
+  if ((isPayment || (isReturn && hasDeduction)) && data.new_balance !== undefined) {
+    const settlementY = totalY + 15;
+    const boxHeight = (isReturn && hasDeduction) ? 38 : 32;
+    
+    doc.setDrawColor(isReturn ? 252 : 241, isReturn ? 165 : 245, isReturn ? 165 : 249);
     doc.setFillColor(255, 255, 255);
-    doc.roundedRect(margin, balanceY - 5, 85, 32, 2, 2, 'FD');
+    doc.roundedRect(margin, settlementY - 5, 90, boxHeight, 2, 2, 'FD');
     
     doc.setFontSize(9);
     doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-    doc.text('ACCOUNT SETTLEMENT SUMMARY', margin + 5, balanceY + 2);
+    doc.text(isReturn ? 'REFUND ACCOUNT SETTLEMENT' : 'ACCOUNT SETTLEMENT SUMMARY', margin + 5, settlementY + 2);
     
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(100, 116, 139);
-    doc.text(`Previous Balance:`, margin + 5, balanceY + 10);
-    doc.text(`Payment Applied:`, margin + 5, balanceY + 16);
     
-    doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-    doc.text(`$${(Number(data.previous_balance) || 0).toFixed(2)}`, margin + 80, balanceY + 10, { align: 'right' });
-    doc.text(`-$${(Number(data.total) || 0).toFixed(2)}`, margin + 80, balanceY + 16, { align: 'right' });
-    
-    doc.setFont('helvetica', 'bold');
-    if ((Number(data.new_balance) || 0) > 0) {
-      doc.setTextColor(185, 28, 28);
+    if (isReturn && hasDeduction) {
+      doc.text(`Gross Refund Amount:`, margin + 5, settlementY + 10);
+      doc.text(`Account Balance Deducted:`, margin + 5, settlementY + 16);
+      doc.text(`Net Payout to Customer:`, margin + 5, settlementY + 22);
+      
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(`-$${(Number(data.total) || 0).toFixed(2)}`, margin + 85, settlementY + 10, { align: 'right' });
+      doc.text(`+$${(Number(data.balanceDeducted) || 0).toFixed(2)}`, margin + 85, settlementY + 16, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.text(`-$${(Number(data.netRefundPaid) || 0).toFixed(2)}`, margin + 85, settlementY + 22, { align: 'right' });
+      
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(`NEW ACCOUNT BALANCE:`, margin + 5, settlementY + 30);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(`$${(Number(data.new_balance) || 0).toFixed(2)}`, margin + 85, settlementY + 30, { align: 'right' });
     } else {
-      doc.setTextColor(21, 128, 61);
+      doc.text(`Previous Balance:`, margin + 5, settlementY + 10);
+      doc.text(`Payment Applied:`, margin + 5, settlementY + 16);
+      doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+      doc.text(`$${(Number(data.previous_balance) || 0).toFixed(2)}`, margin + 85, settlementY + 10, { align: 'right' });
+      doc.text(`-$${(Number(data.total) || 0).toFixed(2)}`, margin + 85, settlementY + 16, { align: 'right' });
+      doc.setFont('helvetica', 'bold');
+      doc.text(`NEW BALANCE DUE:`, margin + 5, settlementY + 24);
+      doc.text(`$${(Number(data.new_balance) || 0).toFixed(2)}`, margin + 85, settlementY + 24, { align: 'right' });
     }
-    doc.text(`NEW BALANCE DUE:`, margin + 5, balanceY + 22);
-    doc.text(`$${(Number(data.new_balance) || 0).toFixed(2)}`, margin + 80, balanceY + 22, { align: 'right' });
   }
 
-  // 5. Orivo Branding & Footer (Perfect Alignment)
+  // 6. Footer & Legal
   const footerY = pageHeight - 15;
-  
-  // Powered by Orivo (Sleek Horizontal)
   doc.setTextColor(148, 163, 184);
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
@@ -228,22 +284,19 @@ export const generateProfessionalReceipt = async (
   doc.setTextColor(100, 116, 139);
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.text('EXCHANGE POLICY: All sales are final. Exchanges only within 7 days for unopened/undamaged items.', margin, footerY + 5);
+  doc.text(data.exchangePolicy || 'EXCHANGE POLICY: All sales are final. Exchanges only within 7 days for unopened items.', margin, footerY + 5);
   
   doc.setTextColor(148, 163, 184);
   doc.setFontSize(6);
   doc.setFont('helvetica', 'normal');
-  doc.text('CERTIFIED ENTERPRISE MANAGEMENT SYSTEM V2026', margin, footerY + 9);
+  doc.text('CERTIFIED AUDIT-COMPLIANT ENTERPRISE MANAGEMENT SYSTEM V2.6', margin, footerY + 9);
 
-  // Security QR Code (Sized to Balance)
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent('https://orivocrm.pro/verify/' + data.id)}`;
+  // Security QR Code
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(window.location.origin + '/verify/' + data.id)}`;
   doc.addImage(qrUrl, 'PNG', pageWidth - margin - 15, footerY - 12, 15, 15);
 
-  if (mode === 'blob') {
-    return doc.output('datauristring');
-  }
-
-  doc.save(`${data.type === 'PAYMENT' ? 'Receipt' : 'Invoice'}_${data.receipt_id || data.id.substring(0, 8)}.pdf`);
+  if (mode === 'blob') return doc.output('datauristring');
+  doc.save(`${isReturn ? 'Return' : isPayment ? 'Receipt' : 'Invoice'}_${(data.receipt_id || data.id).substring(0, 12).toUpperCase()}.pdf`);
 };
 
 

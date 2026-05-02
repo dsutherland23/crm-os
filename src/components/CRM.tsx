@@ -45,7 +45,8 @@ import {
   ChevronDown,
   Printer,
   Smartphone,
-  ExternalLink
+  ExternalLink,
+  ShoppingCart
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -206,26 +207,45 @@ export default function CRM() {
   }, [isDocumentHubOpen, documentHubTx, branding, enterpriseId]);
 
   const handleOpenDocumentHub = (tx: any) => {
+    const txDate = tx.timestamp?.toDate ? tx.timestamp.toDate() : new Date(tx.timestamp || 0);
     setDocumentHubTx({
       id: tx.id,
       type: tx.type || "SALE",
-      customerName: selectedCustomer?.name || tx.customerName || "Guest",
+      status: tx.status || "COMPLETED",
+      customerName: selectedCustomer?.name || tx.customerName || tx.customer_name || "Guest",
       customerAddress: selectedCustomer?.address || "",
       customerPhone: selectedCustomer?.phone || "",
       customerEmail: selectedCustomer?.email || "",
-      date: tx.timestamp?.toDate ? tx.timestamp.toDate().toLocaleString() : new Date(tx.timestamp || 0).toLocaleString(),
+      date: txDate.toLocaleString("en-US", {
+        weekday: "long", year: "numeric", month: "long",
+        day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit"
+      }),
+      dateShort: txDate.toLocaleString(),
+      cashierName: tx.cashier_name || tx.cashierName || null,
       paymentMethod: tx.payment_method || tx.paymentMethod || "CASH",
+      refundMethod: tx.refund_method || tx.refundMethod || tx.payment_method || null,
       receipt_id: tx.receipt_id,
       reference_number: tx.reference_number,
-      exchangePolicy: "EXCHANGE POLICY: All sales are final. We offer exchanges only within 7 days of purchase for items that are unopened, undamaged, and in original packaging. No cash refunds.",
+      originalTransactionId: tx.original_transaction_id || null,
+      // Balance deduction fields
+      balanceDeducted: Number(tx.balance_deducted_from_refund) || 0,
+      netRefundPaid: Number(tx.net_refund_paid) || 0,
+      // Financial breakdown
+      exchangePolicy: "EXCHANGE POLICY: All sales are final. We offer exchanges only within 7 days of purchase for items in original, unopened packaging. No cash refunds after 7 days.",
       items: (tx.items || []).map((item: any) => ({
         ...item,
-        qty: Number(item.qty) || 1,
+        qty: Number(item.qty || item.quantity) || 1,
         price: Number(item.price) || 0
       })),
       subtotal: Number(tx.subtotal) || Number(tx.total) || 0,
+      discountAmount: Number(tx.discount_amount) || 0,
+      discountName: tx.discount?.name || null,
+      taxRate: Number(tx.tax_rate) || 0,
       tax: Number(tx.tax) || 0,
       total: Number(tx.total) || 0,
+      tendered: Number(tx.tendered_amount) || 0,
+      change: Number(tx.change_due) || 0,
+      balanceDue: Number(tx.balance_due) || 0,
       previous_balance: tx.previous_balance !== undefined ? Number(tx.previous_balance) : undefined,
       new_balance: tx.new_balance !== undefined ? Number(tx.new_balance) : undefined
     });
@@ -245,141 +265,122 @@ export default function CRM() {
 
   const handlePrintThermal = () => {
     if (!documentHubTx) return;
-
-    // Create a hidden iframe for isolated printing
     const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = 'none';
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:none;';
     document.body.appendChild(iframe);
 
+    const tx = documentHubTx;
+    const isReturn = tx.type === 'RETURN';
+    const isPayment = tx.type === 'PAYMENT';
+    const hasDeduction = (tx.balanceDeducted || 0) > 0;
     const canvasWidth = thermalSize === '80mm' ? '72mm' : '50mm';
     const paperSize = thermalSize === '80mm' ? '80mm auto' : '58mm auto';
-    const fontSize = thermalSize === '80mm' ? '12px' : '10px';
-    const headerSize = thermalSize === '80mm' ? '22px' : '18px';
-    const boxPadding = thermalSize === '80mm' ? '12px' : '8px';
+    const fs = thermalSize === '80mm' ? '12px' : '10px';
+    const fsSmall = thermalSize === '80mm' ? '10px' : '9px';
+    const headerSize = thermalSize === '80mm' ? '20px' : '16px';
+    const boxPadding = thermalSize === '80mm' ? '10px' : '7px';
 
-    const itemsHtml = (documentHubTx.items || []).map((item: any) => `
-      <div style="margin-bottom: 8px; font-size: ${fontSize};">
-        <div style="display: flex; justify-content: space-between; font-weight: bold;">
-          <span style="text-transform: uppercase;">${item.name}</span>
-          <span>${formatCurrency(Number(item.qty) * Number(item.price)).replace('$', '')}</span>
-        </div>
-        <div style="font-size: ${thermalSize === '80mm' ? '10px' : '9px'}; color: #666;">
-          ${item.qty} x ${formatCurrency(item.price).replace('$', '')}
-        </div>
+    const receiptLabel = isReturn ? 'RETURN RECEIPT' : isPayment ? 'PAYMENT RECEIPT' : 'SALES RECEIPT';
+
+    const itemsHtml = (tx.items || []).map((item: any) => {
+      const qty = Number(item.qty || item.quantity) || 1;
+      const price = Number(item.price) || 0;
+      const hasDisc = item.discount && item.discount.value > 0;
+      const discLabel = hasDisc
+        ? ` (-${item.discount.type === 'Percentage' ? item.discount.value + '%' : formatCurrency(item.discount.value)})`
+        : '';
+      return `
+        <div style="margin-bottom:8px;font-size:${fs};">
+          <div style="display:flex;justify-content:space-between;font-weight:bold;">
+            <span style="text-transform:uppercase;max-width:60%;overflow:hidden;">${item.name}</span>
+            <span>${formatCurrency(qty * price).replace('$', '')}</span>
+          </div>
+          <div style="font-size:${fsSmall};color:#666;">${qty} × ${formatCurrency(price).replace('$', '')}${discLabel}</div>
+        </div>`;
+    }).join('');
+
+    // Financial rows
+    const subtotal = tx.subtotal || tx.total || 0;
+    const discRow = tx.discountAmount > 0
+      ? `<div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>DISCOUNT${tx.discountName ? ` (${tx.discountName})` : ''}:</span><span>-${formatCurrency(tx.discountAmount).replace('$','')}</span></div>`
+      : '';
+    const taxRow = `<div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>TAX${tx.taxRate > 0 ? ` (${tx.taxRate}%)` : ''}:</span><span>${formatCurrency(tx.tax || 0).replace('$','')}</span></div>`;
+
+    // Balance deduction block for returns
+    const deductionBlock = isReturn && hasDeduction ? `
+      <div class="divider"></div>
+      <div style="font-size:${fsSmall};font-weight:bold;text-transform:uppercase;margin-bottom:3px;">Account Settlement</div>
+      <div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>GROSS REFUND:</span><span>${formatCurrency(tx.total).replace('$','')}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>BAL DEDUCTED:</span><span>-${formatCurrency(tx.balanceDeducted).replace('$','')}</span></div>
+      <div class="divider"></div>
+      <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:${thermalSize === '80mm' ? '15px' : '13px'};"><span>NET PAYOUT:</span><span>${formatCurrency(tx.netRefundPaid).replace('$','')}</span></div>
+    ` : '';
+
+    // Tendered/change for sales
+    const tenderedBlock = !isReturn && tx.tendered > 0 ? `
+      <div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>TENDERED:</span><span>${formatCurrency(tx.tendered).replace('$','')}</span></div>
+      ${tx.change > 0 ? `<div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>CHANGE:</span><span>${formatCurrency(tx.change).replace('$','')}</span></div>` : ''}
+    ` : '';
+
+    // Original sale ref for returns
+    const origRefBlock = isReturn && tx.originalTransactionId
+      ? `<div style="font-size:${fsSmall};margin-top:4px;">ORIG SALE REF: #${tx.originalTransactionId.substring(0,12).toUpperCase()}</div>`
+      : '';
+
+    const cashierBlock = tx.cashierName
+      ? `<div style="font-size:${fsSmall};margin-top:2px;">CASHIER: ${tx.cashierName.toUpperCase()}</div>`
+      : '';
+
+    const html = `<html><head><style>
+      @page{margin:0;size:${paperSize};}
+      body{width:${canvasWidth};margin:0 auto;padding:5mm 0;font-family:'Courier New',monospace;color:black;background:white;line-height:1.3;}
+      .center{text-align:center;}.bold{font-weight:bold;}
+      .divider{border-top:1px dashed black;margin:7px 0;}
+      .black-box{background:black;color:white;padding:${boxPadding};text-align:center;font-weight:bold;margin:12px 0;font-size:9px;letter-spacing:1px;word-break:break-all;}
+      .return-box{background:#222;color:white;padding:4px 8px;text-align:center;font-size:9px;font-weight:bold;letter-spacing:2px;margin-bottom:6px;}
+      .legal{font-size:7px;text-align:center;margin-top:8px;font-style:italic;color:#444;line-height:1.3;}
+    </style></head><body>
+      <div class="center">
+        <h1 style="margin:0;font-size:${headerSize};font-weight:bold;text-transform:uppercase;">${branding.name}</h1>
+        <p style="margin:4px 0;font-size:9px;">${branding.address || ''}<br/>${branding.phone || ''}</p>
+        <div class="divider"></div>
+        ${isReturn ? '<div class="return-box">★ RETURN RECEIPT ★</div>' : ''}
+        <p class="bold" style="margin:4px 0;font-size:13px;">${receiptLabel}</p>
+        <p style="margin:0;font-size:10px;">#${(tx.receipt_id || tx.id).substring(0,12).toUpperCase()}</p>
+        <p style="margin:2px 0;font-size:9px;">${tx.date}</p>
+        ${cashierBlock}
+        ${origRefBlock}
+        <div class="divider"></div>
       </div>
-    `).join('');
 
-    const html = `
-      <html>
-        <head>
-          <style>
-            @page { margin: 0; size: ${paperSize}; }
-            body { 
-              width: ${canvasWidth}; 
-              margin: 0 auto; 
-              padding: 5mm 0; 
-              font-family: 'Courier New', Courier, monospace; 
-              color: black;
-              background: white;
-              line-height: 1.2;
-            }
-            .center { text-align: center; }
-            .bold { font-weight: bold; }
-            .divider { border-top: 1px dashed black; margin: 8px 0; }
-            .uppercase { text-transform: uppercase; }
-            .black-box { 
-              background: black; 
-              color: white; 
-              padding: ${boxPadding}; 
-              text-align: center; 
-              font-weight: bold; 
-              margin: 15px 0;
-              font-size: 10px;
-              letter-spacing: 1px;
-            }
-            .legal { 
-              font-size: 8px; 
-              text-align: center; 
-              margin-top: 10px; 
-              font-style: italic;
-              color: #444;
-              line-height: 1.3;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="center">
-            <h1 style="margin: 0; font-size: ${headerSize}; font-weight: bold;" class="uppercase">${branding.name}</h1>
-            <p style="margin: 5px 0; font-size: 10px;">
-              ${branding.address || ''}<br/>
-              ${branding.phone || ''}
-            </p>
-            <div class="divider"></div>
-            <p class="bold" style="margin: 5px 0; font-size: 13px;">SALES RECEIPT</p>
-            <p style="margin: 0; font-size: 11px;">#${documentHubTx.receipt_id || documentHubTx.id.substring(0, 8)}</p>
-            <p style="margin: 0; font-size: 11px;">${documentHubTx.date}</p>
-            <div class="divider"></div>
-          </div>
+      <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:${fs};margin-bottom:4px;"><span>ITEM</span><span>TOTAL</span></div>
+      <div class="divider"></div>
+      <div style="margin-bottom:8px;">${itemsHtml}</div>
+      <div class="divider"></div>
 
-          <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: ${fontSize}; margin-bottom: 5px;">
-            <span>Item</span>
-            <span>Total</span>
-          </div>
-          <div class="divider"></div>
+      <div style="font-size:${fs};line-height:1.6;">
+        <div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>SUBTOTAL:</span><span>${formatCurrency(subtotal).replace('$','')}</span></div>
+        ${discRow}${taxRow}
+        <div class="divider"></div>
+        <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:${thermalSize==='80mm'?'15px':'13px'};"><span>${isReturn?'GROSS REFUND':'TOTAL'}:</span><span>${formatCurrency(tx.total).replace('$','')}</span></div>
+        ${tenderedBlock}
+        <div style="display:flex;justify-content:space-between;font-size:${fsSmall};"><span>METHOD:</span><span>${(isReturn ? tx.refundMethod || tx.paymentMethod : tx.paymentMethod)||'—'}</span></div>
+      </div>
 
-          <div style="margin-bottom: 10px;">
-            ${itemsHtml}
-          </div>
+      ${deductionBlock}
+      <div class="divider"></div>
 
-          <div class="divider"></div>
-          
-          <div style="font-size: ${fontSize}; line-height: 1.5;">
-            <div style="display: flex; justify-content: space-between; font-weight: bold;">
-              <span>SUBTOTAL:</span>
-              <span>${formatCurrency(documentHubTx.subtotal || documentHubTx.total).replace('$', '')}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-              <span>TAX:</span>
-              <span>${formatCurrency(documentHubTx.tax || 0).replace('$', '')}</span>
-            </div>
-            <div class="divider"></div>
-            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: ${thermalSize === '80mm' ? '16px' : '14px'};">
-              <span>TOTAL:</span>
-              <span>${formatCurrency(documentHubTx.total).replace('$', '')}</span>
-            </div>
-          </div>
-
-          <div class="divider"></div>
-
-          <div class="center">
-            <p class="bold" style="margin: 10px 0 5px 0; font-size: 10px;">THANK YOU!</p>
-            <div class="legal">
-              ${documentHubTx.exchangePolicy}
-            </div>
-            
-            <div class="black-box">
-              ${(documentHubTx.receipt_id || documentHubTx.id.substring(0, 10)).toUpperCase()}
-            </div>
-
-            <p style="font-size: 8px; color: #999;">
-              OrivoCRM.pro System v2026
-            </p>
-          </div>
-        </body>
-      </html>
-    `;
+      <div class="center">
+        <p class="bold" style="margin:8px 0 4px;font-size:10px;">${isReturn ? 'RETURN PROCESSED — THANK YOU' : 'THANK YOU FOR YOUR BUSINESS!'}</p>
+        <div class="legal">${tx.exchangePolicy}</div>
+        <div class="black-box">${tx.id.toUpperCase()}</div>
+        <p style="font-size:7px;color:#999;">OrivoCRM.pro · ${new Date().getFullYear()}</p>
+      </div>
+    </body></html>`;
 
     const doc = iframe.contentWindow?.document;
     if (doc) {
-      doc.open();
-      doc.write(html);
-      doc.close();
-
+      doc.open(); doc.write(html); doc.close();
       setTimeout(() => {
         iframe.contentWindow?.focus();
         iframe.contentWindow?.print();
@@ -394,55 +395,53 @@ export default function CRM() {
       toast.error("Customer phone number missing");
       return;
     }
+    const tx = documentHubTx;
+    const isReturn = tx.type === 'RETURN';
+    const isPayment = tx.type === 'PAYMENT';
+    const hasDeduction = (tx.balanceDeducted || 0) > 0;
+    const refVal = tx.receipt_id || tx.id.substring(0, 8);
+    const phone = tx.customerPhone.replace(/\D/g, '');
+    const bName = branding.name || "CRM";
 
-    // Context-Aware Message Templates
-    const isPayment = documentHubTx.type === 'PAYMENT';
-    const docType = isPayment ? 'Receipt' : 'Invoice';
-    const amount = formatCurrency(documentHubTx.total);
-    const refVal = documentHubTx.receipt_id || documentHubTx.id.substring(0, 8);
-    const phone = documentHubTx.customerPhone.replace(/\D/g, '');
-    
-    const bName = branding.name || enterpriseId || "ORIVO CRM";
-    let message = `*OFFICIAL ${docType.toUpperCase()} FROM ${bName.toUpperCase()}*\n\n` +
-      `Hello ${documentHubTx.customerName},\n\n` +
-      (isPayment 
-        ? `We have received your payment of *${amount}* and it has been successfully applied to your account.\n`
-        : `Thank you for your purchase! Your total invoice amount is *${amount}*.\n`) +
-      `\n*Date:* ${documentHubTx.date}\n` +
-      `*Reference:* ${refVal}\n`;
+    let message = `*${isReturn ? '↩ RETURN RECEIPT' : isPayment ? 'PAYMENT RECEIPT' : 'OFFICIAL RECEIPT'} — ${bName.toUpperCase()}*\n\n`;
+    message += `Hello ${tx.customerName},\n\n`;
 
-    if (documentHubTx.new_balance !== undefined) {
-      message += `*Current Balance:* ${formatCurrency(documentHubTx.new_balance)}\n`;
+    if (isReturn) {
+      message += `A *return transaction* has been processed on your account.\n`;
+      message += `*Gross Refund:* ${formatCurrency(tx.total)}\n`;
+      if (hasDeduction) {
+        message += `*Balance Deducted:* ${formatCurrency(tx.balanceDeducted)} _(applied to outstanding balance)_\n`;
+        message += `*Net Payout to You:* ${formatCurrency(tx.netRefundPaid)}\n`;
+      }
+      if (tx.originalTransactionId) {
+        message += `*Original Sale Ref:* #${tx.originalTransactionId.substring(0,12).toUpperCase()}\n`;
+      }
+    } else if (isPayment) {
+      message += `Your payment of *${formatCurrency(tx.total)}* has been received and applied to your account.\n`;
+    } else {
+      message += `Thank you for your purchase! Your total is *${formatCurrency(tx.total)}*.\n`;
     }
 
-    message += `\n_You can view your digital record here:_ ${window.location.origin}/verify/${documentHubTx.id}\n\n` +
-      `Thank you for choosing ${branding.name}!`;
+    message += `\n*Date:* ${tx.date}\n*Ref:* ${refVal}\n`;
+    if (tx.cashierName) message += `*Processed By:* ${tx.cashierName}\n`;
+    if (tx.new_balance !== undefined) message += `*Account Balance:* ${formatCurrency(tx.new_balance)}\n`;
+    message += `\n_Digital record:_ ${window.location.origin}/verify/${tx.id}\n\nThank you for choosing ${branding.name}!`;
 
     const toastId = toast.loading("Queueing WhatsApp delivery...");
     try {
       const commRef = await addDoc(collection(db, "communications"), {
         enterprise_id: enterpriseId,
         customer_id: selectedCustomer?.id || null,
-        customer_name: documentHubTx.customerName,
-        type: "WHATSAPP",
-        status: "PENDING",
+        customer_name: tx.customerName,
+        type: "WHATSAPP", status: "PENDING",
         content: message,
-        transaction_id: documentHubTx.id,
+        transaction_id: tx.id,
         recipient: phone,
         timestamp: serverTimestamp(),
         sender_id: auth.currentUser?.uid,
         sender_name: auth.currentUser?.email || posSession?.staffName || "System"
       });
-
-      await recordAuditLog({
-        enterpriseId,
-        action: "WhatsApp Share Queued",
-        details: `Receipt/Invoice ${refVal} queued for WhatsApp delivery to ${phone}`,
-        severity: "INFO",
-        type: "CRM",
-        metadata: { communication_id: commRef.id, txId: documentHubTx.id }
-      });
-
+      await recordAuditLog({ enterpriseId, action: "WhatsApp Share Queued", details: `Receipt ${refVal} queued for WhatsApp`, severity: "INFO", type: "CRM", metadata: { communication_id: commRef.id, txId: tx.id } });
       toast.success("Document queued for WhatsApp delivery", { id: toastId });
       window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
     } catch (error) {
@@ -453,46 +452,48 @@ export default function CRM() {
 
   const handleShareEmail = async () => {
     if (!documentHubTx) return;
-    const isPayment = documentHubTx.type === 'PAYMENT';
-    const docType = isPayment ? 'Receipt' : 'Invoice';
-    const refVal = documentHubTx.receipt_id || documentHubTx.id.substring(0, 8);
-    const email = documentHubTx.customerEmail || '';
-    
+    const tx = documentHubTx;
+    const isReturn = tx.type === 'RETURN';
+    const isPayment = tx.type === 'PAYMENT';
+    const hasDeduction = (tx.balanceDeducted || 0) > 0;
+    const refVal = tx.receipt_id || tx.id.substring(0, 8);
+    const email = tx.customerEmail || '';
+    const docType = isReturn ? 'Return Receipt' : isPayment ? 'Payment Receipt' : 'Receipt';
     const subject = `${docType} #${refVal} from ${branding.name}`;
-    const body = `Hello ${documentHubTx.customerName},\n\n` +
-      `Please find the details of your official ${docType.toLowerCase()} below:\n\n` +
-      `Transaction ID: ${refVal}\n` +
-      `Date: ${documentHubTx.date}\n` +
-      `Amount: ${formatCurrency(documentHubTx.total)}\n` +
-      (documentHubTx.new_balance !== undefined ? `Current Account Balance: ${formatCurrency(documentHubTx.new_balance)}\n` : '') +
-      `\nThank you for your business!\n\n--\n${branding.name}\n${branding.tagline || ''}`;
+
+    let body = `Hello ${tx.customerName},\n\n`;
+    if (isReturn) {
+      body += `A return transaction has been processed on your account.\n\n`;
+      body += `Gross Refund: ${formatCurrency(tx.total)}\n`;
+      if (hasDeduction) {
+        body += `Balance Deducted: ${formatCurrency(tx.balanceDeducted)} (applied to outstanding account balance)\n`;
+        body += `Net Payout: ${formatCurrency(tx.netRefundPaid)}\n`;
+      }
+      if (tx.originalTransactionId) body += `Original Sale Ref: #${tx.originalTransactionId.substring(0,12).toUpperCase()}\n`;
+    } else {
+      body += `Please find the details of your ${docType.toLowerCase()} below.\n\n`;
+      body += `Amount: ${formatCurrency(tx.total)}\n`;
+    }
+    body += `Date: ${tx.date}\nTransaction ID: ${refVal}\n`;
+    if (tx.cashierName) body += `Processed By: ${tx.cashierName}\n`;
+    if (tx.new_balance !== undefined) body += `Account Balance: ${formatCurrency(tx.new_balance)}\n`;
+    body += `\nThank you for your business!\n\n--\n${branding.name}\n${branding.tagline || ''}`;
 
     const toastId = toast.loading("Queueing Email delivery...");
     try {
       const commRef = await addDoc(collection(db, "communications"), {
         enterprise_id: enterpriseId,
         customer_id: selectedCustomer?.id || null,
-        customer_name: documentHubTx.customerName,
-        type: "EMAIL",
-        status: "PENDING",
-        content: body,
-        subject: subject,
-        transaction_id: documentHubTx.id,
+        customer_name: tx.customerName,
+        type: "EMAIL", status: "PENDING",
+        content: body, subject,
+        transaction_id: tx.id,
         recipient: email,
         timestamp: serverTimestamp(),
         sender_id: auth.currentUser?.uid,
         sender_name: auth.currentUser?.email || posSession?.staffName || "System"
       });
-
-      await recordAuditLog({
-        enterpriseId,
-        action: "Email Share Queued",
-        details: `Receipt/Invoice ${refVal} queued for Email delivery to ${email}`,
-        severity: "INFO",
-        type: "CRM",
-        metadata: { communication_id: commRef.id, txId: documentHubTx.id }
-      });
-
+      await recordAuditLog({ enterpriseId, action: "Email Share Queued", details: `Receipt ${refVal} queued for Email`, severity: "INFO", type: "CRM", metadata: { communication_id: commRef.id, txId: tx.id } });
       toast.success("Document queued for Email delivery", { id: toastId });
       window.open(`mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`);
     } catch (error) {
@@ -2592,107 +2593,155 @@ export default function CRM() {
                             </div>
                           </TableCell>
                         </TableRow>
-                      )}
+)}
                     </TableBody>
                   </Table>
                 </CardContent>
               </Card>
             </TabsContent>
-
             <TabsContent value="transactions">
               <Card className="card-modern overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-zinc-50/50 hover:bg-zinc-50/50 border-b border-zinc-100">
-                      <TableHead className="font-bold text-zinc-900 py-4">Order ID</TableHead>
-                      <TableHead className="font-bold text-zinc-900 py-4">Total Amount</TableHead>
-                      <TableHead className="font-bold text-zinc-900 py-4">Date</TableHead>
-                      <TableHead className="font-bold text-zinc-900 py-4 flex items-center justify-between">
-                        Payment
-                        <Button variant="ghost" size="sm" className="h-8 text-[10px] font-bold text-blue-600 hover:bg-blue-50" onClick={() => handlePrintReport("Purchase History")}>
-                           <FileText className="w-3.5 h-3.5 mr-1" /> Export History
-                        </Button>
-                      </TableHead>
-                      <TableHead className="text-right font-bold text-zinc-900 py-4">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {customerTransactions.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="py-12 text-center text-zinc-400">
-                          No transactions found for this customer.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      customerTransactions.map((tx) => (
-                        <TableRow key={tx.id} className="hover:bg-zinc-50 transition-colors border-b border-zinc-50 cursor-pointer group" onClick={() => { setSelectedTransaction(tx); setIsTransactionDialogOpen(true); }}>
-                          <TableCell className="py-4">
-                            <div className="flex items-center gap-3">
-                              <div className={cn("w-10 h-10 rounded-xl flex items-center justify-center transition-transform group-hover:scale-105", tx.type === "PAYMENT" ? "bg-emerald-50" : "bg-zinc-100")}>
-                                {tx.type === "PAYMENT" ? (
-                                  <Banknote className="w-5 h-5 text-emerald-600" />
-                                ) : (
-                                  <History className="w-5 h-5 text-zinc-400" />
+                <div className="p-6 border-b border-zinc-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-black text-zinc-900">Transaction Ledger</h3>
+                    <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest mt-0.5">
+                      {customerTransactions.length} record{customerTransactions.length !== 1 ? "s" : ""} • Full audit trail
+                    </p>
+                  </div>
+                  <Button variant="ghost" size="sm" className="h-8 text-[10px] font-bold text-blue-600 hover:bg-blue-50" onClick={() => handlePrintReport("Purchase History")}>
+                    <FileText className="w-3.5 h-3.5 mr-1" /> Export
+                  </Button>
+                </div>
+                {customerTransactions.length === 0 ? (
+                  <div className="py-16 text-center space-y-3">
+                    <History className="w-10 h-10 text-zinc-200 mx-auto" />
+                    <p className="text-zinc-400 text-sm font-bold">No transactions on record</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-zinc-50">
+                    {customerTransactions.map((tx) => {
+                      const isReturn = tx.type === "RETURN";
+                      const isPayment = tx.type === "PAYMENT";
+                      const isPartial = tx.status === "PARTIAL";
+                      const hasDeduction = (tx.balance_deducted_from_refund || 0) > 0;
+                      const txDate = tx.timestamp?.toDate
+                        ? tx.timestamp.toDate()
+                        : new Date(tx.timestamp || 0);
+                      const dateStr = txDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                      const timeStr = txDate.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+                      return (
+                        <div
+                          key={tx.id}
+                          className="p-5 hover:bg-zinc-50/70 transition-colors cursor-pointer group"
+                          onClick={() => { setSelectedTransaction(tx); setIsTransactionDialogOpen(true); }}
+                        >
+                          <div className="flex items-start gap-4">
+                            {/* Type Icon */}
+                            <div className={cn(
+                              "w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 mt-0.5",
+                              isReturn ? "bg-rose-100" : isPayment ? "bg-emerald-100" : isPartial ? "bg-amber-100" : "bg-zinc-100"
+                            )}>
+                              {isReturn ? <ArrowUpRight className="w-5 h-5 text-rose-600 rotate-180" /> :
+                               isPayment ? <Banknote className="w-5 h-5 text-emerald-600" /> :
+                               isPartial ? <Clock className="w-5 h-5 text-amber-600" /> :
+                               <ShoppingCart className="w-5 h-5 text-zinc-500" />}
+                            </div>
+
+                            {/* Main Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                {/* Type Badge */}
+                                <Badge className={cn(
+                                  "text-[8px] font-black uppercase border-none px-2 py-0.5",
+                                  isReturn ? "bg-rose-100 text-rose-700" :
+                                  isPayment ? "bg-emerald-100 text-emerald-700" :
+                                  isPartial ? "bg-amber-100 text-amber-700" :
+                                  "bg-zinc-100 text-zinc-600"
+                                )}>
+                                  {isReturn ? "RETURN" : isPayment ? "PAYMENT" : isPartial ? "PARTIAL SALE" : "SALE"}
+                                </Badge>
+
+                                {/* Balance Deduction Flag */}
+                                {hasDeduction && (
+                                  <Badge className="text-[8px] font-black uppercase border-none px-2 py-0.5 bg-rose-50 text-rose-600">
+                                    BAL SETTLED
+                                  </Badge>
+                                )}
+
+                                {/* Partial/Debt Badge */}
+                                {isPartial && (tx.balance_due || 0) > 0 && (
+                                  <Badge className="text-[8px] font-black uppercase bg-amber-50 text-amber-700 border-none px-2 animate-pulse">
+                                    Debt: {formatCurrency(tx.balance_due || 0)}
+                                  </Badge>
                                 )}
                               </div>
-                              <div>
-                                <p className="font-bold text-zinc-900 text-sm">
-                                  {tx.type === "PAYMENT" ? "Account Settlement" : "Store Purchase"}
-                                </p>
-                                <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">
-                                  {tx.type === "PAYMENT" ? (
-                                    <span className="text-emerald-600">Ref: {tx.receipt_id || tx.reference_number || "Settlement"}</span>
-                                  ) : (
-                                    <span>{tx.items?.length || 0} Items • #{tx.id.substring(0, 6)}</span>
-                                  )}
-                                </p>
+
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-sm font-black text-zinc-900">
+                                  {isReturn ? `Return — ${formatCurrency(tx.total || 0)}` :
+                                   isPayment ? `Payment — ${formatCurrency(tx.total || 0)}` :
+                                   formatCurrency(tx.total || 0)}
+                                </span>
+                                {isReturn && hasDeduction && (
+                                  <span className="text-[10px] font-bold text-zinc-500">
+                                    (Net paid: {formatCurrency(tx.net_refund_paid || 0)})
+                                  </span>
+                                )}
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-4 font-black text-zinc-900">
-                            {formatCurrency(tx.total || 0)}
-                          </TableCell>
-                          <TableCell className="py-4 text-sm text-zinc-500 font-medium">
-                            {tx.timestamp?.toDate ? tx.timestamp.toDate().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : new Date(tx.timestamp || 0).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell className="py-4">
-                            <div className="flex flex-col gap-1">
-                              <Badge variant="outline" className={cn("text-[10px] uppercase font-bold border-zinc-200 w-fit shadow-sm", tx.type === "PAYMENT" ? "bg-emerald-50 text-emerald-700 border-emerald-100" : "bg-white text-zinc-500")}>
-                                {tx.payment_method || tx.paymentMethod || "CASH"}
-                              </Badge>
-                              {tx.status === "PARTIAL" && (
-                                <Badge variant="outline" className="text-[8px] uppercase font-black bg-rose-50 text-rose-600 border-rose-100 w-fit animate-pulse">
-                                  Debt: {formatCurrency(tx.balance_due || 0)}
-                                </Badge>
+
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
+                                <span className="text-[10px] text-zinc-400 font-bold">
+                                  {dateStr} at {timeStr}
+                                </span>
+                                {tx.cashier_name && (
+                                  <span className="text-[10px] text-zinc-400 font-bold">
+                                    • Cashier: {tx.cashier_name}
+                                  </span>
+                                )}
+                                <span className="text-[10px] text-zinc-400 font-bold">
+                                  • {tx.items?.length || 0} item{(tx.items?.length || 0) !== 1 ? "s" : ""}
+                                </span>
+                                <span className="text-[10px] font-bold uppercase text-zinc-400">
+                                  • {tx.payment_method || tx.paymentMethod || "—"}
+                                </span>
+                                {isReturn && tx.original_transaction_id && (
+                                  <span className="text-[10px] font-bold text-rose-400">
+                                    • Orig: #{tx.original_transaction_id.substring(0, 8).toUpperCase()}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Balance Deduction Breakdown Row */}
+                              {isReturn && hasDeduction && (
+                                <div className="mt-2 flex items-center gap-2 p-2 bg-rose-50 rounded-lg border border-rose-100">
+                                  <span className="text-[9px] font-black text-rose-600 uppercase tracking-widest">Account Settlement:</span>
+                                  <span className="text-[9px] font-bold text-rose-700">
+                                    Gross {formatCurrency(tx.total || 0)} — Balance Deducted {formatCurrency(tx.balance_deducted_from_refund || 0)} = Net Payout {formatCurrency(tx.net_refund_paid || 0)}
+                                  </span>
+                                </div>
                               )}
-                              {tx.type === "PAYMENT" && (
-                                <Badge variant="outline" className="text-[8px] uppercase font-black bg-blue-50 text-blue-600 border-blue-100 w-fit">
-                                  Balance Cleared
-                                </Badge>
-                              )}
                             </div>
-                          </TableCell>
-                          <TableCell className="text-right py-4">
-                            <div className="flex items-center justify-end gap-2">
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="rounded-xl font-bold text-zinc-400 hover:text-blue-600 hover:bg-blue-50 h-9 w-9 p-0 transition-all"
-                                onClick={(e) => { e.stopPropagation(); handleOpenDocumentHub(tx); }}
-                                title="Open Document Hub"
+
+                            {/* Right — ID + action */}
+                            <div className="shrink-0 flex flex-col items-end gap-2">
+                              <span className="font-mono text-[9px] text-zinc-300 group-hover:text-zinc-400 transition-colors">
+                                #{tx.id.substring(0, 8).toUpperCase()}
+                              </span>
+                              <Button
+                                variant="ghost" size="sm"
+                                className="h-7 px-2 rounded-lg text-[9px] font-black text-blue-500 hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-opacity"
+                                onClick={(e) => { e.stopPropagation(); setSelectedTransaction(tx); setIsTransactionDialogOpen(true); }}
                               >
-                                <ExternalLink className="w-4 h-4" />
-                              </Button>
-                              <Button variant="ghost" size="sm" className="rounded-xl font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 h-9 px-4 transition-all">
-                                View Entry <ChevronRight className="w-4 h-4 ml-1" />
+                                Details
                               </Button>
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </Card>
             </TabsContent>
 
@@ -2984,48 +3033,196 @@ export default function CRM() {
       </ScrollArea>
 
       <Dialog open={isTransactionDialogOpen} onOpenChange={setIsTransactionDialogOpen}>
-        <DialogContent className="rounded-3xl border-zinc-200 sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Transaction Details</DialogTitle>
-            <DialogDescription>Order ID: {selectedTransaction?.id}</DialogDescription>
-          </DialogHeader>
-          {selectedTransaction && (
-            <div className="space-y-4 py-4">
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-zinc-500">Date</span>
-                <span className="text-sm font-bold text-zinc-900">
-                  {selectedTransaction.timestamp?.toDate ? selectedTransaction.timestamp.toDate().toLocaleString() : new Date(selectedTransaction.timestamp || 0).toLocaleString()}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-zinc-500">Total Amount</span>
-                <span className="text-sm font-bold text-zinc-900">{formatCurrency(selectedTransaction.total || 0)}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-bold text-zinc-500">Status</span>
-                <Badge className="bg-emerald-50 text-emerald-600 border-emerald-100 text-[9px] font-bold uppercase">Completed</Badge>
-              </div>
-              <div className="space-y-2 mt-4">
-                <span className="text-sm font-bold text-zinc-500">Items</span>
-                <div className="space-y-2">
-                  {selectedTransaction.items?.map((item: any, i: number) => (
-                    <div key={i} className="flex justify-between items-center p-3 bg-zinc-50 rounded-xl">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold text-zinc-900">{item.name}</span>
-                        <span className="text-xs text-zinc-500">Qty: {item.quantity}</span>
-                      </div>
-                      <span className="text-sm font-bold text-zinc-900">{formatCurrency(item.price * item.quantity)}</span>
-                    </div>
-                  ))}
+        <DialogContent className="rounded-[2.5rem] border-none shadow-2xl bg-white sm:max-w-lg p-0 overflow-hidden">
+          {selectedTransaction && (() => {
+            const tx = selectedTransaction;
+            const isReturn = tx.type === "RETURN";
+            const isPayment = tx.type === "PAYMENT";
+            const isPartial = tx.status === "PARTIAL";
+            const hasDeduction = (tx.balance_deducted_from_refund || 0) > 0;
+            const txDate = tx.timestamp?.toDate ? tx.timestamp.toDate() : new Date(tx.timestamp || 0);
+            const fullDateTime = txDate.toLocaleString("en-US", {
+              weekday: "long", year: "numeric", month: "long",
+              day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit"
+            });
+
+            return (
+              <>
+                {/* Header */}
+                <div className={cn(
+                  "px-8 py-6 border-b border-zinc-100",
+                  isReturn ? "bg-rose-50/50" : isPayment ? "bg-emerald-50/30" : isPartial ? "bg-amber-50/30" : "bg-zinc-50/30"
+                )}>
+                  <div className="flex items-center justify-between mb-3">
+                    <Badge className={cn(
+                      "text-[9px] font-black uppercase border-none px-3 py-1",
+                      isReturn ? "bg-rose-100 text-rose-700" :
+                      isPayment ? "bg-emerald-100 text-emerald-700" :
+                      isPartial ? "bg-amber-100 text-amber-700" :
+                      "bg-zinc-100 text-zinc-700"
+                    )}>
+                      {isReturn ? "Return Transaction" : isPayment ? "Account Payment" : isPartial ? "Partial Sale" : "Sale Completed"}
+                    </Badge>
+                    <span className="font-mono text-[9px] text-zinc-400">#{tx.id.substring(0, 8).toUpperCase()}</span>
+                  </div>
+                  <p className={cn("text-2xl font-black", isReturn ? "text-rose-700" : "text-zinc-900")}>
+                    {isReturn ? "–" : ""}{formatCurrency(tx.total || 0)}
+                  </p>
+                  <p className="text-[10px] text-zinc-500 font-bold mt-1">{fullDateTime}</p>
                 </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button className="w-full rounded-xl bg-zinc-900 text-white h-12 font-bold" onClick={() => setIsTransactionDialogOpen(false)}>
-              Close
-            </Button>
-          </DialogFooter>
+
+                <ScrollArea className="max-h-[65vh]">
+                  <div className="px-8 py-6 space-y-6">
+
+                    {/* Transaction Metadata */}
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: "Cashier", value: tx.cashier_name || "—" },
+                        { label: "Payment Method", value: (tx.payment_method || tx.paymentMethod || "—").toUpperCase() },
+                        { label: "Branch", value: tx.branch_id || "—" },
+                        { label: "Session ID", value: tx.sessionId ? `#${tx.sessionId.substring(0, 6).toUpperCase()}` : "—" },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="bg-zinc-50 rounded-xl p-3">
+                          <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-0.5">{label}</p>
+                          <p className="text-xs font-black text-zinc-800 truncate">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Items Breakdown */}
+                    {tx.items && tx.items.length > 0 && (
+                      <div>
+                        <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-2">
+                          Items ({tx.items.length})
+                        </p>
+                        <div className="space-y-2">
+                          {tx.items.map((item: any, i: number) => {
+                            const qty = item.quantity || item.qty || 1;
+                            const price = item.price || 0;
+                            const lineTotal = price * qty;
+                            const hasDiscount = item.discount && item.discount.value > 0;
+                            return (
+                              <div key={i} className="flex items-center justify-between p-3 bg-zinc-50 rounded-xl border border-zinc-100">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-bold text-zinc-900 truncate">{item.name}</p>
+                                  <p className="text-[10px] text-zinc-400 font-medium">
+                                    {qty} × {formatCurrency(price)}
+                                    {hasDiscount && (
+                                      <span className="text-emerald-600 font-bold ml-1">
+                                        (-{item.discount.type === "Percentage" ? `${item.discount.value}%` : formatCurrency(item.discount.value)})
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                                <span className={cn("text-sm font-black shrink-0 ml-3", isReturn ? "text-rose-600" : "text-zinc-900")}>
+                                  {isReturn ? "–" : ""}{formatCurrency(lineTotal)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Financial Summary */}
+                    <div className="space-y-2 bg-zinc-50 rounded-2xl p-4 border border-zinc-100">
+                      <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-3">Financial Summary</p>
+                      {[
+                        { label: "Subtotal", value: formatCurrency(tx.subtotal || tx.total || 0) },
+                        tx.discount_amount > 0 && { label: `Discount (${tx.discount?.name || "Applied"})`, value: `–${formatCurrency(tx.discount_amount || 0)}`, highlight: "text-emerald-600" },
+                        { label: `Tax (${tx.tax_rate || 0}%)`, value: formatCurrency(tx.tax || 0) },
+                      ].filter(Boolean).map((row: any) => (
+                        <div key={row.label} className="flex justify-between items-center text-[11px] font-bold">
+                          <span className="text-zinc-500">{row.label}</span>
+                          <span className={row.highlight || "text-zinc-800"}>{row.value}</span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between items-center pt-2 border-t border-zinc-200 text-sm font-black">
+                        <span className="text-zinc-900">{isReturn ? "Gross Refund" : "Total"}</span>
+                        <span className={isReturn ? "text-rose-700" : "text-zinc-900"}>
+                          {isReturn ? "–" : ""}{formatCurrency(tx.total || 0)}
+                        </span>
+                      </div>
+                      {tx.tendered_amount > 0 && !isReturn && (
+                        <div className="flex justify-between items-center text-[11px] font-bold text-zinc-500">
+                          <span>Tendered</span><span>{formatCurrency(tx.tendered_amount)}</span>
+                        </div>
+                      )}
+                      {(tx.change_due || 0) > 0 && (
+                        <div className="flex justify-between items-center text-[11px] font-bold text-emerald-600">
+                          <span>Change Returned</span><span>{formatCurrency(tx.change_due)}</span>
+                        </div>
+                      )}
+                      {isPartial && (tx.balance_due || 0) > 0 && (
+                        <div className="flex justify-between items-center text-[11px] font-black text-rose-600 bg-rose-50 rounded-lg p-2 mt-2">
+                          <span>Outstanding Debt</span><span>{formatCurrency(tx.balance_due)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Balance Deduction Breakdown */}
+                    {isReturn && hasDeduction && (
+                      <div className="p-4 bg-rose-50 rounded-2xl border border-rose-200 space-y-2">
+                        <p className="text-[9px] font-black text-rose-600 uppercase tracking-widest">Account Settlement Applied</p>
+                        <div className="flex justify-between text-[11px] font-bold text-rose-700">
+                          <span>Gross Refund</span><span>{formatCurrency(tx.total || 0)}</span>
+                        </div>
+                        <div className="flex justify-between text-[11px] font-bold text-rose-700">
+                          <span>Account Balance Deducted</span><span>– {formatCurrency(tx.balance_deducted_from_refund || 0)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-black text-rose-800 pt-2 border-t border-rose-200">
+                          <span>Net Payout to Customer</span><span>{formatCurrency(tx.net_refund_paid || 0)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Return Reference */}
+                    {isReturn && tx.original_transaction_id && (
+                      <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 flex items-center justify-between">
+                        <div>
+                          <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Original Sale Reference</p>
+                          <p className="font-mono text-[10px] font-black text-zinc-700 mt-0.5">
+                            #{tx.original_transaction_id.substring(0, 12).toUpperCase()}
+                          </p>
+                        </div>
+                        <Badge className="bg-rose-100 text-rose-600 border-none text-[8px] font-black">LINKED</Badge>
+                      </div>
+                    )}
+
+                    {/* Full Receipt ID */}
+                    <div
+                      className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 cursor-pointer hover:bg-zinc-100 transition-colors group"
+                      onClick={() => { navigator.clipboard.writeText(tx.id); }}
+                      title="Click to copy full Receipt ID"
+                    >
+                      <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest mb-1">
+                        {isReturn ? "Return Receipt ID" : "Receipt ID"} — tap to copy
+                      </p>
+                      <p className="font-mono text-[9px] text-zinc-600 break-all group-hover:text-blue-600 transition-colors">
+                        {tx.id.toUpperCase()}
+                      </p>
+                    </div>
+                  </div>
+                </ScrollArea>
+
+                <div className="px-8 py-4 border-t border-zinc-100 flex gap-3">
+                  <Button
+                    variant="outline"
+                    className="flex-1 rounded-2xl border-zinc-200 font-bold h-11"
+                    onClick={() => { handleOpenDocumentHub(tx); setIsTransactionDialogOpen(false); }}
+                  >
+                    <FileText className="w-4 h-4 mr-2" /> Document Hub
+                  </Button>
+                  <Button
+                    className="flex-1 rounded-2xl bg-zinc-900 text-white font-bold h-11"
+                    onClick={() => setIsTransactionDialogOpen(false)}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -3706,106 +3903,146 @@ export default function CRM() {
           
           {/* Right Side: Command Center */}
           <div className="flex-1 flex flex-col bg-white overflow-hidden relative">
-            <div className="p-8 pb-4 relative">
-              <div className="absolute top-0 right-0 p-8 opacity-[0.03]">
-                <FileText className="w-32 h-32" />
-              </div>
-              <h2 className="text-3xl font-black tracking-tighter mb-1 text-zinc-900">Document Hub</h2>
+            <div className="p-6 pb-4 border-b border-zinc-100 relative">
+              <div className="absolute top-0 right-0 p-6 opacity-[0.03]"><FileText className="w-28 h-28" /></div>
+              <h2 className="text-2xl font-black tracking-tighter mb-1 text-zinc-900">Document Hub</h2>
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <p className="text-zinc-400 font-bold text-[10px] uppercase tracking-widest">A4 Digital Standard Ready</p>
+                <p className="text-zinc-400 font-bold text-[10px] uppercase tracking-widest">Secure Document Engine</p>
               </div>
             </div>
-            
-            <div className="p-8 space-y-6 flex-1 overflow-y-auto">
-              <div className="space-y-3">
-                 <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Hardware Outputs</p>
-                 <div className="grid grid-cols-1 gap-3">
-                   <Button 
-                    variant="outline" 
-                    className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white flex items-center justify-start gap-5 px-6 hover:border-blue-500 hover:bg-blue-50 group transition-all shadow-sm"
-                    onClick={handlePrintPDF}
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                      <FileText className="w-6 h-6" />
-                    </div>
-                    <div className="text-left">
-                      <p className="font-black text-base text-zinc-900">Professional A4 PDF</p>
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Office Printers / Digital Archive</p>
-                    </div>
-                  </Button>
 
-                  <div className="flex flex-col gap-2">
-                    <Button 
-                      variant="outline" 
-                      className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white flex items-center justify-start gap-5 px-6 hover:border-emerald-500 hover:bg-emerald-50 group transition-all shadow-sm"
-                      onClick={handlePrintThermal}
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all">
-                        <Printer className="w-6 h-6" />
+            <div className="overflow-y-auto flex-1">
+              {/* Transaction Summary Card */}
+              {documentHubTx && (() => {
+                const tx = documentHubTx;
+                const isReturn = tx.type === 'RETURN';
+                const isPayment = tx.type === 'PAYMENT';
+                const hasDeduction = (tx.balanceDeducted || 0) > 0;
+                return (
+                  <div className={cn(
+                    "mx-6 mt-5 mb-1 rounded-2xl border p-4 space-y-3",
+                    isReturn ? "bg-rose-50 border-rose-200" : isPayment ? "bg-emerald-50 border-emerald-200" : "bg-zinc-50 border-zinc-200"
+                  )}>
+                    <div className="flex items-center justify-between">
+                      <Badge className={cn(
+                        "text-[9px] font-black uppercase border-none",
+                        isReturn ? "bg-rose-100 text-rose-700" : isPayment ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-700"
+                      )}>
+                        {isReturn ? "Return Receipt" : isPayment ? "Payment Receipt" : "Sales Receipt"}
+                      </Badge>
+                      <span className="font-mono text-[9px] text-zinc-400">#{tx.id?.substring(0,8).toUpperCase()}</span>
+                    </div>
+                    <div>
+                      <p className={cn("text-xl font-black", isReturn ? "text-rose-700" : "text-zinc-900")}>
+                        {isReturn ? "–" : ""}{formatCurrency(tx.total || 0)}
+                      </p>
+                      <p className="text-[9px] text-zinc-500 font-bold mt-0.5">{tx.date}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[9px] font-bold">
+                      {tx.cashierName && <div><span className="text-zinc-400 uppercase tracking-wider">Cashier</span><br/><span className="text-zinc-800">{tx.cashierName}</span></div>}
+                      <div><span className="text-zinc-400 uppercase tracking-wider">Method</span><br/><span className="text-zinc-800">{(isReturn ? tx.refundMethod || tx.paymentMethod : tx.paymentMethod) || '—'}</span></div>
+                      <div><span className="text-zinc-400 uppercase tracking-wider">Items</span><br/><span className="text-zinc-800">{(tx.items || []).length}</span></div>
+                      {tx.originalTransactionId && <div><span className="text-zinc-400 uppercase tracking-wider">Orig Ref</span><br/><span className="text-zinc-800 font-mono">#{tx.originalTransactionId.substring(0,8).toUpperCase()}</span></div>}
+                    </div>
+                    {isReturn && hasDeduction && (
+                      <div className="pt-2 border-t border-rose-200 space-y-1">
+                        <p className="text-[8px] font-black text-rose-500 uppercase tracking-widest">Account Settlement</p>
+                        <div className="flex justify-between text-[9px] font-bold text-rose-700"><span>Gross Refund</span><span>{formatCurrency(tx.total)}</span></div>
+                        <div className="flex justify-between text-[9px] font-bold text-rose-700"><span>Balance Deducted</span><span>– {formatCurrency(tx.balanceDeducted)}</span></div>
+                        <div className="flex justify-between text-[10px] font-black text-rose-800 pt-1 border-t border-rose-200"><span>Net Payout</span><span>{formatCurrency(tx.netRefundPaid)}</span></div>
                       </div>
-                      <div className="text-left flex-1">
-                        <p className="font-black text-base text-zinc-900">Thermal Receipt</p>
-                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Point of Sale Printers</p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div className="p-6 space-y-5">
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Hardware Outputs</p>
+                  <div className="grid grid-cols-1 gap-3">
+                    <Button
+                      variant="outline"
+                      className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white flex items-center justify-start gap-5 px-6 hover:border-blue-500 hover:bg-blue-50 group transition-all shadow-sm"
+                      onClick={handlePrintPDF}
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:bg-blue-600 group-hover:text-white transition-all">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-black text-base text-zinc-900">Professional A4 PDF</p>
+                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Office Printers / Digital Archive</p>
                       </div>
                     </Button>
-                    
-                    {/* Thermal Size Toggle */}
-                    <div className="flex items-center justify-between px-3 bg-zinc-50 rounded-2xl py-3 border border-zinc-100">
-                       <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Canvas Size Selection</span>
-                       <div className="flex gap-1">
-                         {['80mm', '58mm'].map((size) => (
-                           <button
-                             key={size}
-                             onClick={() => setThermalSize(size as any)}
-                             className={cn(
-                               "px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all",
-                               thermalSize === size 
-                                ? "bg-zinc-900 text-white shadow-lg" 
-                                : "bg-white text-zinc-400 hover:text-zinc-600"
-                             )}
-                           >
-                             {size}
-                           </button>
-                         ))}
-                       </div>
+
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        variant="outline"
+                        className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white flex items-center justify-start gap-5 px-6 hover:border-emerald-500 hover:bg-emerald-50 group transition-all shadow-sm"
+                        onClick={handlePrintThermal}
+                      >
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                          <Printer className="w-6 h-6" />
+                        </div>
+                        <div className="text-left flex-1">
+                          <p className="font-black text-base text-zinc-900">Thermal Receipt</p>
+                          <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Point of Sale Printers</p>
+                        </div>
+                      </Button>
+                      <div className="flex items-center justify-between px-3 bg-zinc-50 rounded-2xl py-3 border border-zinc-100">
+                        <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Paper Size</span>
+                        <div className="flex gap-1">
+                          {['80mm', '58mm'].map((size) => (
+                            <button
+                              key={size}
+                              onClick={() => setThermalSize(size as any)}
+                              className={cn(
+                                "px-4 py-1.5 rounded-xl text-[10px] font-black uppercase transition-all",
+                                thermalSize === size ? "bg-zinc-900 text-white shadow-lg" : "bg-white text-zinc-400 hover:text-zinc-600"
+                              )}
+                            >
+                              {size}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="space-y-3">
-                <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Digital Distribution</p>
-                <div className="grid grid-cols-1 gap-3">
-                  <Button 
-                    className="w-full h-20 rounded-[1.5rem] bg-[#25D366] hover:bg-[#128C7E] text-white font-bold flex items-center justify-start gap-5 px-6 shadow-lg shadow-emerald-500/20"
-                    onClick={handleShareWhatsApp}
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center">
-                      <MessageSquare className="w-6 h-6" />
-                    </div>
-                    <div className="text-left">
-                      <p className="font-black text-base">WhatsApp Share</p>
-                      <p className="text-[10px] font-bold text-white/60 uppercase tracking-tighter">Direct Social Outreach</p>
-                    </div>
-                  </Button>
-                  
-                  <Button 
-                    variant="outline"
-                    className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white text-zinc-900 font-bold flex items-center justify-start gap-5 px-6 shadow-sm hover:border-zinc-300 transition-all"
-                    onClick={handleShareEmail}
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-zinc-50 flex items-center justify-center text-zinc-400">
-                      <Send className="w-6 h-6" />
-                    </div>
-                    <div className="text-left">
-                      <p className="font-black text-base">Email Digital Copy</p>
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Official Corporate File</p>
-                    </div>
-                  </Button>
+                <div className="space-y-3">
+                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Digital Distribution</p>
+                  <div className="grid grid-cols-1 gap-3">
+                    <Button
+                      className="w-full h-20 rounded-[1.5rem] bg-[#25D366] hover:bg-[#128C7E] text-white font-bold flex items-center justify-start gap-5 px-6 shadow-lg shadow-emerald-500/20"
+                      onClick={handleShareWhatsApp}
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center">
+                        <MessageSquare className="w-6 h-6" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-black text-base">WhatsApp Share</p>
+                        <p className="text-[10px] font-bold text-white/60 uppercase tracking-tighter">Direct Social Outreach</p>
+                      </div>
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      className="w-full h-20 rounded-[1.5rem] border-2 border-zinc-100 bg-white text-zinc-900 font-bold flex items-center justify-start gap-5 px-6 shadow-sm hover:border-zinc-300 transition-all"
+                      onClick={handleShareEmail}
+                    >
+                      <div className="w-12 h-12 rounded-2xl bg-zinc-50 flex items-center justify-center text-zinc-400">
+                        <Send className="w-6 h-6" />
+                      </div>
+                      <div className="text-left">
+                        <p className="font-black text-base">Email Digital Copy</p>
+                        <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Official Corporate File</p>
+                      </div>
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
+            </div>{/* end overflow-y-auto */}
             
             <div className="bg-zinc-50 p-4 border-t border-zinc-100 flex items-center justify-between px-8">
               <div className="flex items-center gap-2">

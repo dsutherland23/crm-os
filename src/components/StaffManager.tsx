@@ -45,7 +45,11 @@ export default function StaffManager() {
 
     // FIX: Added limit() to unbounded staff/roles/branches listeners
     const unsubStaff = onSnapshot(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), limit(500)), (snapshot) => {
-      setStaff(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const docsMap = new Map();
+      snapshot.docs.forEach(doc => {
+        docsMap.set(doc.id, { id: doc.id, ...doc.data() });
+      });
+      setStaff(Array.from(docsMap.values()));
     });
 
     // Limit to last 500 sessions to prevent memory bloat — paginate further on demand
@@ -151,11 +155,11 @@ export default function StaffManager() {
       }
 
       if (isEditing && selectedStaffMember) {
-        await updateDoc(doc(db, "staff", selectedStaffMember.id), {
+        await setDoc(doc(db, "staff", selectedStaffMember.id), {
           ...newUser,
           enterprise_id: enterpriseId,
           updatedAt: new Date().toISOString()
-        });
+        }, { merge: true });
 
         // Only attempt auth sync if the record appears to be a real Firebase Auth UID
         // (Firebase UIDs are exactly 28 chars; local PIN-only IDs are shorter)
@@ -242,7 +246,7 @@ export default function StaffManager() {
         updates.suspendedAt = new Date().toISOString();
       }
 
-      await updateDoc(doc(db, "staff", id), updates);
+      await setDoc(doc(db, "staff", id), updates, { merge: true });
 
       if (newStatus === "DISABLED") {
         const activeSessions = sessions.filter(s => s.staffId === id && s.status !== 'CLOSED');
@@ -501,6 +505,19 @@ export default function StaffManager() {
                   <Select value={newUser.role} onValueChange={(v) => setNewUser({...newUser, role: v})}><SelectTrigger className="rounded-xl border-zinc-200 bg-white h-12"><SelectValue /></SelectTrigger><SelectContent className="rounded-xl">{roles.length === 0 ? ['Manager', 'Supervisor', 'Cashier', 'Sales Rep'].map(r => <SelectItem key={r} value={r}>{r}</SelectItem>) : roles.map(r => <SelectItem key={r.id} value={r.name}>{r.name}</SelectItem>)}</SelectContent></Select>
                 </div>
                 <div className="space-y-2">
+                  <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Discount Grade</Label>
+                  <Select value={newUser.payGrade} onValueChange={(v) => setNewUser({...newUser, payGrade: v})}>
+                    <SelectTrigger className="rounded-xl border-zinc-200 bg-white h-12"><SelectValue placeholder="Select Grade" /></SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      <SelectItem value="STANDARD">Standard (10% Cap)</SelectItem>
+                      <SelectItem value="SUPERVISOR">Supervisor (25% Cap)</SelectItem>
+                      <SelectItem value="EXECUTIVE">Executive (100% Full)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
                   <Label className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Primary Branch</Label>
                   <Select value={newUser.branches?.[0] || "all"} onValueChange={(v) => setNewUser({...newUser, branches: [v]})}>
                     <SelectTrigger className="rounded-xl border-zinc-200 bg-white h-12"><SelectValue>{availableBranches.find(b => b.id === (newUser.branches?.[0] || "all"))?.name || (newUser.branches?.[0] === 'all' ? "All Locations" : newUser.branches[0])}</SelectValue></SelectTrigger>
@@ -571,7 +588,20 @@ export default function StaffManager() {
                     <div className="flex items-center gap-4">
                       <div className={cn("w-5 h-5 rounded-md border-2 flex items-center justify-center cursor-pointer", selectedStaffIds.includes(s.id) ? "bg-zinc-900 border-zinc-900 text-white" : "border-zinc-200 bg-white")} onClick={(e) => { e.stopPropagation(); toggleStaffSelection(s.id); }}>{selectedStaffIds.includes(s.id) && <CheckCircle2 className="w-3.5 h-3.5" />}</div>
                       <div className="relative"><div className="w-12 h-12 rounded-2xl bg-zinc-100 text-zinc-900 flex items-center justify-center font-bold text-sm ring-1 ring-zinc-200 group-hover:bg-zinc-900 group-hover:text-white transition-all">{s.name.substring(0,2).toUpperCase()}</div>{isActive && <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full border-2 border-white animate-pulse" />}</div>
-                      <div><p className="font-bold text-zinc-900 text-sm group-hover:text-blue-600 transition-colors">{s.name}</p><p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{s.role}</p></div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-zinc-900 text-sm group-hover:text-blue-600 transition-colors">{s.name}</p>
+                          <Badge variant="outline" className={cn(
+                            "text-[8px] uppercase font-black px-1.5 py-0",
+                            s.payGrade === 'EXECUTIVE' ? "text-indigo-600 border-indigo-100 bg-indigo-50" :
+                            s.payGrade === 'SUPERVISOR' ? "text-amber-600 border-amber-100 bg-amber-50" :
+                            "text-zinc-500 border-zinc-100 bg-zinc-50"
+                          )}>
+                            {s.payGrade || 'STANDARD'}
+                          </Badge>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 font-bold uppercase tracking-widest">{s.role}</p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-6">
                       <div className="hidden md:block text-right"><p className="text-sm font-bold text-zinc-900">{formatCurrency(lifetimeSales)}</p><p className="text-[9px] text-zinc-400 font-bold uppercase tracking-widest">Lifetime GMV</p></div>

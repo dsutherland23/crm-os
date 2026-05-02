@@ -37,7 +37,9 @@ import {
   PauseCircle,
   Star,
   LifeBuoy,
-  RefreshCw
+  RefreshCw,
+  Loader2,
+  Wallet
 } from "lucide-react";
 import BarcodeScanner from "./BarcodeScanner";
 import { Input } from "@/components/ui/input";
@@ -81,7 +83,7 @@ import { useModules } from "@/context/ModuleContext";
 import { usePendingAction } from "@/context/PendingActionContext";
 import { motion, AnimatePresence } from "motion/react";
 
-import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDocs, writeBatch, orderBy, limit, serverTimestamp, increment } from "@/lib/firebase";
+import { db, collection, onSnapshot, query, where, doc, addDoc, updateDoc, getDocs, getDoc, writeBatch, orderBy, limit, serverTimestamp, increment } from "@/lib/firebase";
 import { PrintableInvoice } from "./PrintableInvoice";
 import { POSReceipt } from "./POSReceipt";
 import { POSAIUpsell } from "./POSAIUpsell";
@@ -241,7 +243,10 @@ export default function POS() {
   const [manualDiscount, setManualDiscount] = useState({ name: "Manual Discount", type: "Percentage", value: "", reason: "" });
   const [customerUsage, setCustomerUsage] = useState<any[]>([]);
   const [isReturnMode, setIsReturnMode] = useState(false);
+  const [returnReceiptId, setReturnReceiptId] = useState("");
+  const [isVerifyingReceipt, setIsVerifyingReceipt] = useState(false);
   const [restockOnReturn, setRestockOnReturn] = useState(true);
+  const [deductBalanceOnRefund, setDeductBalanceOnRefund] = useState(false);
   const [receiptPaperSize, setReceiptPaperSize] = useState<"80mm" | "58mm">("80mm");
 
   useEffect(() => {
@@ -286,6 +291,7 @@ export default function POS() {
   const [customItem, setCustomItem] = useState({ name: "", price: "" });
   const [isCustomerSearchOpen, setIsCustomerSearchOpen] = useState(false);
   const [isCartCollapsed, setIsCartCollapsed] = useState(false);
+  const [isCheckoutDetailsOpen, setIsCheckoutDetailsOpen] = useState(false);
   const [staffList, setStaffList] = useState<any[]>([]);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   // Clock in a ref so the 1-second tick does NOT force a full component re-render
@@ -317,7 +323,10 @@ export default function POS() {
   };
 
   const [isShiftHistoryOpen, setIsShiftHistoryOpen] = useState(false);
+  const [isTransactionHistoryOpen, setIsTransactionHistoryOpen] = useState(false);
   const [shiftHistory, setShiftHistory] = useState<any[]>([]);
+  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
+  const [transactionFilter, setTransactionFilter] = useState<"ALL" | "SALE" | "RETURN">("ALL");
 
   useEffect(() => {
     if (!enterpriseId || !isShiftHistoryOpen) return;
@@ -339,6 +348,20 @@ export default function POS() {
   }, [enterpriseId, isShiftHistoryOpen]);
 
   useEffect(() => {
+    if (!enterpriseId || !isTransactionHistoryOpen) return;
+    const q = query(
+      collection(db, "transactions"),
+      where("enterprise_id", "==", enterpriseId),
+      orderBy("timestamp", "desc"),
+      limit(50)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setTransactionHistory(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsub();
+  }, [enterpriseId, isTransactionHistoryOpen]);
+
+  useEffect(() => {
     if (posSession) {
       setIsAuthorized(true);
       setSelectedAdmin(posSession.staffData);
@@ -348,25 +371,53 @@ export default function POS() {
     }
   }, [posSession]);
 
+  // Real-time listener for current staff member's profile (Pay Grade, Name, etc.)
+  useEffect(() => {
+    if (!enterpriseId || !posSession?.staffId) return;
+    
+    const unsub = onSnapshot(doc(db, "staff", posSession.staffId), (snap) => {
+      if (snap.exists()) {
+        const staffData = snap.data();
+        if (staffData.payGrade !== posSession.payGrade) {
+          // Sync grade change to session
+          setPosSession({
+            ...posSession,
+            payGrade: staffData.payGrade || 'STANDARD',
+            staffData: { ...posSession.staffData, ...staffData }
+          });
+          toast.info(`Permissions Updated: Your Discount Grade is now ${staffData.payGrade}`);
+        }
+      }
+    });
+    
+    return () => unsub();
+  }, [enterpriseId, posSession?.staffId]);
+
 
   useEffect(() => {
     if (!enterpriseId) return;
-    // Staff roster — one-time read (staff changes are rare during POS sessions)
-    getDocs(query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")))
-      .then((snapshot) => {
-        const dbStaff = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+    // Staff roster — real-time sync (handles status and permission changes)
+    const unsubStaff = onSnapshot(
+      query(collection(db, "staff"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
+      (snapshot) => {
+        const docsMap = new Map();
+        snapshot.docs.forEach(d => {
+          docsMap.set(d.id, { id: d.id, ...d.data() });
+        });
+        const dbStaff = Array.from(docsMap.values()) as any[];
         setStaffList(dbStaff.map(s => ({
           id: s.id,
           name: s.name,
           role: s.role,
-          payGrade: s.payGrade,
+          payGrade: s.payGrade || 'STANDARD',
           branches: s.branches,
           status: s.status,
           _pinHash: s.pin,
           initials: (s.name || '').substring(0, 2).toUpperCase()
         })));
-      })
-      .catch((err) => console.error("staff fetch error:", err));
+      },
+      (err) => console.error("staff fetch error:", err)
+    );
 
     const unsubSessions = onSnapshot(
       query(collection(db, "pos_sessions"), where("enterprise_id", "==", enterpriseId), where("status", "in", ["ACTIVE", "ON_BREAK", "ON_LUNCH", "IN_MEETING"])),
@@ -374,6 +425,7 @@ export default function POS() {
       (err) => console.error("sessions sync error:", err)
     );
     return () => {
+      unsubStaff();
       unsubSessions();
     };
   }, [enterpriseId]);
@@ -412,12 +464,14 @@ export default function POS() {
         setLoading(false);
       }
     );
-    // Campaigns change rarely — one-time read instead of real-time listener
-    getDocs(query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")))
-      .then((snapshot) => {
+    // Campaigns — real-time listener so new campaigns appear without refresh
+    const unsubCampaigns = onSnapshot(
+      query(collection(db, "campaigns"), where("enterprise_id", "==", enterpriseId), where("status", "==", "ACTIVE")),
+      (snapshot) => {
         if (isMounted) setCampaigns(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-      })
-      .catch((err) => console.error("campaigns fetch error:", err));
+      },
+      (err) => console.error("campaigns sync error:", err)
+    );
 
     const unsubInventory = onSnapshot(
       query(collection(db, "inventory"), where("enterprise_id", "==", enterpriseId), limit(1500)),
@@ -430,6 +484,7 @@ export default function POS() {
       isMounted = false;
       unsubProducts?.();
       unsubInventory?.();
+      unsubCampaigns?.();
     };
   }, [enterpriseId, isAuthorized]);
 
@@ -745,7 +800,7 @@ export default function POS() {
       toast.error("Please enter a valid positive amount");
       return;
     }
-    const grade = posSession?.payGrade || "EXECUTIVE";
+    const grade = posSession?.payGrade || "STANDARD";
     const capPercent = grade === "STANDARD" ? 10 : grade === "SUPERVISOR" ? 25 : 100;
     if (manualDiscount.type === "Percentage" && val > capPercent) {
       toast.error(`Your ${grade} grade is limited to ${capPercent}% discounts. Ask a SUPERVISOR to override.`, { duration: 5000 });
@@ -784,41 +839,203 @@ export default function POS() {
   }, 0);
   const totalItems = cart.reduce((acc, curr) => acc + curr.quantity, 0);
 
-  const eligibleCampaigns = useMemo(() => {
-    if (totalItems === 0) return [];
-    const list = campaigns.filter(c => {
+  // Track which campaigns have already fired an auto-notify toast this session
+  const autoNotifiedCampaigns = React.useRef<Set<string>>(new Set());
+
+  const campaignProgress = useMemo(() => {
+    // Show campaigns even when cart is empty (so cashier sees what incentives exist)
+    return campaigns.filter(c => {
       if (c.status !== "ACTIVE") return false;
+      // Branch filter: activeBranch==='all' means show ALL campaigns.
+      // Only filter by branch when a specific branch is selected AND the campaign has branch restrictions.
       if (activeBranch !== "all" && c.branches && c.branches.length > 0) {
         if (!c.branches.includes(activeBranch)) return false;
       }
+      // Customer group filter
       if (c.target_customers && c.target_customers !== "All Customers") {
         if (!selectedCustomer || selectedCustomer.group !== c.target_customers) return false;
       }
-      const reqType = c.rules?.requirement_type || "quantity";
-      if (reqType === "spend") {
-        const minSpend = Number(c.rules?.min_spend || 0);
-        if (subtotal < minSpend) return false;
-      } else {
-        const reqQty = Number(c.rules?.req_quantity || 1);
-        if (totalItems < reqQty) return false;
-      }
       return true;
+    }).map(c => {
+      const reqType = c.rules?.requirement_type || "quantity";
+      let progress = 0;
+      let requirement = 1;
+      let current = 0;
+
+      if (reqType === "spend") {
+        requirement = Number(c.rules?.min_spend || 0);
+        current = subtotal;
+        progress = requirement > 0 ? (subtotal / requirement) : 1;
+      } else {
+        requirement = Number(c.rules?.req_quantity || 1);
+        current = totalItems;
+        progress = requirement > 0 ? (totalItems / requirement) : 1;
+      }
+
+      return {
+        ...c,
+        progress: Math.min(1, progress),
+        isUnlocked: progress >= 1,
+        remaining: Math.max(0, requirement - current),
+        reqType,
+        requirementLabel: reqType === "spend" ? formatCurrency(requirement) : `${requirement} item${requirement !== 1 ? 's' : ''}`
+      };
     });
+  }, [campaigns, totalItems, subtotal, activeBranch, selectedCustomer]);
+
+  const handleLookupReceipt = async () => {
+    const searchId = returnReceiptId.trim();
+    if (!searchId) return;
+    setIsVerifyingReceipt(true);
+    try {
+      let txData: any = null;
+      let txDocId: string = "";
+
+      // Strategy 1: Direct Firestore document ID lookup (exact full ID)
+      const directRef = doc(db, "transactions", searchId);
+      const directSnap = await getDoc(directRef);
+
+      if (directSnap.exists()) {
+        txData = directSnap.data();
+        txDocId = directSnap.id;
+        // Security: verify it belongs to this enterprise
+        if (txData.enterprise_id && txData.enterprise_id !== enterpriseId) {
+          toast.error("Receipt not found in this store.");
+          return;
+        }
+      } else {
+        // Strategy 2: Fallback — search by the short 8-char prefix shown on receipts
+        // Users may type the short code shown on the printed receipt
+        const q = query(
+          collection(db, "transactions"),
+          where("enterprise_id", "==", enterpriseId),
+          orderBy("timestamp", "desc"),
+          limit(50)
+        );
+        const snap = await getDocs(q);
+        const matched = snap.docs.find(d =>
+          d.id.toUpperCase().startsWith(searchId.toUpperCase())
+        );
+        if (matched) {
+          txData = matched.data();
+          txDocId = matched.id;
+        }
+      }
+
+      if (!txData) {
+        toast.error("Receipt not found. Check the ID and try again.");
+        return;
+      }
+
+      if (txData.type === "RETURN") {
+        toast.error("This is already a return transaction — it cannot be returned again.");
+        return;
+      }
+
+      // Check if this transaction was already returned
+      const returnCheckQ = query(
+        collection(db, "transactions"),
+        where("enterprise_id", "==", enterpriseId),
+        where("original_transaction_id", "==", txDocId),
+        where("type", "==", "RETURN")
+      );
+      const returnCheckSnap = await getDocs(returnCheckQ);
+      if (!returnCheckSnap.empty) {
+        toast.error("A return has already been processed for this receipt.");
+        return;
+      }
+
+      // Auto-link the original customer
+      if (txData.customer_id) {
+        const cust = customers.find(c => c.id === txData.customer_id);
+        if (cust) setSelectedCustomer(cust);
+      }
+
+      // Populate the cart with the original items (quantities from original sale)
+      const returnItems = (txData.items || []).map((item: any) => {
+        const prod = products.find(p => p.id === item.product_id);
+        // If product no longer exists in catalog, create a stub so return can proceed
+        const fallbackProd = prod || {
+          id: item.product_id,
+          name: item.name,
+          retail_price: item.price,
+          price: item.price,
+          sku: item.sku || "N/A",
+          isCustom: true
+        };
+        return {
+          product: fallbackProd,
+          quantity: item.quantity,
+          discount: item.discount || null
+        };
+      });
+
+      setCart(returnItems);
+      // Store the original tx ID so we can link the return in the transaction record
+      setReturnReceiptId(txDocId);
+      toast.success(`Receipt verified (${txDocId.substring(0,8).toUpperCase()}) — ${returnItems.length} item(s) loaded.`);
+    } catch (error) {
+      console.error("Receipt lookup error:", error);
+      toast.error("Error looking up receipt. Please try again.");
+    } finally {
+      setIsVerifyingReceipt(false);
+    }
+  };
+
+  const eligibleCampaigns = useMemo(() => {
+    // Build a fresh array — do NOT mutate the memoized .filter() result
+    const unlocked: any[] = [];
+
+    // Loyalty points reward (customer-level, not cart-based)
     if (selectedCustomer && (selectedCustomer.points || 0) >= (loyaltySettings.pointsRequiredForReward || 100)) {
-      list.unshift({
+      unlocked.push({
         id: "LOYALTY_POINTS_REWARD",
         name: "Loyalty Points Reward",
-        description: `Redeem your points for a ${formatCurrency(loyaltySettings.rewardValue || 0)} discount`,
+        description: `Redeem ${loyaltySettings.pointsRequiredForReward} pts for a ${formatCurrency(loyaltySettings.rewardValue || 0)} discount`,
         rules: {
           discount_type: "Fixed Amount",
           discount_value: String(loyaltySettings.rewardValue || 0)
         },
         type: "Loyalty Points",
-        isLoyaltyReward: true
+        isLoyaltyReward: true,
+        isUnlocked: true,
+        progress: 1
       });
     }
-    return list;
-  }, [campaigns, totalItems, selectedCustomer, loyaltySettings, formatCurrency]);
+
+    // Cart-based campaigns that have been unlocked
+    campaignProgress.forEach(c => {
+      if (c.isUnlocked) unlocked.push(c);
+    });
+
+    return unlocked;
+  }, [campaignProgress, selectedCustomer, loyaltySettings]);
+
+  // All campaigns that have not yet been unlocked (sorted: highest progress first)
+  const upcomingRewards = useMemo(() => {
+    return campaignProgress
+      .filter(c => !c.isUnlocked)
+      .sort((a, b) => b.progress - a.progress);
+  }, [campaignProgress]);
+
+  // Auto-notify cashier when a campaign is newly unlocked mid-transaction
+  useEffect(() => {
+    eligibleCampaigns.forEach(c => {
+      if (c.id === "LOYALTY_POINTS_REWARD") return; // already obvious from customer panel
+      if (autoNotifiedCampaigns.current.has(c.id)) return;
+      autoNotifiedCampaigns.current.add(c.id);
+      toast.success(
+        `🏷️ "${c.name}" unlocked! Cart qualifies for a discount.`,
+        {
+          duration: 6000,
+          action: {
+            label: "Apply",
+            onClick: () => handleApplyCampaign(c.id)
+          }
+        }
+      );
+    });
+  }, [eligibleCampaigns]);
 
   let discountAmount = 0;
   if (cartDiscount) {
@@ -940,7 +1157,9 @@ export default function POS() {
         enterprise_id: enterpriseId,
         type: isReturnMode ? "RETURN" : "SALE",
         split_cash_amount: paymentMethod === "SPLIT" ? parseFloat(splitCashAmount) || 0 : 0,
-        split_card_amount: paymentMethod === "SPLIT" ? parseFloat(splitCardAmount) || 0 : 0
+        split_card_amount: paymentMethod === "SPLIT" ? parseFloat(splitCardAmount) || 0 : 0,
+        refund_to_account: isReturnMode && paymentMethod === "ACCOUNT",
+        original_transaction_id: isReturnMode && returnReceiptId ? returnReceiptId : null
       });
 
       recordFinancialEventBatch(batch, {
@@ -1055,14 +1274,44 @@ export default function POS() {
         
         const pointsEarned = Math.floor(basePoints * multiplier);
         const pointAdjustment = isReturnMode ? -pointsEarned : ((cartDiscount as any)?.isLoyaltyReward ? -(loyaltySettings.pointsRequiredForReward || 100) : pointsEarned);
+        
+        // Return logic: If refunded to ACCOUNT, decrease customer balance (more credit/less debt)
+        const balanceAdjustment = isReturnMode 
+          ? (paymentMethod === "ACCOUNT" ? -total : 0)
+          : balanceDue;
+
+        // Balance deduction on refund: if toggled, offset the customer's outstanding balance against the refund
+        // Net refund = refundTotal - customerBalance (cannot go negative — customer gets 0 if debt >= refund)
+        const customerOutstandingBalance = isReturnMode && deductBalanceOnRefund ? (selectedCustomer.balance || 0) : 0;
+        const netRefundAdjustment = isReturnMode && deductBalanceOnRefund
+          ? Math.min(customerOutstandingBalance, total) // amount deducted from refund
+          : 0;
+        
+        // Final balance change:
+        // - Normal return to Account: decrease balance by refund total
+        // - Deduct balance from refund: reduce balance by the outstanding amount (clears up to refund total)
+        const finalBalanceAdjustment = isReturnMode
+          ? (deductBalanceOnRefund
+              ? -Math.min(customerOutstandingBalance, total) // clear the debt (up to refund amount)
+              : (paymentMethod === "ACCOUNT" ? -total : 0))
+          : balanceDue;
+
         batch.update(doc(db, "customers", selectedCustomer.id), {
           spend: increment(isReturnMode ? -total : total),
           points: increment(pointAdjustment),
-          balance: increment(isReturnMode ? 0 : balanceDue),
+          balance: increment(finalBalanceAdjustment),
           last_purchase_date: serverTimestamp(),
           lastContact: new Date().toISOString()
         });
-      }
+        
+        // Store deduction metadata on the transaction for audit
+        if (isReturnMode && deductBalanceOnRefund && netRefundAdjustment > 0) {
+          batch.update(doc(db, "transactions", txId), {
+            balance_deducted_from_refund: netRefundAdjustment,
+            net_refund_paid: Math.max(0, total - netRefundAdjustment)
+          });
+        }
+      } // end if (selectedCustomer?.id)
 
       if (currentSessionId) {
         batch.update(doc(db, "pos_sessions", currentSessionId), {
@@ -1105,6 +1354,12 @@ export default function POS() {
 
       setLastTransaction({
         id: txId,
+        isReturn: isReturnMode,
+        originalTransactionId: isReturnMode && returnReceiptId ? returnReceiptId : null,
+        cashierName: selectedAdmin?.name || null,
+        refundMethod: isReturnMode ? paymentMethod : null,
+        balanceDeducted: isReturnMode && deductBalanceOnRefund ? Math.min(selectedCustomer?.balance || 0, total) : 0,
+        netRefundPaid: isReturnMode && deductBalanceOnRefund ? Math.max(0, total - (selectedCustomer?.balance || 0)) : (isReturnMode ? total : 0),
         items: cart.map(item => ({
           id: item.product.id,
           name: item.product.name,
@@ -1124,6 +1379,10 @@ export default function POS() {
         date: new Date().toLocaleString()
       });
       setShowReceipt(true);
+      // Auto-switch back to Sale mode after a return is completed
+      if (isReturnMode) {
+        setIsReturnMode(false);
+      }
       // Automatically trigger print after a short delay
       setTimeout(() => {
         window.print();
@@ -1174,6 +1433,10 @@ export default function POS() {
     setPaymentMethod("CARD");
     setSearchTerm("");
     setSelectedCategory("All Items");
+    setDeductBalanceOnRefund(false);
+    setReturnReceiptId("");
+    setIsReturnMode(false);
+    autoNotifiedCampaigns.current.clear(); // reset so unlock toasts fire again for new session
     if (cartKey) localStorage.removeItem(cartKey);
     toast.success("Ready for new transaction");
   };
@@ -1611,12 +1874,22 @@ Notes: ${closeRegisterNotes || 'None'}
                             <p className="text-xs font-medium text-zinc-500">{admin.role}</p>
                           </div>
                         </div>
-                        {statusInfo && (
-                          <div className="flex flex-col items-end gap-1 shrink-0">
-                            <Badge className={cn("text-[9px] uppercase font-bold py-0.5", statusInfo.styles)}>{statusInfo.label}</Badge>
-                            <span className="text-xs font-mono font-bold text-zinc-500">{statusInfo.formattedTimer}</span>
-                          </div>
-                        )}
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <Badge variant="outline" className={cn(
+                            "text-[8px] uppercase font-black px-1.5 py-0",
+                            admin.payGrade === 'EXECUTIVE' ? "text-indigo-600 border-indigo-100 bg-indigo-50" :
+                            admin.payGrade === 'SUPERVISOR' ? "text-amber-600 border-amber-100 bg-amber-50" :
+                            "text-zinc-500 border-zinc-100 bg-zinc-50"
+                          )}>
+                            {admin.payGrade || 'STANDARD'}
+                          </Badge>
+                          {statusInfo && (
+                            <>
+                              <Badge className={cn("text-[9px] uppercase font-bold py-0.5", statusInfo.styles)}>{statusInfo.label}</Badge>
+                              <span className="text-xs font-mono font-bold text-zinc-500">{statusInfo.formattedTimer}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -1667,7 +1940,9 @@ Notes: ${closeRegisterNotes || 'None'}
                 <History className="w-3.5 h-3.5 shrink-0" />
                 <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-widest truncate">
                   Branch: {(activeBranch || 'all').toUpperCase()}
-                  {selectedAdmin?.name && <> · <span className="text-zinc-400">{selectedAdmin.name}</span></>}
+                  {selectedAdmin?.name && (
+                    <> · <span className="text-zinc-400">{selectedAdmin.name}</span> <Badge variant="outline" className="ml-2 text-[8px] font-black border-zinc-200 text-zinc-500 uppercase">{posSession?.payGrade || 'STANDARD'}</Badge></>
+                  )}
                 </span>
               </div>
 
@@ -1712,9 +1987,29 @@ Notes: ${closeRegisterNotes || 'None'}
                   <Button variant="ghost" size="sm" onClick={() => setIsReturnMode(true)} className={cn("rounded-lg h-8 px-3 text-[10px] font-black uppercase tracking-widest transition-all", isReturnMode ? "bg-rose-500 text-white shadow-lg shadow-rose-200" : "text-zinc-500 hover:text-zinc-700")}>Return</Button>
                 </div>
                 {isReturnMode && (
-                  <div className="flex items-center gap-2 bg-rose-50/50 border border-rose-100 px-3 py-1.5 rounded-xl shrink-0">
-                    <span className="text-[10px] font-bold text-rose-600 uppercase tracking-tighter">Restock?</span>
-                    <Switch checked={restockOnReturn} onCheckedChange={setRestockOnReturn} className="data-[state=checked]:bg-rose-500 scale-75" />
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 bg-rose-50/50 border border-rose-100 px-3 py-1.5 rounded-xl shrink-0">
+                      <span className="text-[10px] font-bold text-rose-600 uppercase tracking-tighter">Restock?</span>
+                      <Switch checked={restockOnReturn} onCheckedChange={setRestockOnReturn} className="data-[state=checked]:bg-rose-500 scale-75" />
+                    </div>
+                    <div className="flex items-center gap-2 bg-white border border-rose-100 p-1 rounded-xl shadow-sm">
+                      <Input 
+                        placeholder="Receipt ID..." 
+                        className="h-8 w-32 border-none bg-transparent text-[10px] font-bold placeholder:text-rose-200 focus-visible:ring-0"
+                        value={returnReceiptId}
+                        onChange={(e) => setReturnReceiptId(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleLookupReceipt()}
+                      />
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        className="h-8 w-8 rounded-lg text-rose-500 hover:bg-rose-50"
+                        onClick={handleLookupReceipt}
+                        disabled={isVerifyingReceipt}
+                      >
+                        {isVerifyingReceipt ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                      </Button>
+                    </div>
                   </div>
                 )}
                 {posSession?.sessionId && (
@@ -1740,12 +2035,24 @@ Notes: ${closeRegisterNotes || 'None'}
                           <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-emerald-50 cursor-pointer group" onClick={() => handleTimeClock('ACTIVE')}><div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Play className="w-4 h-4 text-emerald-600" /></div><span className="font-bold text-zinc-700 text-sm">Resume Duty</span></DropdownMenuItem>
                           <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-amber-50 cursor-pointer group" onClick={() => handleTimeClock('ON_BREAK')}><div className="w-8 h-8 rounded-lg bg-amber-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Coffee className="w-4 h-4 text-amber-600" /></div><span className="font-bold text-zinc-700 text-sm">On Break</span></DropdownMenuItem>
                           <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-orange-50 cursor-pointer group" onClick={() => handleTimeClock('ON_LUNCH')}><div className="w-8 h-8 rounded-lg bg-orange-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Utensils className="w-4 h-4 text-orange-600" /></div><span className="font-bold text-zinc-700 text-sm">On Lunch</span></DropdownMenuItem>
-                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => handleTimeClock('LOCKED')}><div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><Lock className="w-4 h-4 text-zinc-600" /></div><span className="font-bold text-zinc-700 text-sm">Lock Terminal</span></DropdownMenuItem>
-                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => setIsShiftHistoryOpen(true)}><div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><History className="w-4 h-4 text-zinc-600" /></div><span className="font-bold text-zinc-700 text-sm">Shift Records</span></DropdownMenuItem>
-                        </DropdownMenuGroup>
-                        <DropdownMenuGroup>
-                          <DropdownMenuSeparator className="bg-zinc-100" />
-                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-rose-50 cursor-pointer group" onClick={() => setIsClosePromptOpen(true)}><div className="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform"><History className="w-4 h-4 text-rose-600" /></div><span className="font-bold text-rose-700 text-sm">End Shift</span></DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => setIsTransactionHistoryOpen(true)}>
+                            <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <History className="w-4 h-4 text-zinc-600" />
+                            </div>
+                            <span className="font-bold text-zinc-700 text-sm">Transaction Ledger</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-zinc-100 cursor-pointer group" onClick={() => setIsShiftHistoryOpen(true)}>
+                            <div className="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <History className="w-4 h-4 text-zinc-600" />
+                            </div>
+                            <span className="font-bold text-zinc-700 text-sm">Shift Records</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem className="rounded-xl h-12 px-3 focus:bg-rose-50 cursor-pointer group" onClick={() => setIsClosePromptOpen(true)}>
+                            <div className="w-8 h-8 rounded-lg bg-rose-100 flex items-center justify-center mr-3 group-hover:scale-110 transition-transform">
+                              <History className="w-4 h-4 text-rose-600" />
+                            </div>
+                            <span className="font-bold text-rose-700 text-sm">End Shift</span>
+                          </DropdownMenuItem>
                         </DropdownMenuGroup>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -1833,14 +2140,17 @@ Notes: ${closeRegisterNotes || 'None'}
                       <ShoppingCart className="w-5 h-5 text-zinc-900" />
                       <h2 className="text-xl font-bold tracking-tight font-display">Current Order</h2>
                     </div>
-                    {suspendedOrders.length > 0 && (
-                      <button 
-                        className="text-[9px] font-black uppercase tracking-widest text-amber-600 hover:text-amber-700 flex items-center gap-1 mt-1 transition-colors"
-                        onClick={() => setIsSuspendedOrdersOpen(true)}
-                      >
-                        <PauseCircle className="w-2.5 h-2.5" /> {suspendedOrders.length} Parked Orders →
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-2xl font-black text-blue-600 tracking-tighter">{formatCurrency(total)}</span>
+                      {suspendedOrders.length > 0 && (
+                        <button 
+                          className="text-[9px] font-black uppercase tracking-widest text-amber-600 hover:text-amber-700 flex items-center gap-1 transition-colors"
+                          onClick={() => setIsSuspendedOrdersOpen(true)}
+                        >
+                          <PauseCircle className="w-2.5 h-2.5" /> {suspendedOrders.length} Parked
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button 
@@ -1924,7 +2234,110 @@ Notes: ${closeRegisterNotes || 'None'}
                 )}
               </Button>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 bg-zinc-50/30 scroll-smooth hide-scrollbar">
+            <div className="flex-1 overflow-y-auto bg-zinc-50/30 scroll-smooth hide-scrollbar relative">
+              {/* Reward Horizon — Premium Horizontal Carousel */}
+              <AnimatePresence>
+                {!isReturnMode && (eligibleCampaigns.length > 0 || upcomingRewards.length > 0) && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="sticky top-0 z-20 bg-white/80 backdrop-blur-md border-b border-zinc-100 overflow-hidden shadow-sm"
+                  >
+                    <div className="px-4 py-3 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        <span className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.15em]">Live Reward Tracker</span>
+                      </div>
+                      <button 
+                        onClick={() => { setDiscountContext("Campaign"); setIsDiscountDialogOpen(true); }}
+                        className="text-[9px] font-black text-indigo-600 hover:text-indigo-700 uppercase tracking-widest flex items-center gap-1 group"
+                      >
+                        See All <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+                      </button>
+                    </div>
+                    
+                    <div className="flex gap-3 px-4 pb-4 overflow-x-auto hide-scrollbar snap-x snap-mandatory">
+                      {/* UNLOCKED CARDS */}
+                      {eligibleCampaigns.map(c => {
+                        const isApplied = cartDiscount?.id === c.id;
+                        return (
+                          <motion.div 
+                            key={c.id} 
+                            whileTap={{ scale: 0.98 }}
+                            className={cn(
+                              "snap-start shrink-0 w-48 rounded-2xl p-3 border transition-all relative overflow-hidden",
+                              isApplied 
+                                ? "bg-emerald-600 border-emerald-500 shadow-lg shadow-emerald-200/50" 
+                                : "bg-gradient-to-br from-emerald-500 to-teal-600 border-emerald-400 shadow-md shadow-emerald-100"
+                            )}
+                            onClick={() => handleApplyCampaign(c.id)}
+                          >
+                            <div className="relative z-10 flex flex-col justify-between h-full min-h-[70px]">
+                              <div className="flex justify-between items-start">
+                                <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-md flex items-center justify-center">
+                                  <Sparkles className="w-3.5 h-3.5 text-white animate-pulse" />
+                                </div>
+                                <div className="text-[8px] font-black text-white/80 uppercase tracking-widest bg-black/10 px-1.5 py-0.5 rounded-md">
+                                  {isApplied ? "ACTIVE" : "QUALIFIED"}
+                                </div>
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-black text-white leading-tight truncate">{c.name}</p>
+                                <div className="flex items-center justify-between mt-1.5">
+                                  <p className="text-[9px] font-bold text-emerald-50">One-Tap Redeem</p>
+                                  {!isApplied && <div className="w-4 h-4 rounded-full bg-white flex items-center justify-center"><Plus className="w-2.5 h-2.5 text-emerald-600" /></div>}
+                                </div>
+                              </div>
+                            </div>
+                            {/* Decorative background circle */}
+                            <div className="absolute -right-4 -bottom-4 w-16 h-16 bg-white/10 rounded-full blur-2xl" />
+                          </motion.div>
+                        );
+                      })}
+
+                      {/* UPCOMING CARDS */}
+                      {upcomingRewards.map(c => (
+                        <motion.div 
+                          key={c.id}
+                          className="snap-start shrink-0 w-48 bg-white rounded-2xl p-3 border border-zinc-100 shadow-sm flex flex-col justify-between min-h-[70px]"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-center gap-2">
+                              <div className="w-7 h-7 rounded-lg bg-zinc-50 flex items-center justify-center">
+                                <Zap className={cn("w-3.5 h-3.5", c.progress > 0.5 ? "text-amber-500" : "text-zinc-300")} />
+                              </div>
+                              <div className="flex flex-col">
+                                <p className="text-[10px] font-black text-zinc-900 leading-tight truncate max-w-[90px]">{c.name}</p>
+                                <p className="text-[8px] font-bold text-zinc-400 uppercase">{Math.round(c.progress * 100)}% Progress</p>
+                              </div>
+                            </div>
+                            <div className="w-5 h-5 rounded-full border-2 border-zinc-100 flex items-center justify-center relative">
+                                <svg className="w-full h-full -rotate-90">
+                                  <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" strokeWidth="2" className="text-indigo-500 transition-all duration-700" strokeDasharray={2 * Math.PI * 8} strokeDashoffset={2 * Math.PI * 8 * (1 - c.progress)} />
+                                </svg>
+                            </div>
+                          </div>
+                          <div className="mt-2 space-y-1.5">
+                            <div className="h-1 w-full bg-zinc-100 rounded-full overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${c.progress * 100}%` }}
+                                className={cn("h-full", c.progress > 0.8 ? "bg-amber-400" : "bg-indigo-400")} 
+                              />
+                            </div>
+                            <p className="text-[8px] font-black text-zinc-500 uppercase tracking-tighter">
+                              Need {c.remaining > 100 ? formatCurrency(c.remaining) : `${c.remaining} more`}
+                            </p>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <div className="p-4 sm:p-6 lg:p-8">
               {cart.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center space-y-4 opacity-40">
                   <div className="w-20 h-20 bg-zinc-100 rounded-full flex items-center justify-center"><ShoppingCart className="w-10 h-10 text-zinc-400" /></div>
@@ -1964,160 +2377,131 @@ Notes: ${closeRegisterNotes || 'None'}
                 </div>
               )}
             </div>
-            <div className="flex-none p-4 sm:p-6 lg:p-8 bg-white border-t border-zinc-200 space-y-4 sm:space-y-6 shadow-[0_-8px_30px_rgb(0,0,0,0.04)]">
-              <AnimatePresence>
-                {eligibleCampaigns.length > 0 && (activeBranch === "all" || !cartDiscount) && (
-                  <motion.div initial={{ opacity: 0, y: 10, height: 0 }} animate={{ opacity: 1, y: 0, height: "auto" }} exit={{ opacity: 0, y: -10, height: 0 }} className="overflow-hidden">
-                    <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 flex flex-col gap-3 shadow-sm mb-4">
-                      <div className="flex items-center gap-2 text-indigo-600"><Sparkles className="w-4 h-4 animate-pulse" /><span className="text-[10px] font-bold uppercase tracking-widest text-indigo-700">Rewards Unlocked</span></div>
-                      <div className="space-y-2">
-                        {eligibleCampaigns.map(campaign => {
-                          const isUsed = campaign.one_time_per_customer && customerUsage.some(u => u.campaign_id === campaign.id);
-                          const isApplied = cartDiscount && cartDiscount.id === campaign.id;
-                          return (
-                            <div key={campaign.id} className={cn("flex items-center justify-between bg-white p-3 rounded-xl border shadow-sm transition-all relative overflow-hidden", isUsed ? "opacity-60 grayscale border-zinc-200" : "border-indigo-100/50 hover:shadow-md hover:border-indigo-200")}>
-                              <div className="flex flex-col flex-1 min-w-0 pr-4">
-                                <div className="flex items-center gap-2"><span className="text-sm font-bold text-zinc-900 truncate">{campaign.name}</span>{isUsed && <Badge variant="outline" className="h-4 text-[8px] font-black uppercase text-rose-600 border-rose-200 bg-rose-50">Used</Badge>}</div>
-                                <span className="text-[10px] text-zinc-500 font-medium truncate">{isUsed ? `Claimed on ${customerUsage.find(u => u.campaign_id === campaign.id)?.used_at?.toDate ? customerUsage.find(u => u.campaign_id === campaign.id).used_at.toDate().toLocaleDateString() : 'N/A'}` : (campaign.description || 'Exclusive discount available')}</span>
-                              </div>
-                              <Button size="sm" className={cn("h-8 text-xs font-bold rounded-lg shadow-sm", isUsed ? "bg-zinc-100 text-zinc-400" : isApplied ? "bg-emerald-600 text-white" : "bg-indigo-600 text-white")} onClick={() => handleApplyCampaign(campaign.id)} disabled={isUsed || isApplied}>{isUsed ? "Locked" : isApplied ? "Applied" : "Apply"}</Button>
+          </div>
+            <div id="checkout-footer" className="flex-none bg-white border-t border-zinc-200 shadow-[0_-8px_30px_rgb(0,0,0,0.04)] transition-all duration-300">
+              <div className="p-4 sm:p-6 space-y-4">
+                <AnimatePresence>
+                  {isCheckoutDetailsOpen && (
+                    <motion.div 
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="space-y-4 overflow-hidden pb-4"
+                    >
+                      <div className="flex gap-2">
+                        <Button variant="outline" className="flex-1 rounded-xl h-10 border-zinc-200 text-[10px] font-black text-zinc-600 bg-white" onClick={() => { setDiscountContext("Campaign"); setIsDiscountDialogOpen(true); }}><Tag className="w-3.5 h-3.5 mr-2" />Campaign</Button>
+                        <Button variant="outline" className="flex-1 rounded-xl h-10 border-zinc-200 text-[10px] font-black text-zinc-600 bg-white" onClick={() => { setDiscountContext("Manual"); setIsDiscountDialogOpen(true); }}><Percent className="w-3.5 h-3.5 mr-2" />Manual</Button>
+                      </div>
+
+                      <div className="space-y-2 text-[11px] font-bold">
+                        <div className="flex justify-between"><span className="text-zinc-500 uppercase">Subtotal</span><span className="text-zinc-900">{formatCurrency(subtotal)}</span></div>
+                        {cartDiscount && (
+                          <div className="flex justify-between items-center text-emerald-600">
+                            <div className="flex items-center gap-1.5"><Tag className="w-3 h-3" /><span>{cartDiscount.name}</span></div>
+                            <span>-{formatCurrency(discountAmount)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center">
+                          <div className="flex items-center gap-2"><span className="text-zinc-500 uppercase">Tax ({globalTaxRate}%)</span><Switch checked={isTaxEnabled} onCheckedChange={setIsTaxEnabled} className="scale-75" /></div>
+                          <span className="text-zinc-900">{formatCurrency(tax)}</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {["CARD", "CASH", "SPLIT", "ACCOUNT"].map(method => (
+                          <Button 
+                            key={method}
+                            variant={paymentMethod === method ? "default" : "outline"} 
+                            className={cn("rounded-xl h-10 font-black text-[9px] px-0 transition-all", paymentMethod === method && "bg-zinc-900 border-zinc-900 scale-[1.02]")} 
+                            onClick={() => setPaymentMethod(method)}
+                            disabled={method === "ACCOUNT" && !selectedCustomer}
+                          >
+                            {method === "CARD" && <CreditCard className="w-3 h-3 mr-1" />}
+                            {method === "CASH" && <Banknote className="w-3 h-3 mr-1" />}
+                            {method === "SPLIT" && <Split className="w-3 h-3 mr-1" />}
+                            {method === "ACCOUNT" && (isReturnMode ? <Wallet className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />)}
+                            {method === "ACCOUNT" ? (isReturnMode ? "Store Credit" : "Charge Account") : method.charAt(0) + method.slice(1).toLowerCase()}
+                          </Button>
+                        ))}
+                      </div>
+
+                      {paymentMethod !== "SPLIT" && (
+                        <div className="space-y-3 bg-zinc-50 p-3 rounded-xl border border-zinc-100">
+                          <div className="flex justify-between items-center">
+                            <Label className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Tendered</Label>
+                            <Input 
+                              type="number"
+                              placeholder={total.toFixed(2)}
+                              value={paidAmount}
+                              onChange={(e) => setPaidAmount(e.target.value)}
+                              className="h-8 w-24 rounded-lg border-zinc-200 bg-white font-black text-right text-sm"
+                            />
+                          </div>
+                          {parseFloat(paidAmount) > total && (
+                            <div className="flex justify-between items-center text-emerald-600 font-black text-[10px]">
+                              <span>CHANGE DUE</span>
+                              <span>{formatCurrency(parseFloat(paidAmount) - total)}</span>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              <div className="flex gap-2">
-                <Button variant="outline" className="flex-1 rounded-xl h-10 border-zinc-200 text-xs font-bold text-zinc-600 bg-white" onClick={() => { setDiscountContext("Campaign"); setIsDiscountDialogOpen(true); }}><Tag className="w-3.5 h-3.5 mr-2" />Campaign</Button>
-                <Button variant="outline" className="flex-1 rounded-xl h-10 border-zinc-200 text-xs font-bold text-zinc-600 bg-white" onClick={() => { setDiscountContext("Manual"); setIsDiscountDialogOpen(true); }}><Percent className="w-3.5 h-3.5 mr-2" />Manual</Button>
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm"><span className="text-zinc-500">Subtotal</span><span className="font-medium text-zinc-900">{formatCurrency(subtotal)}</span></div>
-                {cartDiscount && (
-                  <div className="flex justify-between text-sm items-center text-emerald-600">
-                    <div className="flex items-center gap-2">
-                      <Tag className="w-3.5 h-3.5" /><span>{cartDiscount.name}</span>
-                      <button onClick={() => setCartDiscount(null)} className="text-rose-500 hover:text-rose-700 ml-1"><X className="w-3 h-3" /></button>
-                    </div>
-                    <span className="font-medium">-{formatCurrency(discountAmount)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-sm items-center">
-                  <div className="flex items-center gap-2">
-                    <span className="text-zinc-500">Tax ({globalTaxRate}%)</span>
-                    <button onClick={() => setIsTaxEnabled(!isTaxEnabled)} className={cn("w-8 h-4 rounded-full transition-colors relative", isTaxEnabled ? "bg-blue-600" : "bg-zinc-200")}><div className={cn("absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all shadow-sm", isTaxEnabled ? "left-4.5" : "left-0.5")} /></button>
-                  </div>
-                  <span className="font-medium text-zinc-900">{formatCurrency(tax)}</span>
-                </div>
-                <div className="flex justify-between text-lg sm:text-2xl font-black pt-3 sm:pt-4 border-t border-zinc-200"><span className="text-zinc-900">Total</span><span className="text-blue-600">{formatCurrency(total)}</span></div>
-              </div>
-              <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-                <Button variant={paymentMethod === "CARD" ? "default" : "outline"} className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "CARD" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CARD"); }}><CreditCard className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Card</Button>
-                <Button variant={paymentMethod === "CASH" ? "default" : "outline"} className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "CASH" && "bg-zinc-900")} onClick={() => { setPaymentMethod("CASH"); }}><Banknote className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Cash</Button>
-                <Button variant={paymentMethod === "SPLIT" ? "default" : "outline"} className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "SPLIT" && "bg-zinc-900")} onClick={() => { setPaymentMethod("SPLIT"); }}><Split className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Split</Button>
-                <Button 
-                  variant={paymentMethod === "DEBT" ? "default" : "outline"} 
-                  className={cn("rounded-xl h-10 sm:h-12 font-bold text-[10px] sm:text-xs px-0", paymentMethod === "DEBT" && "bg-blue-600")} 
-                  disabled={!selectedCustomer}
-                  onClick={() => { setPaymentMethod("DEBT"); setPaidAmount("0"); }}
-                >
-                  <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />Acc.
-                </Button>
-              </div>
-
-              {paymentMethod !== "SPLIT" && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Amount Tendered</Label>
-                      {selectedCustomer && (parseFloat(paidAmount) < total) && (
-                        <Badge variant="outline" className="text-[9px] font-black text-blue-600 bg-blue-50 border-blue-100 uppercase">Partial Payment</Badge>
+                          )}
+                        </div>
                       )}
-                    </div>
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 font-bold">$</span>
-                      <Input 
-                        type="number"
-                        placeholder={total.toFixed(2)}
-                        value={paidAmount}
-                        onChange={(e) => setPaidAmount(e.target.value)}
-                        className="h-10 sm:h-12 pl-8 rounded-xl border-zinc-200 bg-white font-black text-base sm:text-lg focus:ring-4 focus:ring-blue-500/10 transition-all"
-                      />
-                    </div>
-                  </div>
 
-                  {/* MODERN RECONCILIATION SUMMARY */}
-                  <div className="bg-zinc-100/50 rounded-2xl p-4 space-y-2 border border-zinc-200/50">
-                    <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-zinc-500">
-                      <span>Payment Summary</span>
-                      <span>{paymentMethod}</span>
-                    </div>
-                    <div className="flex justify-between items-center py-1">
-                      <span className="text-xs text-zinc-600">Amount Tendered</span>
-                      <span className="text-xs font-bold text-zinc-900">{formatCurrency(parseFloat(paidAmount) || 0)}</span>
-                    </div>
-                    {parseFloat(paidAmount) > total && (
-                      <div className="flex justify-between items-center py-1 text-emerald-600">
-                        <span className="text-xs font-bold">Change to Customer</span>
-                        <span className="text-sm font-black">{formatCurrency(parseFloat(paidAmount) - total)}</span>
-                      </div>
-                    )}
-                    {selectedCustomer && parseFloat(paidAmount) < total && (
-                      <div className="flex justify-between items-center py-1 text-blue-600">
-                        <span className="text-xs font-bold">Charge to Account</span>
-                        <span className="text-sm font-black">{formatCurrency(total - (parseFloat(paidAmount) || 0))}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between items-center pt-2 border-t border-zinc-200">
-                      <span className="text-[10px] sm:text-xs font-bold text-zinc-900">Total Applied</span>
-                      <span className="text-xs sm:text-sm font-black text-zinc-900">{formatCurrency(Math.min(total, parseFloat(paidAmount) || total))}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {paymentMethod === "CASH" && (
-                <div className="space-y-3">
-                  <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Quick Tender</p>
-                  <div className="grid grid-cols-2 xs:grid-cols-4 gap-2">
-                    {[Math.ceil(total), Math.ceil(total/5)*5, Math.ceil(total/10)*10, Math.ceil(total/20)*20].filter((v, i, a) => a.indexOf(v) === i).slice(0,4).map(amt => (
-                      <button key={amt} onClick={() => setSmartCashTendered(amt)} className={cn("h-12 rounded-xl border-2 font-black text-xs transition-all active:scale-95", smartCashTendered === amt ? "bg-emerald-600 border-emerald-600 text-white" : "bg-white border-zinc-200 text-zinc-900")}>{formatCurrency(amt)}</button>
-                    ))}
-                  </div>
-                  {smartCashTendered !== null && (
-                    <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
-                      <span className="text-xs font-bold text-emerald-700">Change Due</span>
-                      <span className="text-lg font-black text-emerald-700">{formatCurrency(Math.max(0, smartCashTendered - total))}</span>
-                    </div>
+                      {/* Balance Deduction Banner — only for returns with a customer that has a balance */}
+                      {isReturnMode && selectedCustomer && (selectedCustomer.balance || 0) > 0 && (
+                        <div className={cn(
+                          "flex items-center justify-between gap-3 p-3 rounded-xl border transition-all",
+                          deductBalanceOnRefund
+                            ? "bg-rose-50 border-rose-200"
+                            : "bg-zinc-50 border-zinc-200"
+                        )}>
+                          <div className="flex-1">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-rose-700">Account Balance Deduction</p>
+                            <p className="text-[10px] text-zinc-500 font-medium">
+                              Customer owes <span className="font-black text-zinc-800">{formatCurrency(selectedCustomer.balance)}</span>.
+                              {deductBalanceOnRefund && (
+                                <span className="text-rose-600 font-bold"> Net refund: {formatCurrency(Math.max(0, total - (selectedCustomer.balance || 0)))}</span>
+                              )}
+                            </p>
+                          </div>
+                          <Switch
+                            checked={deductBalanceOnRefund}
+                            onCheckedChange={setDeductBalanceOnRefund}
+                            className="data-[state=checked]:bg-rose-500 shrink-0"
+                          />
+                        </div>
+                      )}
+                    </motion.div>
                   )}
+                </AnimatePresence>
+
+                {/* Primary Sticky Bar */}
+                <div className="flex items-center gap-3">
+                  <div 
+                    className="flex-1 flex flex-col cursor-pointer group" 
+                    onClick={() => setIsCheckoutDetailsOpen(!isCheckoutDetailsOpen)}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">{cart.length} {cart.length === 1 ? 'Item' : 'Items'}</span>
+                      <ChevronRight className={cn("w-3 h-3 text-zinc-300 transition-transform", isCheckoutDetailsOpen ? "-rotate-90" : "rotate-90")} />
+                    </div>
+                    <span className="text-xl font-black text-zinc-900 tracking-tighter group-hover:text-blue-600 transition-colors">{formatCurrency(total)}</span>
+                  </div>
+                  <Button 
+                    className={cn(
+                      "h-14 px-8 rounded-xl font-black text-lg shadow-xl transition-all active:scale-95 shrink-0",
+                      isProcessing ? "bg-zinc-100 text-zinc-400" : "bg-zinc-900 text-white shadow-zinc-900/20"
+                    )} 
+                    onClick={() => {
+                      if (!isCheckoutDetailsOpen) { setIsCheckoutDetailsOpen(true); return; }
+                      if (paymentMethod === "SPLIT") { setIsSplitPaymentDialogOpen(true); } 
+                      else { handleCompleteTransaction(); }
+                    }} 
+                    disabled={isProcessing || cart.length === 0}
+                  >
+                    {isProcessing ? "Wait..." : (paymentMethod === "SPLIT" ? "Split Pay" : "Complete")}
+                  </Button>
                 </div>
-              )}
-              <Button 
-                className={cn(
-                  "w-full rounded-xl h-12 sm:h-14 font-bold text-base sm:text-lg shadow-xl transition-all active:scale-95",
-                  (selectedCustomer && (parseFloat(paidAmount) || total) < total) 
-                    ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20" 
-                    : "bg-zinc-900 hover:bg-zinc-800 text-white shadow-zinc-900/20"
-                )} 
-                onClick={() => {
-                  if (paymentMethod === "SPLIT") {
-                    setSplitCashAmount("");
-                    setSplitCardAmount("");
-                    setIsSplitPaymentDialogOpen(true);
-                  } else {
-                    const received = parseFloat(paidAmount) || total;
-                    if (!selectedCustomer && received < total) {
-                      toast.error("Partial payments require a linked customer account.");
-                      return;
-                    }
-                    handleCompleteTransaction();
-                  }
-                }} 
-                disabled={isProcessing || cart.length === 0}
-              >
-                {isProcessing ? "Processing..." : (selectedCustomer && (parseFloat(paidAmount) || total) < total) ? (window.innerWidth < 640 ? "Charge Account" : "Charge Remainder to Account") : "Complete Transaction"}
-              </Button>
+              </div>
             </div>
           </div>
         
@@ -2133,6 +2517,240 @@ Notes: ${closeRegisterNotes || 'None'}
               />
             )}
           </AnimatePresence>
+
+      {/* Campaign / Discount Selection Dialog */}
+      <Dialog open={isDiscountDialogOpen} onOpenChange={setIsDiscountDialogOpen}>
+        <DialogContent className="sm:max-w-lg rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
+          <div className="p-6 border-b border-zinc-100 bg-zinc-50/50">
+            <DialogTitle className="text-xl font-black text-zinc-900 tracking-tight">Apply Discount</DialogTitle>
+            <DialogDescription className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mt-1">
+              {discountContext === "Campaign" ? "Active Campaigns & Rewards" : "Manual Discount Override"}
+            </DialogDescription>
+            <div className="flex bg-zinc-100 p-1 rounded-xl mt-4 gap-1">
+              {(["Campaign", "Manual"] as const).map(ctx => (
+                <button
+                  key={ctx}
+                  className={cn(
+                    "flex-1 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+                    discountContext === ctx ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"
+                  )}
+                  onClick={() => setDiscountContext(ctx)}
+                >
+                  {ctx === "Campaign" ? "🏷️ Campaigns" : "✏️ Manual"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <ScrollArea className="max-h-[70vh]">
+            <div className="p-6">
+              {discountContext === "Campaign" ? (
+                <div className="space-y-6">
+                  {/* Empty state: no campaigns configured at all */}
+                  {campaignProgress.length === 0 && !selectedCustomer && (
+                    <div className="text-center py-16 px-4">
+                      <div className="w-20 h-20 bg-zinc-50 rounded-[2rem] flex items-center justify-center mx-auto mb-4 border border-zinc-100 rotate-3 transition-transform hover:rotate-0">
+                        <Star className="w-10 h-10 text-zinc-200" />
+                      </div>
+                      <h3 className="font-black text-zinc-900 text-lg">No Incentives Available</h3>
+                      <p className="text-zinc-400 text-xs font-medium max-w-[200px] mx-auto mt-2 leading-relaxed">
+                        Create loyalty campaigns or seasonal rewards in the management console.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ✓ QUALIFIED REWARDS — Premium Highlight Cards */}
+                  {eligibleCampaigns.length > 0 && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-1.5 h-4 bg-emerald-500 rounded-full" />
+                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Ready to Redeem</p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        {eligibleCampaigns.map(c => {
+                          const discType = c.rules?.discount_type || "Percentage";
+                          const discVal = Number(c.rules?.discount_value || 0);
+                          const isApplied = cartDiscount?.id === c.id;
+                          return (
+                            <button
+                              key={c.id}
+                              onClick={() => handleApplyCampaign(c.id)}
+                              className={cn(
+                                "relative w-full text-left p-5 rounded-[2rem] border-2 transition-all group overflow-hidden",
+                                isApplied
+                                  ? "border-emerald-500 bg-emerald-50 shadow-xl shadow-emerald-100 ring-2 ring-emerald-100"
+                                  : "border-zinc-100 bg-white hover:border-indigo-100 hover:bg-zinc-50/50"
+                              )}
+                            >
+                              <div className="relative z-10 flex items-center justify-between">
+                                <div className="flex items-center gap-4">
+                                  <div className={cn(
+                                    "w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm transition-transform group-hover:scale-110",
+                                    c.isLoyaltyReward ? "bg-amber-100" : "bg-emerald-100"
+                                  )}>
+                                    {c.isLoyaltyReward ? "🎁" : "🏷️"}
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-black text-zinc-900 mb-1">{c.name}</p>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-black text-emerald-600 px-2 py-0.5 bg-emerald-100/50 rounded-full">
+                                        {discType === "Percentage" ? `${discVal}% OFF` : `-${formatCurrency(discVal)}`}
+                                      </span>
+                                      {c.isLoyaltyReward && <span className="text-[10px] font-bold text-amber-600">Loyalty Perk</span>}
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex flex-col items-end gap-2">
+                                  {isApplied ? (
+                                    <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center text-white shadow-lg shadow-emerald-200">
+                                      <CheckCircle2 className="w-5 h-5" />
+                                    </div>
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-full border border-zinc-200 flex items-center justify-center group-hover:bg-indigo-50 group-hover:border-indigo-200 transition-colors">
+                                      <Plus className="w-4 h-4 text-zinc-400 group-hover:text-indigo-600" />
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {/* Background Decorative Sparkle */}
+                              {!isApplied && <Sparkles className="absolute -right-2 -bottom-2 w-16 h-16 text-zinc-50/50 group-hover:text-indigo-50 transition-colors" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* IN-PROGRESS REWARDS — Modern Bento Cards */}
+                  {upcomingRewards.length > 0 && (
+                    <div className="space-y-3 pt-4 border-t border-zinc-100">
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="w-1.5 h-4 bg-zinc-200 rounded-full" />
+                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">In-Progress Milestones</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        {upcomingRewards.map(c => (
+                          <div key={c.id} className="bg-zinc-50/50 rounded-3xl p-4 border border-zinc-100 flex flex-col gap-3">
+                            <div className="flex justify-between items-start">
+                              <div className="w-8 h-8 rounded-xl bg-white border border-zinc-100 flex items-center justify-center shadow-sm">
+                                <Zap className={cn("w-4 h-4", c.progress > 0.6 ? "text-amber-500" : "text-zinc-300")} />
+                              </div>
+                              <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
+                                {Math.round(c.progress * 100)}%
+                              </span>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-black text-zinc-900 leading-tight mb-1">{c.name}</p>
+                              <p className="text-[9px] text-zinc-400 font-bold uppercase tracking-tight truncate">
+                                Req: {c.requirementLabel}
+                              </p>
+                            </div>
+                            <div className="w-full bg-zinc-200/50 rounded-full h-1.5 overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: `${c.progress * 100}%` }}
+                                className={cn(
+                                  "h-full transition-all duration-1000",
+                                  c.progress > 0.8 ? "bg-amber-400" : c.progress > 0.5 ? "bg-indigo-500" : "bg-zinc-400"
+                                )} 
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Discount Label</Label>
+                    <Input
+                      placeholder="e.g. Staff Discount, Loyalty Adjustment"
+                      value={manualDiscount.name}
+                      onChange={e => setManualDiscount(d => ({ ...d, name: e.target.value }))}
+                      className="rounded-xl border-zinc-200"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Type</Label>
+                      <div className="flex bg-zinc-100 p-1 rounded-xl gap-1">
+                        {(["Percentage", "Fixed Amount"] as const).map(t => (
+                          <button
+                            key={t}
+                            className={cn(
+                              "flex-1 py-2 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+                              manualDiscount.type === t ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500"
+                            )}
+                            onClick={() => setManualDiscount(d => ({ ...d, type: t }))}
+                          >
+                            {t === "Percentage" ? "% Off" : "$ Fixed"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">
+                        Value {manualDiscount.type === "Percentage" ? "(%)" : "($)"}
+                      </Label>
+                      <Input
+                        type="number"
+                        placeholder={manualDiscount.type === "Percentage" ? "10" : "5.00"}
+                        value={manualDiscount.value}
+                        onChange={e => setManualDiscount(d => ({ ...d, value: e.target.value }))}
+                        className="rounded-xl border-zinc-200"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Reason (Required for Audit)</Label>
+                    <Input
+                      placeholder="e.g. Price match, damaged packaging…"
+                      value={manualDiscount.reason}
+                      onChange={e => setManualDiscount(d => ({ ...d, reason: e.target.value }))}
+                      className="rounded-xl border-zinc-200"
+                    />
+                  </div>
+                  <div className="p-3 bg-amber-50 rounded-xl border border-amber-100">
+                    <p className="text-[10px] font-bold text-amber-700">
+                      ⚠️ Your role ({posSession?.payGrade || "STANDARD"}) allows up to {
+                        posSession?.payGrade === "STANDARD" ? "10%" :
+                        posSession?.payGrade === "SUPERVISOR" ? "25%" : "100%"
+                      } discounts.
+                    </p>
+                  </div>
+                  <Button
+                    className="w-full h-12 rounded-2xl bg-zinc-900 text-white font-black"
+                    onClick={handleApplyManualDiscount}
+                  >
+                    Apply Discount
+                  </Button>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+
+          {cartDiscount && (
+            <div className="p-4 border-t border-zinc-100 flex items-center justify-between gap-3 bg-emerald-50/50">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-emerald-600" />
+                <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">
+                  Active: {cartDiscount.name} (-{formatCurrency(discountAmount)})
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg text-[10px] font-black"
+                onClick={() => { setCartDiscount(null); setIsDiscountDialogOpen(false); }}
+              >
+                Remove
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Split Payment Dialog */}
       <Dialog open={isSplitPaymentDialogOpen} onOpenChange={setIsSplitPaymentDialogOpen}>
@@ -2256,40 +2874,56 @@ Notes: ${closeRegisterNotes || 'None'}
             <motion.div 
               initial={{ scale: 0 }} 
               animate={{ scale: 1 }} 
-              className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-500 shadow-inner"
+              className={cn(
+                "w-24 h-24 rounded-full flex items-center justify-center shadow-inner",
+                lastTransaction?.isReturn ? "bg-rose-50 text-rose-500" : "bg-emerald-50 text-emerald-500"
+              )}
             >
-              <CheckCircle2 className="w-12 h-12" />
+              {lastTransaction?.isReturn ? <ArrowLeft className="w-12 h-12" /> : <CheckCircle2 className="w-12 h-12" />}
             </motion.div>
             
             <div className="space-y-2">
               <h2 className={cn(
                 "text-3xl font-black tracking-tight",
+                lastTransaction?.isReturn ? "text-rose-600" :
                 lastTransaction?.balanceDue > 0.01 ? "text-blue-600" : "text-zinc-900"
               )}>
-                {lastTransaction?.balanceDue > 0.01 ? "Partial Payment" : "Payment Complete"}
+                {lastTransaction?.isReturn ? "Return Processed" :
+                 lastTransaction?.balanceDue > 0.01 ? "Partial Payment" : "Payment Complete"}
               </h2>
               <div className="flex flex-col items-center gap-1">
                 <p className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
-                  {lastTransaction?.balanceDue > 0.01 ? "Debt added to customer account" : "Transaction fully resolved"}
+                  {lastTransaction?.isReturn
+                    ? `Refund via ${lastTransaction?.refundMethod === "ACCOUNT" ? "Store Credit" : lastTransaction?.refundMethod}`
+                    : lastTransaction?.balanceDue > 0.01 ? "Debt added to customer account" : "Transaction fully resolved"}
                 </p>
-                {selectedCustomer && (
+                {lastTransaction?.isReturn && lastTransaction?.originalTransactionId && (
+                  <Badge className="bg-rose-50 text-rose-600 border-rose-200 border text-[9px] font-black uppercase">
+                    Ref: #{lastTransaction.originalTransactionId.substring(0, 8).toUpperCase()}
+                  </Badge>
+                )}
+                {!lastTransaction?.isReturn && lastTransaction?.total > 0 && lastTransaction?.customerName !== "Guest Customer" && (
                   <Badge variant="outline" className="bg-amber-50 text-amber-600 border-amber-200 text-[9px] font-black uppercase">
                     <Star className="w-2.5 h-2.5 mr-1 fill-amber-600" />
                     +{Math.floor(lastTransaction?.total || 0)} Points Earned
                   </Badge>
-               )}
+                )}
               </div>
             </div>
 
             <div className="w-full bg-zinc-50 rounded-3xl p-6 space-y-4 border border-zinc-100">
               <div className="flex justify-between items-center text-sm font-bold">
-                <span className="text-zinc-400">Total Bill</span>
-                <span className="text-lg font-black text-zinc-900">{formatCurrency(lastTransaction?.total || 0)}</span>
+                <span className="text-zinc-400">{lastTransaction?.isReturn ? "Refund Amount" : "Total Bill"}</span>
+                <span className={cn("text-lg font-black", lastTransaction?.isReturn ? "text-rose-600" : "text-zinc-900")}>
+                  {lastTransaction?.isReturn ? "-" : ""}{formatCurrency(lastTransaction?.total || 0)}
+                </span>
               </div>
-              <div className="flex justify-between items-center text-sm font-bold pt-4 border-t border-zinc-100">
-                <span className="text-zinc-400">Amount Received</span>
-                <span className="text-xl font-black text-emerald-600">{formatCurrency(lastTransaction?.tendered || 0)}</span>
-              </div>
+              {!lastTransaction?.isReturn && (
+                <div className="flex justify-between items-center text-sm font-bold pt-4 border-t border-zinc-100">
+                  <span className="text-zinc-400">Amount Received</span>
+                  <span className="text-xl font-black text-emerald-600">{formatCurrency(lastTransaction?.tendered || 0)}</span>
+                </div>
+              )}
               
               {lastTransaction?.change > 0 && (
                 <div className="flex justify-between items-center text-sm font-bold text-emerald-600">
@@ -2305,9 +2939,52 @@ Notes: ${closeRegisterNotes || 'None'}
                 </div>
               )}
 
+              {/* Balance Deduction Breakdown — only when deduction was applied on return */}
+              {lastTransaction?.isReturn && (lastTransaction?.balanceDeducted || 0) > 0 && (
+                <div className="mt-2 p-3 rounded-xl border border-rose-200 bg-rose-50 space-y-2">
+                  <p className="text-[9px] font-black text-rose-600 uppercase tracking-widest">Account Settlement Applied</p>
+                  <div className="flex justify-between items-center text-[10px] font-bold text-rose-700">
+                    <span>Gross Refund Total</span>
+                    <span>{formatCurrency(lastTransaction?.total || 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] font-bold text-rose-700">
+                    <span>Account Balance Deducted</span>
+                    <span>- {formatCurrency(lastTransaction?.balanceDeducted || 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-black text-rose-800 pt-1 border-t border-rose-200">
+                    <span>Net Payout to Customer</span>
+                    <span>{formatCurrency(lastTransaction?.netRefundPaid || 0)}</span>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-between items-center text-[10px] font-black text-zinc-400 uppercase tracking-widest pt-2">
-                <span>Method</span>
-                <span>{lastTransaction?.paymentMethod}</span>
+                <span>{lastTransaction?.isReturn ? "Refund Via" : "Method"}</span>
+                <span>{lastTransaction?.isReturn && lastTransaction?.refundMethod === "ACCOUNT" ? "Store Credit" : lastTransaction?.paymentMethod}</span>
+              </div>
+              {lastTransaction?.cashierName && (
+                <div className="flex justify-between items-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                  <span>Processed By</span>
+                  <span>{lastTransaction.cashierName}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center text-[10px] font-bold text-zinc-400 uppercase tracking-widest">
+                <span>Date & Time</span>
+                <span>{lastTransaction?.date}</span>
+              </div>
+              <div
+                className="flex justify-between items-center text-[10px] font-bold text-zinc-400 pt-2 border-t border-zinc-100 cursor-pointer hover:text-zinc-700 transition-colors group"
+                title="Click to copy full Receipt ID for returns"
+                onClick={() => {
+                  navigator.clipboard.writeText(lastTransaction?.id || "");
+                  toast.success("Receipt ID copied to clipboard!");
+                }}
+              >
+                <span className="uppercase tracking-widest">{lastTransaction?.isReturn ? "Return Ref ID" : "Receipt ID"}</span>
+                <span className="font-mono text-[10px] text-zinc-500 group-hover:text-blue-600 transition-colors">
+                  #{lastTransaction?.id?.substring(0, 8).toUpperCase()}
+                  <span className="text-[8px] text-zinc-300 ml-1">(tap to copy)</span>
+                </span>
               </div>
             </div>
 
@@ -2702,7 +3379,104 @@ Date: ${lastTransaction?.date}
         </DialogContent>
       </Dialog>
 
-      {/* Customer Selector Dialog */}
+      <Dialog open={isTransactionHistoryOpen} onOpenChange={setIsTransactionHistoryOpen}>
+        <DialogContent className="w-full max-w-full sm:max-w-4xl rounded-none sm:rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden h-[100dvh] max-h-[100dvh] sm:h-[80vh] flex flex-col">
+          <div className="p-6 sm:p-8 pb-4 border-b border-zinc-100 bg-zinc-50/50 flex-none">
+            <DialogHeader className="mb-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-zinc-900 text-white rounded-2xl flex items-center justify-center shadow-lg">
+                    <History className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <DialogTitle className="text-xl sm:text-2xl font-black text-zinc-900 tracking-tight">Transaction Ledger</DialogTitle>
+                    <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">Full Audit Trail & Return History</DialogDescription>
+                  </div>
+                </div>
+                <div className="flex bg-zinc-100 p-1 rounded-xl gap-1">
+                  {(["ALL", "SALE", "RETURN"] as const).map(type => (
+                    <button 
+                      key={type}
+                      className={cn(
+                        "px-3 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all",
+                        transactionFilter === type ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"
+                      )}
+                      onClick={() => setTransactionFilter(type)}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </DialogHeader>
+          </div>
+
+          <ScrollArea className="flex-1 min-h-0">
+            <div className="p-4 sm:p-8">
+              {transactionHistory.length === 0 ? (
+                <div className="text-center py-20 opacity-20">
+                   <History className="w-16 h-16 mx-auto mb-4" />
+                   <p className="font-bold uppercase tracking-widest">No transactions found</p>
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-zinc-100 hover:bg-transparent">
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest">Receipt ID</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest">Date</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest">Customer</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-right">Total</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-right">Method</TableHead>
+                      <TableHead className="text-[10px] font-black uppercase tracking-widest text-right">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {transactionHistory
+                      .filter(tx => transactionFilter === "ALL" || tx.type === transactionFilter)
+                      .map((tx) => {
+                        const date = tx.timestamp?.toDate ? tx.timestamp.toDate() : new Date();
+                        const isReturn = tx.type === "RETURN";
+                        
+                        return (
+                          <TableRow key={tx.id} className="border-zinc-50 hover:bg-zinc-50/50 transition-colors cursor-pointer" onClick={() => {
+                            setLastTransaction(tx);
+                            setShowReceipt(true);
+                          }}>
+                            <TableCell className="font-mono text-[10px] font-bold text-blue-600">{tx.id.substring(0,8).toUpperCase()}</TableCell>
+                            <TableCell className="text-[10px] text-zinc-500 font-medium whitespace-nowrap">
+                              {date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </TableCell>
+                            <TableCell>
+                              <span className="font-bold text-[10px] text-zinc-900">{tx.customer_name || "Walk-in"}</span>
+                            </TableCell>
+                            <TableCell className={cn(
+                              "text-right font-black text-[10px]",
+                              isReturn ? "text-rose-600" : "text-zinc-900"
+                            )}>
+                              {isReturn ? "-" : ""}{formatCurrency(tx.total)}
+                            </TableCell>
+                            <TableCell className="text-right text-[9px] font-bold text-zinc-500 uppercase">{tx.payment_method}</TableCell>
+                            <TableCell className="text-right">
+                              <Badge className={cn(
+                                "text-[8px] font-black border-none px-2",
+                                isReturn ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"
+                              )}>
+                                {isReturn ? "RETURNED" : "COMPLETED"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </ScrollArea>
+          <div className="p-6 bg-zinc-50 border-t border-zinc-100 flex justify-end">
+             <Button variant="ghost" className="rounded-xl font-bold" onClick={() => setIsTransactionHistoryOpen(false)}>Close Ledger</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isCustomerSearchOpen} onOpenChange={setIsCustomerSearchOpen}>
         <DialogContent className="sm:max-w-2xl rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
           <div className="p-8 pb-4 border-b border-zinc-100">
@@ -2932,7 +3706,7 @@ Date: ${lastTransaction?.date}
                 }
 
                 // Grade-based cap check
-                const grade = posSession?.payGrade || "EXECUTIVE";
+                const grade = posSession?.payGrade || "STANDARD";
                 const capPercent = grade === "STANDARD" ? 10 : grade === "SUPERVISOR" ? 25 : 100;
                 if (itemDiscount.type === "Percentage" && val > capPercent) {
                   toast.error(`Your ${grade} grade is capped at ${capPercent}% item discounts.`);
