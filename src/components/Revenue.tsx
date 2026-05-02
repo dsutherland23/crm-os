@@ -33,7 +33,9 @@ import {
   ShieldCheck,
   Archive,
   X as XIcon,
-  Info
+  Info,
+  Camera,
+  MessageSquare
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -449,7 +451,8 @@ export default function Revenue() {
         description: '',
         status: 'PAID',
         payment_method: 'Bank Transfer',
-        date: new Date().toISOString().split('T')[0]
+        date: new Date().toISOString().split('T')[0],
+        receipt_url: ""
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'expenses');
@@ -674,7 +677,8 @@ export default function Revenue() {
     description: "",
     status: "PAID",
     payment_method: "Bank Transfer",
-    date: new Date().toISOString().split('T')[0]
+    date: new Date().toISOString().split('T')[0],
+    receipt_url: ""
   });
 
   const [newPayment, setNewPayment] = useState({
@@ -2048,6 +2052,7 @@ export default function Revenue() {
                     <TableHead className="font-bold text-zinc-900 py-4">Amount</TableHead>
                     <TableHead className="font-bold text-zinc-900 py-4">Date</TableHead>
                     <TableHead className="font-bold text-zinc-900 py-4">Status</TableHead>
+                    <TableHead className="font-bold text-zinc-900 py-4 text-right pr-6">Receipt</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2060,11 +2065,12 @@ export default function Revenue() {
                         <TableCell><div className="h-4 w-20 bg-zinc-100 rounded animate-pulse" /></TableCell>
                         <TableCell><div className="h-4 w-20 bg-zinc-100 rounded animate-pulse" /></TableCell>
                         <TableCell><div className="h-6 w-16 bg-zinc-100 rounded-full animate-pulse" /></TableCell>
+                        <TableCell className="text-right px-6"><div className="h-8 w-8 bg-zinc-100 rounded-lg animate-pulse ml-auto" /></TableCell>
                       </TableRow>
                     ))
                   ) : filteredExpenses.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="py-16 text-center">
+                      <TableCell colSpan={7} className="py-16 text-center">
                         <div className="flex flex-col items-center gap-3 text-zinc-400">
                           <AlertCircle className="w-10 h-10 opacity-20" />
                           <p className="text-sm font-bold">No expenses found matching your criteria</p>
@@ -2088,6 +2094,28 @@ export default function Revenue() {
                         )}>
                           {exp.status || "PAID"}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="py-4 text-right px-6">
+                        {exp.receipt_url ? (
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-8 w-8 rounded-lg text-blue-600 hover:bg-blue-50"
+                            onClick={() => {
+                              const link = document.createElement('a');
+                              link.href = exp.receipt_url;
+                              link.download = `receipt_${exp.id.substring(0,8)}.png`;
+                              document.body.appendChild(link);
+                              link.click();
+                              document.body.removeChild(link);
+                            }}
+                            title="View Receipt"
+                          >
+                            <Download className="w-4 h-4" />
+                          </Button>
+                        ) : (
+                          <span className="text-[10px] text-zinc-300 font-bold uppercase tracking-tighter italic">No Receipt</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -2530,7 +2558,8 @@ export default function Revenue() {
                         <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 px-6">Customer</TableHead>
                         <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10">Last Purchase</TableHead>
                         <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10">Outstanding</TableHead>
-                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 text-right px-6">Risk Status</TableHead>
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 text-center px-6">Risk Status</TableHead>
+                        <TableHead className="font-bold text-[10px] uppercase text-zinc-500 h-10 text-right px-6">Recovery</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -2544,13 +2573,29 @@ export default function Revenue() {
                             <TableCell className="font-bold text-sm text-zinc-900 px-6 py-4">{client.name}</TableCell>
                             <TableCell className="text-xs text-zinc-500 py-4">{client.daysSince} Days Ago</TableCell>
                             <TableCell className="text-xs font-bold text-rose-600 py-4">{formatCurrency(client.balance || 0)}</TableCell>
-                            <TableCell className="text-right px-6 py-4">
+                            <TableCell className="text-center px-6 py-4">
                                <Badge className={cn(
                                  "text-[9px] font-black px-2 py-0.5",
                                  client.risk === "HIGH" ? "bg-rose-50 text-rose-600 border-rose-100" : "bg-amber-50 text-amber-600 border-amber-100"
                                )}>
                                  {client.risk} RISK
                                </Badge>
+                            </TableCell>
+                            <TableCell className="text-right px-6 py-4">
+                              <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="h-8 rounded-lg border-blue-200 text-blue-600 hover:bg-blue-50 text-[10px] font-black uppercase tracking-widest"
+                                onClick={() => {
+                                  const msg = `Hi ${client.name}, we haven't seen you in ${client.daysSince} days! We'd love to help you clear your ${formatCurrency(client.balance || 0)} balance. Reply to this message and we can offer a 10% discount on a settlement today!`;
+                                  const url = `https://wa.me/${client.phone?.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(msg)}`;
+                                  window.open(url, '_blank');
+                                  toast.success(`Recovery message drafted for ${client.name}`);
+                                }}
+                              >
+                                <MessageSquare className="w-3 h-3 mr-1.5" />
+                                Engage AI
+                              </Button>
                             </TableCell>
                           </TableRow>
                         ))
@@ -2609,9 +2654,43 @@ export default function Revenue() {
             <div className="p-6 md:p-8 space-y-8">
               {/* Core Details */}
               <div className="space-y-4">
-                <div className="flex items-center gap-2 text-rose-600 mb-4 border-b border-zinc-200/50 pb-2">
-                  <ArrowDownRight className="w-4 h-4" />
-                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Transaction Core</span>
+                <div className="flex items-center justify-between mb-4 border-b border-zinc-200/50 pb-2">
+                  <div className="flex items-center gap-2 text-rose-600">
+                    <ArrowDownRight className="w-4 h-4" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-400">Transaction Core</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="file" 
+                      id="receipt-upload" 
+                      className="hidden" 
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            const base64String = reader.result as string;
+                            setNewExpense(prev => ({ ...prev, receipt_url: base64String }));
+                            toast.success("Receipt digitized and ready");
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className={cn(
+                        "h-8 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                        newExpense.receipt_url ? "bg-emerald-50 text-emerald-600 border-emerald-100" : "bg-white text-zinc-500 border-zinc-200"
+                      )}
+                      onClick={() => document.getElementById('receipt-upload')?.click()}
+                    >
+                      <Camera className="w-3 h-3 mr-1.5" />
+                      {newExpense.receipt_url ? "Receipt Linked" : "Capture"}
+                    </Button>
+                  </div>
                 </div>
                 
                 <div className="space-y-2 relative">

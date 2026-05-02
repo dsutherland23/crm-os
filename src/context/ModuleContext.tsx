@@ -127,7 +127,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     return saved ? JSON.parse(saved) : DEFAULT_MODULE_CONFIG;
   });
 
-  const [activeBranch, setActiveBranch] = useState("all");
+  const [activeBranch, setActiveBranch] = useState(() => localStorage.getItem("crm_active_branch") || "all");
   const [hasActiveTransaction, setHasActiveTransaction] = useState(false);
   const [currency, setCurrency] = useState(() => localStorage.getItem("crm_display_currency") || "USD");
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("crm_theme") as any) || "system");
@@ -335,6 +335,10 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     else localStorage.removeItem("crm_enterprise_id");
   }, [enterpriseId]);
 
+  useEffect(() => {
+    localStorage.setItem("crm_active_branch", activeBranch);
+  }, [activeBranch]);
+
   const toggleModule = (moduleName: keyof ModuleConfig) => {
     setConfig(prev => ({ ...prev, [moduleName]: !prev[moduleName] }));
   };
@@ -365,6 +369,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     try {
       clearSession();
       setPosSession(null); // Use the new function to clear state and localStorage
+      localStorage.removeItem("crm_active_branch");
       const { auth } = await import("@/lib/firebase");
       const { signOut } = await import("firebase/auth");
       const { clearMockUser, getMockUser } = await import("@/lib/auth-mock");

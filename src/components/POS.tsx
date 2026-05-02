@@ -223,7 +223,7 @@ export default function POS() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT" | "ACCOUNT">("CARD");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT" | "ACCOUNT" | "STORE_CREDIT">("CARD");
   const [isSplitPaymentDialogOpen, setIsSplitPaymentDialogOpen] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitCardAmount, setSplitCardAmount] = useState("");
@@ -1117,6 +1117,13 @@ export default function POS() {
       const balanceDue = Math.max(0, total - actualPaid);
 
       // SECURITY: Prevent debt accrual on Guest checkout
+      // Prevent Store Credit if no credit available
+      if (paymentMethod === "STORE_CREDIT" && (selectedCustomer?.balance || 0) >= -0.01) {
+        toast.error("Error: Customer has no store credit available.");
+        setIsProcessing(false);
+        return;
+      }
+
       if (balanceDue > 0.01 && !selectedCustomer) {
         toast.error("A customer must be selected to record a partial payment or account charge.");
         setIsProcessing(false);
@@ -1309,7 +1316,7 @@ export default function POS() {
           ? (deductBalanceOnRefund
               ? -Math.min(customerOutstandingBalance, total) // clear the debt (up to refund amount)
               : (paymentMethod === "ACCOUNT" ? -total : 0))
-          : balanceDue;
+          : (paymentMethod === "STORE_CREDIT" ? total : balanceDue);
 
         batch.update(doc(db, "customers", selectedCustomer.id), {
           spend: increment(isReturnMode ? -total : total),
@@ -2234,7 +2241,7 @@ Notes: ${closeRegisterNotes || 'None'}
                      <div className="flex items-center gap-3">
                         <div className="text-right">
                           <p className="text-[10px] font-black text-emerald-600">{selectedCustomer.points || 0} PTS</p>
-                          {(selectedCustomer.balance || 0) > 0.01 && (
+                          {Number(selectedCustomer.balance) > 0.01 && (
                             <p className="text-[9px] font-black text-rose-500 uppercase tracking-tighter">Owes {formatCurrency(selectedCustomer.balance)}</p>
                           )}
                         </div>
@@ -2425,22 +2432,35 @@ Notes: ${closeRegisterNotes || 'None'}
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {["CARD", "CASH", "SPLIT", "ACCOUNT"].map(method => (
-                          <Button 
-                            key={method}
-                            variant={paymentMethod === method ? "default" : "outline"} 
-                            className={cn("rounded-xl h-10 font-black text-[9px] px-0 transition-all", paymentMethod === method && "bg-zinc-900 border-zinc-900 scale-[1.02]")} 
-                            onClick={() => setPaymentMethod(method)}
-                            disabled={method === "ACCOUNT" && !selectedCustomer}
-                          >
-                            {method === "CARD" && <CreditCard className="w-3 h-3 mr-1" />}
-                            {method === "CASH" && <Banknote className="w-3 h-3 mr-1" />}
-                            {method === "SPLIT" && <Split className="w-3 h-3 mr-1" />}
-                            {method === "ACCOUNT" && (isReturnMode ? <Wallet className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />)}
-                            {method === "ACCOUNT" ? (isReturnMode ? "Store Credit" : "Charge Account") : method.charAt(0) + method.slice(1).toLowerCase()}
-                          </Button>
-                        ))}
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {["CARD", "CASH", "SPLIT", "ACCOUNT", "STORE_CREDIT"].map(method => {
+                          const hasCredit = selectedCustomer && (selectedCustomer.balance || 0) < -0.01;
+                          if (method === "STORE_CREDIT" && !hasCredit) return null;
+                          
+                          return (
+                            <Button 
+                              key={method}
+                              variant={paymentMethod === method ? "default" : "outline"} 
+                              className={cn(
+                                "rounded-xl h-10 font-black text-[8px] px-0 transition-all", 
+                                paymentMethod === method && "bg-zinc-900 border-zinc-900 scale-[1.02]",
+                                method === "STORE_CREDIT" && "border-emerald-200 text-emerald-600 bg-emerald-50/30"
+                              )} 
+                              onClick={() => setPaymentMethod(method as any)}
+                              disabled={method === "ACCOUNT" && !selectedCustomer}
+                            >
+                              {method === "CARD" && <CreditCard className="w-3 h-3 mr-1" />}
+                              {method === "CASH" && <Banknote className="w-3 h-3 mr-1" />}
+                              {method === "SPLIT" && <Split className="w-3 h-3 mr-1" />}
+                              {method === "ACCOUNT" && (isReturnMode ? <Wallet className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />)}
+                              {method === "STORE_CREDIT" && <History className="w-3 h-3 mr-1" />}
+                              
+                              {method === "ACCOUNT" 
+                                ? (isReturnMode ? "Credit Note" : "Account") 
+                                : method === "STORE_CREDIT" ? "Credit" : method.charAt(0) + method.slice(1).toLowerCase()}
+                            </Button>
+                          );
+                        })}
                       </div>
 
                       {paymentMethod !== "SPLIT" && (

@@ -46,7 +46,8 @@ import {
   Printer,
   Smartphone,
   ExternalLink,
-  ShoppingCart
+  ShoppingCart,
+  Wallet
 } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { 
@@ -2243,10 +2244,16 @@ export default function CRM() {
                           VIP
                         </Badge>
                       )}
-                      {selectedCustomer.balance > 0 && (
+                      {Number(selectedCustomer.balance) > 0.01 && (
                         <Badge className="bg-rose-600 text-white border-none px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest animate-pulse flex items-center gap-1">
                           <AlertCircle className="w-3 h-3" />
                           Owing: {formatCurrency(selectedCustomer.balance)}
+                        </Badge>
+                      )}
+                      {Number(selectedCustomer.balance) < -0.01 && (
+                        <Badge className="bg-emerald-500 text-white border-none px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 shadow-sm">
+                          <Wallet className="w-3 h-3" />
+                          Store Credit: {formatCurrency(Math.abs(selectedCustomer.balance))}
                         </Badge>
                       )}
                     </div>
@@ -2306,6 +2313,34 @@ export default function CRM() {
                         <span className="font-bold text-xs text-zinc-700">Schedule Call</span>
                       </DropdownMenuItem>
                     )}
+                    {canEdit && selectedCustomer.id !== 'walk-in' && (
+                      <DropdownMenuItem
+                        className={cn(
+                          "rounded-xl py-3 px-3 cursor-pointer flex items-center gap-3",
+                          selectedCustomer.balance > 0.01
+                            ? "text-rose-600 focus:text-rose-600 focus:bg-rose-50"
+                            : selectedCustomer.balance < -0.01
+                              ? "text-emerald-600 focus:text-emerald-600 focus:bg-emerald-50"
+                              : "focus:bg-zinc-50"
+                        )}
+                        onClick={() => setIsCollectPaymentOpen(true)}
+                      >
+                        <div className={cn(
+                          "p-2 rounded-lg",
+                          selectedCustomer.balance > 0.01 ? "bg-rose-50 text-rose-600" : selectedCustomer.balance < -0.01 ? "bg-emerald-50 text-emerald-600" : "bg-zinc-100 text-zinc-500"
+                        )}>
+                          <Wallet className="w-4 h-4" />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="font-bold text-xs">
+                            {selectedCustomer.balance > 0.01 ? "Settle Debt" : selectedCustomer.balance < -0.01 ? "Adjust Credit" : "Manage Balance"}
+                          </span>
+                          <span className="text-[10px] text-zinc-400">
+                            {selectedCustomer.balance > 0.01 ? `Collect ${formatCurrency(selectedCustomer.balance)}` : selectedCustomer.balance < -0.01 ? `Credit: +${formatCurrency(Math.abs(selectedCustomer.balance))}` : "Account is settled"}
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuGroup>
                   
                   <DropdownMenuSeparator className="my-2 bg-zinc-100" />
@@ -2355,9 +2390,9 @@ export default function CRM() {
               </div>
             </div>
 
-          {/* Debt Warning Banner */}
+          {/* Financial Status Banners */}
           <AnimatePresence>
-            {selectedCustomer.balance > 0 && (
+            {Number(selectedCustomer.balance) > 0.01 && (
               <motion.div 
                 initial={{ opacity: 0, height: 0, marginBottom: 0 }}
                 animate={{ opacity: 1, height: "auto", marginBottom: 24 }}
@@ -2385,6 +2420,49 @@ export default function CRM() {
             )}
           </AnimatePresence>
 
+          {/* Store Credit Banner */}
+          <AnimatePresence>
+            {Number(selectedCustomer.balance) < -0.01 && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                animate={{ opacity: 1, height: "auto", marginBottom: 24 }}
+                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="relative overflow-hidden bg-gradient-to-r from-emerald-50 to-teal-50 border-2 border-emerald-100 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                  <div className="absolute top-0 right-0 p-6 opacity-5 pointer-events-none">
+                    <Wallet className="w-24 h-24 text-emerald-600" />
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-emerald-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200/50 shrink-0">
+                      <Wallet className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <p className="text-base font-black text-emerald-900">Store Credit Available</p>
+                      <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">
+                        {formatCurrency(Math.abs(selectedCustomer.balance))} available — can be redeemed at Point of Sale
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 w-full sm:w-auto">
+                    <div className="text-right hidden sm:block">
+                      <p className="text-2xl font-black text-emerald-700">+{formatCurrency(Math.abs(selectedCustomer.balance))}</p>
+                      <p className="text-[9px] text-emerald-500 font-bold uppercase tracking-widest">Credit Balance</p>
+                    </div>
+                    <div className="w-[1px] h-10 bg-emerald-100 hidden sm:block" />
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsCollectPaymentOpen(true)}
+                      className="w-full sm:w-auto rounded-xl border-emerald-200 text-emerald-700 hover:bg-emerald-100 font-bold px-6 h-12 text-xs uppercase tracking-widest bg-white/60"
+                    >
+                      Adjust Balance
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <Card className="card-modern p-6 space-y-2 group hover:border-blue-500/50 transition-all">
@@ -2407,15 +2485,17 @@ export default function CRM() {
             </Card>
             <Card className="card-modern p-6 space-y-2 group hover:border-blue-500/50 transition-all relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Account Balance</p>
-                <CreditCard className="w-4 h-4 text-rose-500" />
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Financial Standing</p>
+                {selectedCustomer.balance > 0.01 ? <CreditCard className="w-4 h-4 text-rose-500" /> : selectedCustomer.balance < -0.01 ? <Wallet className="w-4 h-4 text-emerald-500" /> : <ShieldCheck className="w-4 h-4 text-zinc-400" />}
               </div>
-              <h3 className={cn("text-2xl font-bold", selectedCustomer.balance > 0 ? "text-rose-600" : "text-zinc-900")}>
-                {formatCurrency(selectedCustomer.balance)}
+              <h3 className={cn("text-2xl font-bold", selectedCustomer.balance > 0.01 ? "text-rose-600" : selectedCustomer.balance < -0.01 ? "text-emerald-600" : "text-zinc-900")}>
+                {selectedCustomer.balance < -0.01 ? `+${formatCurrency(Math.abs(selectedCustomer.balance))}` : formatCurrency(selectedCustomer.balance)}
               </h3>
               <div className="flex items-center justify-between">
-                <p className="text-[10px] text-zinc-500 font-medium">{selectedCustomer.balance > 0 ? "Outstanding Payment" : "No debt"}</p>
-                {selectedCustomer.balance > 0 && (
+                <p className="text-[10px] text-zinc-500 font-medium">
+                  {selectedCustomer.balance > 0.01 ? "Outstanding Debt" : selectedCustomer.balance < -0.01 ? "Available Store Credit" : "Account Settled"}
+                </p>
+                {selectedCustomer.balance > 0.01 && (
                   <Button variant="ghost" size="sm" className="h-6 px-2 rounded-lg text-blue-600 hover:bg-blue-50 text-[10px] font-black uppercase" onClick={() => setIsCollectPaymentOpen(true)}>
                     Collect
                   </Button>
