@@ -223,7 +223,7 @@ export default function POS() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<any>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT" | "DEBT">("CARD");
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT" | "ACCOUNT">("CARD");
   const [isSplitPaymentDialogOpen, setIsSplitPaymentDialogOpen] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitCardAmount, setSplitCardAmount] = useState("");
@@ -435,24 +435,30 @@ export default function POS() {
       return;
     }
     let isMounted = true;
-    const loadStaticData = async () => {
-      try {
-        const [bSnap, cSnap] = await Promise.all([
-          getDocs(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId))),
-          // PERF: Limit customer payload to 500 records to prevent memory crash on large DBs
-          getDocs(query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived"), limit(500))),
-        ]);
+
+    // Branches — one-time read is fine (rarely change mid-session)
+    getDocs(query(collection(db, "branches"), where("enterprise_id", "==", enterpriseId)))
+      .then(bSnap => { if (isMounted) setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() }))); })
+      .catch(err => console.error("Branch fetch error:", err));
+
+    // Customers — REAL-TIME listener so balance / points changes from any terminal
+    // are immediately visible in the search dialog and on the active customer badge.
+    const unsubCustomers = onSnapshot(
+      query(collection(db, "customers"), where("enterprise_id", "==", enterpriseId), where("status", "!=", "Archived"), limit(500)),
+      (cSnap) => {
         if (!isMounted) return;
-        setBranches(bSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setCustomers(cSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        // Loading is now handled by the products listener to ensure data is present before showing the UI
-        // setLoading(false);
-      } catch (err) {
-        console.error("Static data load error:", err);
-        if (isMounted) setLoading(false);
-      }
-    };
-    loadStaticData();
+        const fresh = cSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setCustomers(fresh);
+        // Keep selectedCustomer in sync — avoids stale balance during active transaction
+        setSelectedCustomer(prev => {
+          if (!prev) return prev;
+          const updated = fresh.find(c => c.id === prev.id);
+          return updated ?? prev;
+        });
+      },
+      err => console.error("Customer sync error:", err)
+    );
+
     const unsubProducts = onSnapshot(
       query(collection(db, "products"), where("enterprise_id", "==", enterpriseId), limit(1000)),
       (snapshot) => {
@@ -482,6 +488,7 @@ export default function POS() {
     );
     return () => {
       isMounted = false;
+      unsubCustomers?.();
       unsubProducts?.();
       unsubInventory?.();
       unsubCampaigns?.();
@@ -1103,11 +1110,19 @@ export default function POS() {
       
       const tendered = paymentMethod === "SPLIT" 
         ? (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0)
-        : (parseFloat(paidAmount) || (paymentMethod === "DEBT" ? 0 : total));
+        : (parseFloat(paidAmount) || (paymentMethod === "ACCOUNT" ? 0 : total));
       
       const actualPaid = Math.min(total, tendered);
       const changeDue = paymentMethod === "CASH" ? Math.max(0, tendered - total) : 0;
       const balanceDue = Math.max(0, total - actualPaid);
+
+      // SECURITY: Prevent debt accrual on Guest checkout
+      if (balanceDue > 0.01 && !selectedCustomer) {
+        toast.error("A customer must be selected to record a partial payment or account charge.");
+        setIsProcessing(false);
+        return;
+      }
+
       const isPartial = balanceDue > 0.01;
 
       const txRef = doc(collection(db, "transactions"));
@@ -1379,6 +1394,9 @@ export default function POS() {
         date: new Date().toLocaleString()
       });
       setShowReceipt(true);
+      if (balanceDue > 0.01 && selectedCustomer) {
+        toast.success(`Success: ${formatCurrency(balanceDue)} added to ${selectedCustomer.name}'s account balance.`);
+      }
       // Auto-switch back to Sale mode after a return is completed
       if (isReturnMode) {
         setIsReturnMode(false);

@@ -862,9 +862,14 @@ export default function CRM() {
       });
       
       setCustomers(docs);
-      if (docs.length > 0 && !selectedCustomer) {
-        setSelectedCustomer(docs[0]);
-      }
+      
+      // Functional updater avoids stale-closure bug — `prev` always reflects current state
+      // so balance/points changes from POS propagate instantly to the open profile.
+      setSelectedCustomer(prev => {
+        if (!prev) return docs.length > 0 ? docs[0] : null;
+        const updated = docs.find(d => d.id === prev.id);
+        return updated ?? prev;
+      });
 
       // Warn admin if the display window cap was hit
       if (snapshot.size >= 500) {
@@ -2238,6 +2243,12 @@ export default function CRM() {
                           VIP
                         </Badge>
                       )}
+                      {selectedCustomer.balance > 0 && (
+                        <Badge className="bg-rose-600 text-white border-none px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest animate-pulse flex items-center gap-1">
+                          <AlertCircle className="w-3 h-3" />
+                          Owing: {formatCurrency(selectedCustomer.balance)}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-2 lg:gap-6 text-xs lg:text-sm text-zinc-500 font-medium">
@@ -2343,6 +2354,36 @@ export default function CRM() {
                 </Button>
               </div>
             </div>
+
+          {/* Debt Warning Banner */}
+          <AnimatePresence>
+            {selectedCustomer.balance > 0 && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                animate={{ opacity: 1, height: "auto", marginBottom: 24 }}
+                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="bg-rose-50 border-2 border-rose-100 rounded-[2rem] p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-rose-500 text-white rounded-2xl flex items-center justify-center shadow-lg shrink-0">
+                      <AlertCircle className="w-6 h-6 animate-pulse" />
+                    </div>
+                    <div>
+                      <p className="text-base font-black text-rose-900">Outstanding Account Balance</p>
+                      <p className="text-[10px] text-rose-600 font-bold uppercase tracking-widest">This customer currently owes {formatCurrency(selectedCustomer.balance)} to the enterprise</p>
+                    </div>
+                  </div>
+                  <Button 
+                    onClick={() => setIsCollectPaymentOpen(true)} 
+                    className="w-full sm:w-auto rounded-xl bg-rose-600 text-white hover:bg-rose-700 font-black px-8 shadow-lg shadow-rose-200/50 h-12 text-xs uppercase tracking-widest"
+                  >
+                    Settle Debt Now
+                  </Button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Metrics Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
