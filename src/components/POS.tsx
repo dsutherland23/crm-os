@@ -227,6 +227,7 @@ export default function POS() {
   const [isSplitPaymentDialogOpen, setIsSplitPaymentDialogOpen] = useState(false);
   const [splitCashAmount, setSplitCashAmount] = useState("");
   const [splitCardAmount, setSplitCardAmount] = useState("");
+  const [splitCreditAmount, setSplitCreditAmount] = useState("");
   const [isSuspendedOrdersOpen, setIsSuspendedOrdersOpen] = useState(false);
   const [suspendedOrders, setSuspendedOrders] = useState<any[]>([]);
   const [receiptType, setReceiptType] = useState<"INVOICE" | "POS">("POS");
@@ -1109,7 +1110,7 @@ export default function POS() {
       const resolvedBranch = activeBranch === "all" ? "main" : activeBranch;
       
       const tendered = paymentMethod === "SPLIT" 
-        ? (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0)
+        ? (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0) + (parseFloat(splitCreditAmount) || 0)
         : (parseFloat(paidAmount) || (paymentMethod === "ACCOUNT" ? 0 : total));
       
       const actualPaid = Math.min(total, tendered);
@@ -1117,11 +1118,19 @@ export default function POS() {
       const balanceDue = Math.max(0, total - actualPaid);
 
       // SECURITY: Prevent debt accrual on Guest checkout
-      // Prevent Store Credit if no credit available
-      if (paymentMethod === "STORE_CREDIT" && (selectedCustomer?.balance || 0) >= -0.01) {
-        toast.error("Error: Customer has no store credit available.");
-        setIsProcessing(false);
-        return;
+      // Prevent Store Credit if no credit available or total exceeds credit
+      if (paymentMethod === "STORE_CREDIT") {
+        const availableCredit = Math.abs(Math.min(0, selectedCustomer?.balance || 0));
+        if (availableCredit < 0.01) {
+          toast.error("Error: Customer has no store credit available.");
+          setIsProcessing(false);
+          return;
+        }
+        if (total > availableCredit + 0.01) {
+          toast.error(`Insufficient Credit: This order is ${formatCurrency(total)} but the customer only has ${formatCurrency(availableCredit)} in credit. Please use 'Split Payment' to cover the remainder.`);
+          setIsProcessing(false);
+          return;
+        }
       }
 
       if (balanceDue > 0.01 && !selectedCustomer) {
@@ -1180,6 +1189,7 @@ export default function POS() {
         type: isReturnMode ? "RETURN" : "SALE",
         split_cash_amount: paymentMethod === "SPLIT" ? parseFloat(splitCashAmount) || 0 : 0,
         split_card_amount: paymentMethod === "SPLIT" ? parseFloat(splitCardAmount) || 0 : 0,
+        split_credit_amount: paymentMethod === "SPLIT" ? parseFloat(splitCreditAmount) || 0 : 0,
         refund_to_account: isReturnMode && paymentMethod === "ACCOUNT",
         original_transaction_id: isReturnMode && returnReceiptId ? returnReceiptId : null
       });
@@ -1313,10 +1323,16 @@ export default function POS() {
         // - Normal return to Account: decrease balance by refund total
         // - Deduct balance from refund: reduce balance by the outstanding amount (clears up to refund total)
         const finalBalanceAdjustment = isReturnMode
-          ? (deductBalanceOnRefund
-              ? -Math.min(customerOutstandingBalance, total) // clear the debt (up to refund amount)
-              : (paymentMethod === "ACCOUNT" ? -total : 0))
-          : (paymentMethod === "STORE_CREDIT" ? total : balanceDue);
+          ? (paymentMethod === "ACCOUNT"
+              ? -total
+              : (deductBalanceOnRefund
+                  ? -Math.min(customerOutstandingBalance, total)
+                  : 0))
+          : (paymentMethod === "STORE_CREDIT" 
+              ? total 
+              : paymentMethod === "SPLIT" 
+                ? (balanceDue + (parseFloat(splitCreditAmount) || 0)) 
+                : balanceDue);
 
         batch.update(doc(db, "customers", selectedCustomer.id), {
           spend: increment(isReturnMode ? -total : total),
@@ -2457,7 +2473,9 @@ Notes: ${closeRegisterNotes || 'None'}
                               
                               {method === "ACCOUNT" 
                                 ? (isReturnMode ? "Credit Note" : "Account") 
-                                : method === "STORE_CREDIT" ? "Credit" : method.charAt(0) + method.slice(1).toLowerCase()}
+                                : method === "STORE_CREDIT" 
+                                  ? `Credit (${formatCurrency(Math.abs(selectedCustomer?.balance || 0))})` 
+                                  : method.charAt(0) + method.slice(1).toLowerCase()}
                             </Button>
                           );
                         })}
@@ -2531,7 +2549,12 @@ Notes: ${closeRegisterNotes || 'None'}
                     )} 
                     onClick={() => {
                       if (!isCheckoutDetailsOpen) { setIsCheckoutDetailsOpen(true); return; }
-                      if (paymentMethod === "SPLIT") { setIsSplitPaymentDialogOpen(true); } 
+                      if (paymentMethod === "SPLIT") { 
+                        setSplitCashAmount("");
+                        setSplitCardAmount("");
+                        setSplitCreditAmount("");
+                        setIsSplitPaymentDialogOpen(true); 
+                      } 
                       else { handleCompleteTransaction(); }
                     }} 
                     disabled={isProcessing || cart.length === 0}
@@ -2790,21 +2813,135 @@ Notes: ${closeRegisterNotes || 'None'}
         </DialogContent>
       </Dialog>
 
-      {/* Split Payment Dialog */}
+      {/* Split Payment Dialog — Modern CRM v2 */}
       <Dialog open={isSplitPaymentDialogOpen} onOpenChange={setIsSplitPaymentDialogOpen}>
-        <DialogContent className="sm:max-w-md rounded-[2.5rem] p-8 border-none shadow-2xl bg-white overflow-hidden">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-black text-zinc-900">Split Tendering</DialogTitle>
-            <DialogDescription className="text-zinc-500 font-bold uppercase tracking-widest text-[10px]">
-              Total to collect: {formatCurrency(total)}
-            </DialogDescription>
-          </DialogHeader>
+        <DialogContent className="sm:max-w-md rounded-[2.5rem] p-0 border-none shadow-2xl bg-white overflow-hidden">
           
-          <div className="space-y-6 py-6">
+          {/* Dark Header — Payment Calculator */}
+          <div className="bg-zinc-900 p-7 pb-6 space-y-4">
+            <div>
+              <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1">Split Tendering</p>
+              <p className="text-3xl font-black text-white tracking-tight">{formatCurrency(total)}</p>
+              <p className="text-[10px] text-zinc-400 font-medium mt-0.5">Order Total to Collect</p>
+            </div>
+            
+            {/* Live Calculation Breakdown */}
+            {(() => {
+              const creditUsed = Math.min(
+                parseFloat(splitCreditAmount) || 0,
+                Math.abs(Math.min(0, selectedCustomer?.balance || 0))
+              );
+              const afterCredit = Math.max(0, total - creditUsed);
+              const cashCard = (parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0);
+              const remaining = Math.max(0, afterCredit - cashCard);
+              const isBalanced = Math.abs(creditUsed + cashCard - total) < 0.01;
+
+              return (
+                <div className="space-y-2">
+                  <div className="h-[1px] bg-zinc-800" />
+                  <div className="flex justify-between items-center text-[11px] font-bold">
+                    <span className="text-zinc-400 flex items-center gap-1.5"><Wallet className="w-3 h-3" /> Credit Applied</span>
+                    <span className={creditUsed > 0 ? "text-emerald-400" : "text-zinc-600"}>
+                      {creditUsed > 0 ? `– ${formatCurrency(creditUsed)}` : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-[11px] font-bold">
+                    <span className="text-zinc-400">Balance to Collect (Cash / Card)</span>
+                    <span className={afterCredit < 0.01 ? "text-emerald-400" : "text-amber-400"}>{formatCurrency(afterCredit)}</span>
+                  </div>
+                  {!isBalanced && remaining > 0.01 && (
+                    <div className="flex justify-between items-center text-[11px] font-black animate-pulse">
+                      <span className="text-rose-400">Still Needed</span>
+                      <span className="text-rose-400">{formatCurrency(remaining)}</span>
+                    </div>
+                  )}
+                  {isBalanced && (
+                    <div className="flex items-center justify-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Payment Balanced — Ready to Process</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+
+          <div className="p-7 space-y-5">
+
+            {/* Store Credit — First, most impactful */}
+            {selectedCustomer && (selectedCustomer.balance || 0) < -0.01 && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <Wallet className="w-3 h-3 text-emerald-500" /> Store Credit
+                  </Label>
+                  <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                    Available: {formatCurrency(Math.abs(Math.min(0, selectedCustomer.balance)))}
+                  </span>
+                </div>
+                <div className="relative group">
+                  <Wallet className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-400" />
+                  <Input 
+                    type="number" 
+                    placeholder="0.00" 
+                    className="h-16 pl-12 pr-20 rounded-2xl border-2 border-emerald-100 bg-emerald-50/30 font-black text-2xl focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-300"
+                    value={splitCreditAmount}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const num = parseFloat(val) || 0;
+                      const available = Math.abs(Math.min(0, selectedCustomer?.balance || 0));
+                      const capped = Math.min(num, available);
+                      setSplitCreditAmount(val);
+                      // Auto-fill remaining into Cash
+                      const rem = Math.max(0, total - capped);
+                      setSplitCashAmount(rem > 0.01 ? rem.toFixed(2) : "");
+                      setSplitCardAmount("");
+                    }}
+                  />
+                  <Button 
+                    size="sm" 
+                    variant="ghost"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 h-10 px-3 rounded-xl text-[10px] font-black uppercase text-emerald-600 hover:bg-emerald-100"
+                    onClick={() => {
+                      const available = Math.abs(Math.min(0, selectedCustomer?.balance || 0));
+                      const maxCredit = Math.min(available, total);
+                      setSplitCreditAmount(maxCredit.toFixed(2));
+                      const rem = Math.max(0, total - maxCredit);
+                      setSplitCashAmount(rem > 0.01 ? rem.toFixed(2) : "");
+                      setSplitCardAmount("");
+                    }}
+                  >
+                    Max
+                  </Button>
+                </div>
+                {/* Credit Remaining After Purchase */}
+                {parseFloat(splitCreditAmount) > 0 && (() => {
+                  const available = Math.abs(Math.min(0, selectedCustomer?.balance || 0));
+                  const used = Math.min(parseFloat(splitCreditAmount) || 0, available);
+                  const leftover = available - used;
+                  return (
+                    <div className="flex justify-between items-center px-1">
+                      <span className="text-[10px] text-zinc-400 font-medium">Credit Remaining After Purchase</span>
+                      <span className={cn("text-[10px] font-black", leftover > 0.01 ? "text-emerald-600" : "text-zinc-400")}>
+                        {leftover > 0.01 ? `+ ${formatCurrency(leftover)}` : "Fully Used"}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* Cash */}
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Cash Amount</Label>
-                {splitCashAmount && <span className="text-[10px] font-bold text-emerald-600">Remaining: {formatCurrency(Math.max(0, total - parseFloat(splitCashAmount)))}</span>}
+                <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                  <Banknote className="w-3 h-3" /> Cash Amount
+                </Label>
+                {(parseFloat(splitCreditAmount) || 0) + (parseFloat(splitCashAmount) || 0) > 0 && (
+                  <span className="text-[10px] font-bold text-zinc-500">
+                    Still needed: {formatCurrency(Math.max(0, total - (parseFloat(splitCreditAmount) || 0) - (parseFloat(splitCashAmount) || 0) - (parseFloat(splitCardAmount) || 0)))}
+                  </span>
+                )}
               </div>
               <div className="relative">
                 <Banknote className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
@@ -2816,15 +2953,20 @@ Notes: ${closeRegisterNotes || 'None'}
                   onChange={(e) => {
                     const val = e.target.value;
                     setSplitCashAmount(val);
-                    const num = parseFloat(val) || 0;
-                    setSplitCardAmount((total - num).toFixed(2));
+                    const credit = parseFloat(splitCreditAmount) || 0;
+                    const cash = parseFloat(val) || 0;
+                    const rem = Math.max(0, total - credit - cash);
+                    setSplitCardAmount(rem > 0.01 ? rem.toFixed(2) : "");
                   }}
                 />
               </div>
             </div>
 
+            {/* Card */}
             <div className="space-y-2">
-              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Card Amount</Label>
+              <Label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1.5">
+                <CreditCard className="w-3 h-3" /> Card Amount
+              </Label>
               <div className="relative">
                 <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-400" />
                 <Input 
@@ -2835,29 +2977,43 @@ Notes: ${closeRegisterNotes || 'None'}
                   onChange={(e) => {
                     const val = e.target.value;
                     setSplitCardAmount(val);
-                    const num = parseFloat(val) || 0;
-                    setSplitCashAmount((total - num).toFixed(2));
+                    const credit = parseFloat(splitCreditAmount) || 0;
+                    const card = parseFloat(val) || 0;
+                    const rem = Math.max(0, total - credit - card);
+                    setSplitCashAmount(rem > 0.01 ? rem.toFixed(2) : "");
                   }}
                 />
               </div>
             </div>
 
-            <div className={cn(
-              "p-4 rounded-2xl border-2 flex items-center justify-between font-black text-sm transition-all",
-              Math.abs((parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0) - total) < 0.01
-                ? "bg-emerald-50 border-emerald-100 text-emerald-600"
-                : "bg-rose-50 border-rose-100 text-rose-600 animate-pulse"
-            )}>
-              <span>Validated Total:</span>
-              <span>{formatCurrency((parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0))} / {formatCurrency(total)}</span>
-            </div>
+            {/* Breakdown Chips */}
+            {((parseFloat(splitCashAmount) || 0) > 0 || (parseFloat(splitCardAmount) || 0) > 0 || (parseFloat(splitCreditAmount) || 0) > 0) && (
+              <div className="flex flex-wrap gap-2">
+                {(parseFloat(splitCreditAmount) || 0) > 0 && (
+                  <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full px-3 py-1 text-[10px] font-black">
+                    💳 Credit: {formatCurrency(parseFloat(splitCreditAmount) || 0)}
+                  </span>
+                )}
+                {(parseFloat(splitCashAmount) || 0) > 0 && (
+                  <span className="bg-zinc-100 text-zinc-700 rounded-full px-3 py-1 text-[10px] font-black">
+                    💵 Cash: {formatCurrency(parseFloat(splitCashAmount) || 0)}
+                  </span>
+                )}
+                {(parseFloat(splitCardAmount) || 0) > 0 && (
+                  <span className="bg-blue-50 text-blue-700 border border-blue-100 rounded-full px-3 py-1 text-[10px] font-black">
+                    💳 Card: {formatCurrency(parseFloat(splitCardAmount) || 0)}
+                  </span>
+                )}
+              </div>
+            )}
+
           </div>
 
-          <DialogFooter className="gap-3">
+          <div className="px-7 pb-7 flex gap-3">
             <Button variant="ghost" className="flex-1 rounded-2xl h-14 font-bold" onClick={() => setIsSplitPaymentDialogOpen(false)}>Cancel</Button>
             <Button 
               className="flex-1 rounded-2xl h-14 font-black bg-zinc-900 text-white shadow-xl shadow-zinc-900/20"
-              disabled={Math.abs((parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0) - total) > 0.01}
+              disabled={Math.abs((parseFloat(splitCashAmount) || 0) + (parseFloat(splitCardAmount) || 0) + (parseFloat(splitCreditAmount) || 0) - total) > 0.01}
               onClick={() => {
                 setIsSplitPaymentDialogOpen(false);
                 handleCompleteTransaction();
@@ -2865,7 +3021,8 @@ Notes: ${closeRegisterNotes || 'None'}
             >
               Finalize Split
             </Button>
-          </DialogFooter>
+          </div>
+
         </DialogContent>
       </Dialog>
 
