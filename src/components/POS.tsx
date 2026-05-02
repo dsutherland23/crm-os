@@ -134,6 +134,12 @@ export default function POS() {
   const [isOpeningFloatOpen, setIsOpeningFloatOpen] = useState(false);
   const [showResolution, setShowResolution] = useState<{ type: "NO_SESSION" | "BRANCH_MISMATCH" | "NETWORK_OFFLINE" } | null>(null);
 
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT" | "ACCOUNT" | "STORE_CREDIT">("CARD");
+  const [splitCashAmount, setSplitCashAmount] = useState("");
+  const [splitCardAmount, setSplitCardAmount] = useState("");
+  const [splitCreditAmount, setSplitCreditAmount] = useState("");
+
   // ── Cart Persistence ──────────────────────────────────────────
   const [isCartHydrated, setIsCartHydrated] = useState(false);
   const cartKey = useMemo(() => 
@@ -144,21 +150,25 @@ export default function POS() {
     setIsCartHydrated(false);
     if (!cartKey) {
       setCart([]);
+      setSelectedCustomer(null);
       return;
     }
     const saved = localStorage.getItem(cartKey);
+    const savedCustomer = localStorage.getItem(`${cartKey}_customer`);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setCart(parsed);
-        }
-      } catch (e) {
-        console.error("Cart restoration failed:", e);
-      }
-    } else {
-      setCart([]);
+        if (Array.isArray(parsed)) setCart(parsed);
+      } catch (e) { console.error("Cart restoration failed:", e); }
+    } else { setCart([]); }
+
+    if (savedCustomer) {
+      try {
+        const parsed = JSON.parse(savedCustomer);
+        setSelectedCustomer(parsed);
+      } catch (e) { console.error("Customer restoration failed:", e); }
     }
+
     setIsCartHydrated(true);
   }, [cartKey]);
 
@@ -169,7 +179,13 @@ export default function POS() {
     } else {
       localStorage.removeItem(cartKey);
     }
-  }, [cart, cartKey, isCartHydrated]);
+
+    if (selectedCustomer) {
+      localStorage.setItem(`${cartKey}_customer`, JSON.stringify(selectedCustomer));
+    } else {
+      localStorage.removeItem(`${cartKey}_customer`);
+    }
+  }, [cart, selectedCustomer, cartKey, isCartHydrated]);
   // ─────────────────────────────────────────────────────────────
   
   useEffect(() => {
@@ -222,12 +238,7 @@ export default function POS() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<any>(null);
-  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  const [paymentMethod, setPaymentMethod] = useState<"CASH" | "CARD" | "SPLIT" | "ACCOUNT" | "STORE_CREDIT">("CARD");
   const [isSplitPaymentDialogOpen, setIsSplitPaymentDialogOpen] = useState(false);
-  const [splitCashAmount, setSplitCashAmount] = useState("");
-  const [splitCardAmount, setSplitCardAmount] = useState("");
-  const [splitCreditAmount, setSplitCreditAmount] = useState("");
   const [isSuspendedOrdersOpen, setIsSuspendedOrdersOpen] = useState(false);
   const [suspendedOrders, setSuspendedOrders] = useState<any[]>([]);
   const [receiptType, setReceiptType] = useState<"INVOICE" | "POS">("POS");
@@ -1413,6 +1424,9 @@ export default function POS() {
         tendered: tendered,
         change: changeDue,
         balanceDue: balanceDue,
+        split_cash_amount: paymentMethod === "SPLIT" ? (parseFloat(splitCashAmount) || 0) : 0,
+        split_card_amount: paymentMethod === "SPLIT" ? (parseFloat(splitCardAmount) || 0) : 0,
+        split_credit_amount: paymentMethod === "SPLIT" ? (parseFloat(splitCreditAmount) || 0) : 0,
         customerName: selectedCustomer?.name || "Guest Customer",
         date: new Date().toLocaleString()
       });
@@ -2448,34 +2462,44 @@ Notes: ${closeRegisterNotes || 'None'}
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-5 gap-1.5">
+                      <div className="grid grid-cols-3 gap-2">
                         {["CARD", "CASH", "SPLIT", "ACCOUNT", "STORE_CREDIT"].map(method => {
                           const hasCredit = selectedCustomer && (selectedCustomer.balance || 0) < -0.01;
                           if (method === "STORE_CREDIT" && !hasCredit) return null;
                           
+                          const isActive = paymentMethod === method;
                           return (
                             <Button 
                               key={method}
-                              variant={paymentMethod === method ? "default" : "outline"} 
+                              variant={isActive ? "default" : "outline"} 
                               className={cn(
-                                "rounded-xl h-10 font-black text-[8px] px-0 transition-all", 
-                                paymentMethod === method && "bg-zinc-900 border-zinc-900 scale-[1.02]",
-                                method === "STORE_CREDIT" && "border-emerald-200 text-emerald-600 bg-emerald-50/30"
+                                "rounded-2xl h-16 flex flex-col items-center justify-center gap-1.5 transition-all border-zinc-100", 
+                                isActive 
+                                  ? "bg-zinc-900 border-zinc-900 text-white shadow-lg shadow-zinc-900/10 scale-[1.02]" 
+                                  : "bg-white text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900",
+                                method === "STORE_CREDIT" && !isActive && "border-emerald-100 bg-emerald-50/20 text-emerald-600 hover:bg-emerald-50"
                               )} 
                               onClick={() => setPaymentMethod(method as any)}
                               disabled={method === "ACCOUNT" && !selectedCustomer}
                             >
-                              {method === "CARD" && <CreditCard className="w-3 h-3 mr-1" />}
-                              {method === "CASH" && <Banknote className="w-3 h-3 mr-1" />}
-                              {method === "SPLIT" && <Split className="w-3 h-3 mr-1" />}
-                              {method === "ACCOUNT" && (isReturnMode ? <Wallet className="w-3 h-3 mr-1" /> : <Clock className="w-3 h-3 mr-1" />)}
-                              {method === "STORE_CREDIT" && <History className="w-3 h-3 mr-1" />}
+                              <div className={cn(
+                                "w-6 h-6 rounded-lg flex items-center justify-center transition-colors",
+                                isActive ? "bg-white/10 text-white" : (method === "STORE_CREDIT" ? "bg-emerald-100 text-emerald-600" : "bg-zinc-100 text-zinc-400")
+                              )}>
+                                {method === "CARD" && <CreditCard className="w-3.5 h-3.5" />}
+                                {method === "CASH" && <Banknote className="w-3.5 h-3.5" />}
+                                {method === "SPLIT" && <Split className="w-3.5 h-3.5" />}
+                                {method === "ACCOUNT" && (isReturnMode ? <Wallet className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />)}
+                                {method === "STORE_CREDIT" && <History className="w-3.5 h-3.5" />}
+                              </div>
                               
-                              {method === "ACCOUNT" 
-                                ? (isReturnMode ? "Credit Note" : "Account") 
-                                : method === "STORE_CREDIT" 
-                                  ? `Credit (${formatCurrency(Math.abs(selectedCustomer?.balance || 0))})` 
-                                  : method.charAt(0) + method.slice(1).toLowerCase()}
+                              <span className="text-[9px] font-black uppercase tracking-tighter">
+                                {method === "ACCOUNT" 
+                                  ? (isReturnMode ? "Credit Note" : "Charge Account") 
+                                  : method === "STORE_CREDIT" 
+                                    ? `Credit (${formatCurrency(Math.abs(selectedCustomer?.balance || 0))})` 
+                                    : method.charAt(0) + method.slice(1).toLowerCase()}
+                              </span>
                             </Button>
                           );
                         })}
@@ -3131,6 +3155,31 @@ Notes: ${closeRegisterNotes || 'None'}
                 <div className="flex justify-between items-center text-sm font-bold text-blue-600 bg-blue-50/50 p-3 rounded-xl border border-blue-100/50 mt-2">
                   <span>Remaining Debt</span>
                   <span className="text-lg font-black">{formatCurrency(lastTransaction?.balanceDue)}</span>
+                </div>
+              )}
+
+              {/* Split Payment Breakdown on Receipt */}
+              {lastTransaction?.paymentMethod === "SPLIT" && (
+                <div className="mt-2 p-4 rounded-2xl border border-zinc-100 bg-white space-y-3 shadow-sm">
+                  <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Payment Breakdown</p>
+                  {(lastTransaction?.split_credit_amount || 0) > 0 && (
+                    <div className="flex justify-between items-center text-[11px] font-bold">
+                      <span className="text-zinc-500 flex items-center gap-1.5"><Wallet className="w-3 h-3 text-emerald-500" /> Store Credit</span>
+                      <span className="text-emerald-600">{formatCurrency(lastTransaction.split_credit_amount)}</span>
+                    </div>
+                  )}
+                  {(lastTransaction?.split_cash_amount || 0) > 0 && (
+                    <div className="flex justify-between items-center text-[11px] font-bold">
+                      <span className="text-zinc-500 flex items-center gap-1.5"><Banknote className="w-3 h-3 text-amber-500" /> Cash</span>
+                      <span className="text-zinc-900">{formatCurrency(lastTransaction.split_cash_amount)}</span>
+                    </div>
+                  )}
+                  {(lastTransaction?.split_card_amount || 0) > 0 && (
+                    <div className="flex justify-between items-center text-[11px] font-bold">
+                      <span className="text-zinc-500 flex items-center gap-1.5"><CreditCard className="w-3 h-3 text-blue-500" /> Card</span>
+                      <span className="text-zinc-900">{formatCurrency(lastTransaction.split_card_amount)}</span>
+                    </div>
+                  )}
                 </div>
               )}
 

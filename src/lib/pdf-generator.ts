@@ -35,6 +35,10 @@ interface ReceiptData {
   previous_balance?: number;
   new_balance?: number;
   exchangePolicy?: string;
+  // Split payment details
+  split_cash_amount?: number;
+  split_card_amount?: number;
+  split_credit_amount?: number;
 }
 
 /**
@@ -215,7 +219,37 @@ export const generateProfessionalReceipt = async (
     doc.text(row.value, pageWidth - margin, y, { align: 'right' });
   });
 
-  const totalY = finalY + (rows.length * 5) + 4;
+  // Split Payment Breakdown if applicable
+  let splitY = finalY + (rows.length * 5);
+  if (data.paymentMethod === 'SPLIT') {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(148, 163, 184);
+    doc.text('PAYMENT BREAKDOWN:', summaryX, splitY + 4);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    let currentSplitY = splitY + 8;
+    
+    if ((data.split_credit_amount || 0) > 0) {
+      doc.text('Store Credit:', summaryX, currentSplitY);
+      doc.text(`$${data.split_credit_amount?.toFixed(2)}`, pageWidth - margin, currentSplitY, { align: 'right' });
+      currentSplitY += 4;
+    }
+    if ((data.split_cash_amount || 0) > 0) {
+      doc.text('Cash:', summaryX, currentSplitY);
+      doc.text(`$${data.split_cash_amount?.toFixed(2)}`, pageWidth - margin, currentSplitY, { align: 'right' });
+      currentSplitY += 4;
+    }
+    if ((data.split_card_amount || 0) > 0) {
+      doc.text('Card:', summaryX, currentSplitY);
+      doc.text(`$${data.split_card_amount?.toFixed(2)}`, pageWidth - margin, currentSplitY, { align: 'right' });
+      currentSplitY += 4;
+    }
+    splitY = currentSplitY - 4;
+  }
+
+  const totalY = Math.max(finalY + (rows.length * 5) + 4, splitY + 8);
   doc.setFillColor(isReturn ? 254 : 248, isReturn ? 242 : 250, isReturn ? 242 : 252);
   doc.rect(summaryX - 5, totalY - 4, 55, 8, 'F');
   
