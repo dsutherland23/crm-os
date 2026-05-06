@@ -2296,51 +2296,71 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         {/* ── BILLING TAB ─────────────────────────────────────────── */}
         <TabsContent value="billing" className="space-y-8">
           {/* Hero Header */}
-          <div className="rounded-3xl overflow-hidden bg-gradient-to-br from-zinc-900 via-blue-950 to-indigo-950 border border-zinc-800 p-6 sm:p-10 relative">
-            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
-            <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-indigo-600/10 rounded-full blur-[80px] pointer-events-none" />
-            <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400">Subscription</span>
-                  {billing.status === "trialing" ? (() => {
-                    const trialEnd = billing.trialEndsAt ? new Date(billing.trialEndsAt) : null;
-                    const daysLeft = trialEnd ? Math.max(0, Math.ceil((trialEnd.getTime() - Date.now()) / 86400000)) : 0;
-                    return (
-                      <span className={`text-[10px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-full border ${
-                        daysLeft <= 3
-                          ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
-                          : "bg-amber-500/20 text-amber-300 border-amber-500/30"
-                      }`}>
-                        {daysLeft > 0 ? `Trial · ${daysLeft}d left` : "Trial Expired"}
-                      </span>
-                    );
-                  })() : (
-                    <span className="text-[10px] font-black uppercase tracking-[0.2em] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full">Active</span>
+          <div className="rounded-[2.5rem] overflow-hidden bg-gradient-to-br from-zinc-950 via-zinc-900 to-indigo-950 border border-zinc-800 p-8 sm:p-12 relative shadow-2xl">
+            <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-indigo-500/5 rounded-full blur-[100px] pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-blue-500/5 rounded-full blur-[80px] pointer-events-none" />
+            
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-10">
+              <div className="space-y-4 max-w-xl">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20">
+                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300">
+                      {billing.status === "trialing" ? "Trial Period" : "Active Subscription"}
+                    </span>
+                  </div>
+                  
+                  {billing.autoBill ? (
+                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-300">Auto-Renew ON</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20">
+                      <AlertTriangle className="w-3 h-3 text-amber-400" />
+                      <span className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-300">Manual Renewal</span>
+                    </div>
                   )}
                 </div>
-                <h2 className="text-3xl font-black text-white tracking-tight">
-                  {billing.status === "trialing" ? "You're on a Free Trial" : "Choose Your Plan"}
-                </h2>
-                <p className="text-zinc-400 max-w-md text-sm leading-relaxed">
-                  {billing.status === "trialing"
-                    ? "Unlock the full power of your enterprise. Upgrade before your trial ends to keep all features."
-                    : "Upgrade or downgrade at any time — changes take effect at the next billing cycle."
-                  }
-                </p>
+
+                <div className="space-y-2">
+                  <h2 className="text-4xl font-black text-white tracking-tight leading-none">
+                    {PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS]?.name || "Business"} Plan
+                  </h2>
+                  <p className="text-zinc-400 text-sm font-medium leading-relaxed">
+                    {billing.status === "trialing" 
+                      ? "You are currently exploring the platform's capabilities. Upgrade to secure your enterprise data."
+                      : `Your ${PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS]?.name} subscription is active and fully functional.`
+                    }
+                  </p>
+                </div>
               </div>
-              <div className="flex flex-col items-start md:items-end gap-2 shrink-0">
-                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Current Plan</span>
-                <span className="text-2xl font-black text-white capitalize">{billing.planId.replace("-", " ")}</span>
-                {billing.status === "trialing" && billing.trialEndsAt ? (
-                  <span className="text-xs text-amber-400 font-bold">
-                    Trial ends {new Date(billing.trialEndsAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-                  </span>
-                ) : (
-                  <span className="text-xs text-zinc-500">
-                    Renews {new Date(billing.renewalDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-                  </span>
-                )}
+
+              <div className="flex flex-col items-start md:items-end gap-1.5 shrink-0">
+                <div className="bg-white/5 backdrop-blur-md rounded-2xl border border-white/10 p-5 min-w-[200px] space-y-4">
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Next Billing Event</p>
+                    <p className="text-lg font-black text-white">
+                      {new Date(billing.renewalDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+                  
+                  <div className="h-px bg-white/10" />
+                  
+                  <div className="flex justify-between items-center gap-4">
+                    <div className="space-y-0.5">
+                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Cycle</p>
+                      <p className="text-xs font-bold text-white capitalize">{billing.billingCycle}</p>
+                    </div>
+                    <div className="space-y-0.5 text-right">
+                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Investment</p>
+                      <p className="text-xs font-bold text-white">
+                        ${PLAN_LIMITS[billing.planId as keyof typeof PLAN_LIMITS]?.pricing[billing.billingCycle || 'monthly']}
+                        <span className="text-zinc-500 font-medium">/{billing.billingCycle === 'yearly' ? 'yr' : 'mo'}</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -2394,20 +2414,21 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
               </Card>
 
               {/* Billing Info Card */}
-              <Card className="card-modern">
-                <CardContent className="p-6 space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
-                      <Coins className="w-5 h-5" />
+              <Card className="card-modern shadow-xl border-zinc-100">
+                <CardContent className="p-8 space-y-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
+                      <CreditCard className="w-6 h-6" />
                     </div>
-                    <div>
-                      <p className="text-sm font-bold text-zinc-900">Payment Method</p>
-                      <p className="text-xs text-zinc-500">{billing.paymentMethod.type} ending in {billing.paymentMethod.last4} · Expires {billing.paymentMethod.expiry}</p>
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Vault Settlements</p>
+                      <p className="text-sm font-black text-zinc-900">{billing.paymentMethod.type} ending in {billing.paymentMethod.last4}</p>
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">Expires {billing.paymentMethod.expiry}</p>
                     </div>
                     <Dialog open={isPaymentMethodDialogOpen} onOpenChange={setIsPaymentMethodDialogOpen}>
                       <DialogTrigger
                         render={
-                          <Button variant="outline" size="sm" className="ml-auto rounded-xl text-xs font-bold border-zinc-200">Update</Button>
+                          <Button variant="outline" size="sm" className="ml-auto rounded-xl text-[10px] font-black uppercase tracking-widest border-zinc-200 hover:bg-zinc-50 px-4">Update Vault</Button>
                         }
                       />
                       <DialogContent className="rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl bg-white sm:max-w-md">
