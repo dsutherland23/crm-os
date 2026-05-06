@@ -100,6 +100,8 @@ function PricingCard() {
     // Stash plan & cycle so Settings can read them back from the return URL
     sessionStorage.setItem("lunipay_pending_plan", selectedPlan);
     sessionStorage.setItem("lunipay_pending_cycle", billingCycle);
+    sessionStorage.setItem("lunipay_pending_users", userCounts[selectedPlan].toString());
+    sessionStorage.setItem("lunipay_pending_branches", branchCounts[selectedPlan].toString());
 
     try {
       const breakdown = calculateBreakdown();
@@ -700,6 +702,64 @@ function PricingCard() {
                       </div>
                     </div>
                   </div>
+
+                  {/* ── Plan Change Impact ─────────────────────── */}
+                  {(selectedPlan !== billing.planId || userCounts[selectedPlan] !== billing.userCount || branchCounts[selectedPlan] !== billing.branchCount) && (
+                    <div className="space-y-4">
+                      <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Plan Change Impact</p>
+                      <div className="bg-blue-50/50 rounded-3xl p-5 border border-blue-100 space-y-4">
+                        {/* Plan Transition */}
+                        <div className="flex items-center gap-3">
+                          <div className="px-3 py-1 rounded-full bg-zinc-200 text-zinc-600 text-[10px] font-black uppercase">
+                            {PLAN_LIMITS[billing.planId]?.name || billing.planId}
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-zinc-300" />
+                          <div className="px-3 py-1 rounded-full bg-indigo-600 text-white text-[10px] font-black uppercase">
+                            {PLAN_LIMITS[selectedPlan]?.name}
+                          </div>
+                        </div>
+
+                        {/* Limit Deltas */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="p-3 bg-white rounded-2xl border border-blue-100/50">
+                            <p className="text-[9px] font-black text-zinc-400 uppercase">Total Users</p>
+                            <p className="text-sm font-black text-zinc-900 mt-1">
+                              {billing.userCount} <span className="text-zinc-300 font-medium">→</span> {userCounts[selectedPlan]}
+                            </p>
+                          </div>
+                          <div className="p-3 bg-white rounded-2xl border border-blue-100/50">
+                            <p className="text-[9px] font-black text-zinc-400 uppercase">Total Branches</p>
+                            <p className="text-sm font-black text-zinc-900 mt-1">
+                              {billing.branchCount} <span className="text-zinc-300 font-medium">→</span> {branchCounts[selectedPlan]}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* New Features Gain */}
+                        {PLAN_LIMITS[selectedPlan]?.features.length > (PLAN_LIMITS[billing.planId]?.features.length || 0) && (
+                          <div className="space-y-2">
+                            <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest">New Capabilities Gained</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {PLAN_LIMITS[selectedPlan].displayFeatures
+                                .filter(f => !PLAN_LIMITS[billing.planId]?.displayFeatures?.includes(f))
+                                .slice(0, 3)
+                                .map((feature, i) => (
+                                  <span key={i} className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[9px] font-bold border border-emerald-100/50 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    {feature}
+                                  </span>
+                                ))}
+                              {(PLAN_LIMITS[selectedPlan].displayFeatures.length - (PLAN_LIMITS[billing.planId]?.displayFeatures?.length || 0)) > 3 && (
+                                <span className="text-[9px] font-bold text-zinc-400 ml-1">
+                                  +{(PLAN_LIMITS[selectedPlan].displayFeatures.length - (PLAN_LIMITS[billing.planId]?.displayFeatures?.length || 0)) - 3} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Step 2: Payment Method Selector */}
                   <div className="space-y-4">

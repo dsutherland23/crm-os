@@ -193,6 +193,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
   };
 
   const [paymentSuccessData, setPaymentSuccessData] = useState<{
+    planId: string;
     planName: string;
     renewalDate: string;
     orderId: string;
@@ -225,11 +226,21 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
         ? new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString()
         : new Date(new Date().setMonth(new Date().getMonth() + 1)).toISOString();
 
-      setPaymentSuccessData({ planName, renewalDate: optimisticRenewal, orderId, autoBill: true, billingCycle: storedCycle });
+      setPaymentSuccessData({ 
+        planId: storedPlan,
+        planName, 
+        renewalDate: optimisticRenewal, 
+        orderId, 
+        autoBill: true, 
+        billingCycle: storedCycle 
+      });
       setIsPaymentSuccessOpen(true);
 
       // Background: verify with backend and update billing state
       if (orderId && enterpriseId) {
+        const storedUsers = sessionStorage.getItem("lunipay_pending_users");
+        const storedBranches = sessionStorage.getItem("lunipay_pending_branches");
+
         import("@/lib/firebase").then(({ auth }) => {
           auth.currentUser?.getIdToken().then(idToken => {
             fetch("/api/billing/lunipay/verify-session", {
@@ -239,13 +250,26 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
                 sessionId: orderId,
                 planId: storedPlan,
                 billingCycle: storedCycle,
+                userCount: storedUsers,
+                branchCount: storedBranches,
               }),
             }).then(r => r.json()).then(data => {
               if (data.verified) {
                 setPaymentSuccessData(prev => prev ? { ...prev, renewalDate: data.renewalDate, orderId: data.orderId } : prev);
-                updateBilling({ status: "active", planId: data.planId, billingCycle: data.billingCycle, renewalDate: data.renewalDate, autoBill: true, lastPaymentOrderId: data.orderId });
+                updateBilling({ 
+                  status: "active", 
+                  planId: data.planId, 
+                  billingCycle: data.billingCycle, 
+                  renewalDate: data.renewalDate, 
+                  autoBill: true, 
+                  lastPaymentOrderId: data.orderId,
+                  userCount: Number(storedUsers) || billing.userCount,
+                  branchCount: Number(storedBranches) || billing.branchCount,
+                });
                 sessionStorage.removeItem("lunipay_pending_plan");
                 sessionStorage.removeItem("lunipay_pending_cycle");
+                sessionStorage.removeItem("lunipay_pending_users");
+                sessionStorage.removeItem("lunipay_pending_branches");
               }
             }).catch(console.warn);
           });
@@ -2522,7 +2546,7 @@ export default function Settings({ defaultTab = "modules" }: { defaultTab?: stri
 function PaymentSuccessDialog({ open, onClose, data }: {
   open: boolean;
   onClose: () => void;
-  data: { planName: string; renewalDate: string; orderId: string; autoBill: boolean; billingCycle: string } | null;
+  data: { planId: string; planName: string; renewalDate: string; orderId: string; autoBill: boolean; billingCycle: string } | null;
 }) {
   const renewal = data?.renewalDate ? new Date(data.renewalDate) : null;
   const renewalStr = renewal?.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
@@ -2594,6 +2618,23 @@ function PaymentSuccessDialog({ open, onClose, data }: {
               </div>
             )}
           </motion.div>
+
+          {/* New Capabilities Gained */}
+          {data?.planId && PLAN_LIMITS[data.planId]?.displayFeatures && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.45 }} className="space-y-3">
+              <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest px-1">Included in your {data.planName} tier</p>
+              <div className="grid grid-cols-1 gap-2">
+                {PLAN_LIMITS[data.planId].displayFeatures.slice(0, 4).map((feature, i) => (
+                  <div key={i} className="flex items-center gap-2.5 p-3 rounded-2xl bg-zinc-50 border border-zinc-100">
+                    <div className="w-6 h-6 rounded-lg bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </div>
+                    <span className="text-xs font-bold text-zinc-700">{feature}</span>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
 
           {/* Auto-bill notice */}
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="flex gap-3 p-4 bg-blue-50/60 border border-blue-100 rounded-2xl">
