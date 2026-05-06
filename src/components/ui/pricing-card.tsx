@@ -14,7 +14,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState, useEffect, useRef } from "react";
 import { useModules } from "@/context/ModuleContext";
 import { toast } from "sonner";
-import { WiPayService, defaultWiPayConfig } from "@/lib/wipay";
 import { CreditCardIcon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import { PLAN_LIMITS } from "@/constants/plan-limits";
@@ -92,47 +91,59 @@ function PricingCard() {
   const [isSuccess, setIsSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleWiPayCheckout = async () => {
+  const handleLunipayCheckout = async () => {
     setIsSummaryOpen(false);
     setIsHandoffOpen(true);
     setHandoffStep(0);
-    
+
     try {
-      const plan = PLAN_LIMITS[selectedPlan as keyof typeof PLAN_LIMITS];
-      const extraUsers = Math.max(0, userCounts[selectedPlan] - plan.maxUsers);
-      const extraBranches = Math.max(0, branchCounts[selectedPlan] - plan.maxBranches);
-      const basePrice = billingCycle === "monthly" ? plan.pricing.monthly : plan.pricing.yearly;
-      const userAddonPrice = billingCycle === "monthly" ? plan.addons.userMonthly : plan.addons.userYearly;
-      const branchAddonPrice = billingCycle === "monthly" ? plan.addons.branchMonthly : plan.addons.branchYearly;
-      const total = basePrice + (extraUsers * userAddonPrice) + (extraBranches * branchAddonPrice);
+      const breakdown = calculateBreakdown();
+      const finalAmount = billingCycle === "yearly" ? breakdown.total * 12 : breakdown.total;
 
       // Step 1: Verification
       await new Promise(r => setTimeout(r, 800));
       setHandoffStep(1);
 
-      const wipay = new WiPayService({
-        ...defaultWiPayConfig,
-        currency: "USD"
-      });
-
-      // Step 2: Finalizing
+      // Step 2: Call secure backend to create a Lunipay session
       await new Promise(r => setTimeout(r, 800));
       setHandoffStep(2);
 
-      // Step 3: Redirecting
-      await new Promise(r => setTimeout(r, 500));
-      
-      wipay.redirectToCheckout({
-        total: billingCycle === "yearly" ? total * 12 : total,
-        orderId: `SUB-${enterpriseId || "NEW"}-${Date.now()}`,
-        customerName: enterpriseId || "Valued Merchant",
-        customerEmail: "connect@orivocrm.pro",
-        returnUrl: window.location.href + "?payment=success",
-        responseUrl: "https://us-central1-crm-os.cloudfunctions.net/wipayWebhook",
+      const idToken = await import("@/lib/firebase").then(m => m.auth.currentUser?.getIdToken());
+      const response = await fetch("/api/billing/lunipay/create-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
+        body: JSON.stringify({
+          planId: selectedPlan,
+          billingCycle,
+          userCount: userCounts[selectedPlan],
+          branchCount: branchCounts[selectedPlan],
+          enterpriseId,
+        }),
       });
-    } catch (err) {
-      console.error("WiPay Handoff Error:", err);
-      toast.error("Handshake failed. Please check your connection.");
+
+      if (!response.ok) {
+        let errMsg = `Server error: ${response.status} ${response.statusText}`;
+        try {
+          const text = await response.text();
+          if (text) {
+            const parsed = JSON.parse(text);
+            errMsg = parsed.error || errMsg;
+          }
+        } catch { /* body was not JSON — use status text */ }
+        throw new Error(errMsg);
+      }
+
+      const { url } = await response.json();
+
+      // Step 3: Redirect to Lunipay hosted checkout
+      await new Promise(r => setTimeout(r, 400));
+      window.location.href = url;
+    } catch (err: any) {
+      console.error("Lunipay Handoff Error:", err);
+      toast.error(err.message || "Handshake failed. Please check your connection.");
       setIsHandoffOpen(false);
     }
   };
@@ -701,7 +712,7 @@ function PricingCard() {
                         </div>
                         <div>
                           <p className="text-sm font-black text-zinc-900">Card Payment</p>
-                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">WiPay Secure Gateway</p>
+                          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-tighter">Lunipay Secure Gateway</p>
                         </div>
                       </button>
 
@@ -739,10 +750,10 @@ function PricingCard() {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-zinc-900">Secure Caribbean Gateway</p>
-                            <p className="text-[10px] text-zinc-500 leading-relaxed mt-1">We use WiPay to ensure your data is encrypted. Supports Visa, MasterCard, and local debit cards.</p>
+                            <p className="text-[10px] text-zinc-500 leading-relaxed mt-1">We use Lunipay to ensure your payment data is encrypted end-to-end. Supports Visa, MasterCard, and local debit cards.</p>
                           </div>
                         </div>
-                        <Button onClick={handleWiPayCheckout} className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black shadow-xl shadow-zinc-900/20 text-sm gap-2">
+                        <Button onClick={handleLunipayCheckout} className="w-full h-14 rounded-2xl bg-zinc-900 text-white font-black shadow-xl shadow-zinc-900/20 text-sm gap-2">
                           Pay via Secure Card
                           <ChevronRight className="w-4 h-4" />
                         </Button>

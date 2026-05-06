@@ -2,7 +2,8 @@ import express from "express";
 import * as dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 
-dotenv.config();
+dotenv.config();                           // loads .env
+dotenv.config({ path: ".env.local", override: true }); // loads .env.local and overrides .env values
 import path from "path";
 import { fileURLToPath } from "url";
 import { v4 as uuidv4 } from "uuid";
@@ -579,6 +580,74 @@ async function startServer() {
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
   });
+
+  // ── LUNIPAY SUBSCRIPTION BILLING ─────────────────────────────────────
+  app.post(
+    "/api/billing/lunipay/create-session",
+    requireAuth,
+    async (req: AuthenticatedRequest, res) => {
+      const secretKey = process.env.LUNIPAY_SECRET_KEY;
+      if (!secretKey) {
+        console.error("[Lunipay] LUNIPAY_SECRET_KEY is not configured.");
+        return res.status(503).json({ error: "Payment gateway is not configured. Please contact support." });
+      }
+
+      const { planId, billingCycle, userCount, branchCount, enterpriseId } = req.body;
+      if (!planId || !billingCycle) {
+        return res.status(400).json({ error: "Missing required billing fields: planId, billingCycle." });
+      }
+
+      // Pricing table (matches frontend PLAN_LIMITS)
+      const PLAN_PRICING_FULL: Record<string, {
+        monthly: number; yearly: number;
+        maxUsers: number; maxBranches: number;
+        userMonthly: number; userYearly: number;
+        branchMonthly: number; branchYearly: number;
+      }> = {
+        starter:       { monthly: 39,  yearly: 32.76, maxUsers: 5,  maxBranches: 1, userMonthly: 8,  userYearly: 6.72,  branchMonthly: 15, branchYearly: 12.60 },
+        "business-pro":{ monthly: 79,  yearly: 66.36, maxUsers: 15, maxBranches: 3, userMonthly: 8,  userYearly: 6.72,  branchMonthly: 15, branchYearly: 12.60 },
+        enterprise:    { monthly: 199, yearly: 167.16, maxUsers: 50, maxBranches: 10, userMonthly: 8, userYearly: 6.72,  branchMonthly: 15, branchYearly: 12.60 },
+      };
+
+      const plan = PLAN_PRICING_FULL[planId as string];
+      if (!plan) {
+        return res.status(400).json({ error: `Unknown plan: ${planId}` });
+      }
+
+      const isYearly = billingCycle === "yearly";
+      const basePrice = isYearly ? plan.yearly : plan.monthly;
+      const extraUsers = Math.max(0, (Number(userCount) || plan.maxUsers) - plan.maxUsers);
+      const extraBranches = Math.max(0, (Number(branchCount) || plan.maxBranches) - plan.maxBranches);
+      const userAddon = isYearly ? plan.userYearly : plan.userMonthly;
+      const branchAddon = isYearly ? plan.branchYearly : plan.branchMonthly;
+      const totalMonthly = basePrice + (extraUsers * userAddon) + (extraBranches * branchAddon);
+      const totalAmount = isYearly ? totalMonthly * 12 : totalMonthly;
+
+      // Lunipay expects amount in cents (integer)
+      const amountInCents = Math.round(totalAmount * 100);
+
+      const orderId = `SUB-${enterpriseId || req.user?.enterpriseId || "UNKNOWN"}-${Date.now()}`;
+      const returnBase = req.headers.origin || "https://crm-os.web.app";
+
+      try {
+        const LuniPay = (await import("lunipay")).default;
+        const lunipay = new LuniPay(secretKey);
+
+        const session = await lunipay.checkout.sessions.create({
+          amount: amountInCents,
+          currency: "usd",
+          success_url: `${returnBase}/settings?tab=billing&payment=success&order=${orderId}`,
+          cancel_url: `${returnBase}/settings?tab=billing&payment=cancelled`,
+        });
+
+        console.log(`[Lunipay] Session created for ${orderId}:`, session.url);
+        return res.json({ url: session.url, orderId });
+      } catch (err: any) {
+        console.error("[Lunipay] Session creation failed:", err);
+        return res.status(500).json({ error: "Failed to create payment session. Please try again." });
+      }
+    }
+  );
 
   // ── SECURE AI PROXY ─────────────────────────────────────────────────
   app.post(
