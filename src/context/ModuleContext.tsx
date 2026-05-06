@@ -73,6 +73,8 @@ export interface BillingConfig {
   };
   status: "active" | "past_due" | "canceled" | "trialing";
   trialEndsAt?: string;
+  autoBill: boolean;
+  lastPaymentOrderId?: string;
 }
 
 export interface BrandingConfig {
@@ -159,6 +161,7 @@ export function ModuleProvider({ children }: { children: React.ReactNode }) {
     paymentMethod: { type: "Visa", last4: "4242", expiry: "08/27" },
     status: "trialing",
     trialEndsAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+    autoBill: true,
   });
 
   const [enterpriseId, setEnterpriseId] = useState<string | null>(() => {

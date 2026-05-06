@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { CreditCardIcon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import { PLAN_LIMITS } from "@/constants/plan-limits";
-import { RefreshCw, ShieldCheck, Zap, Landmark, FileUp, Image as ImageIcon, Trash2, Globe, Copy, CheckCircle2, ChevronRight, Info } from "lucide-react";
+import { RefreshCw, ShieldCheck, Zap, Landmark, FileUp, Image as ImageIcon, Trash2, Globe, Copy, CheckCircle2, ChevronRight, Info, RotateCcw, Calendar, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { db, addDoc, collection, serverTimestamp } from "@/lib/firebase";
 import { recordAuditLog } from "@/lib/audit";
@@ -51,6 +51,7 @@ function PricingCard() {
     enterprise: billing.planId === "enterprise" ? billing.branchCount : PLAN_LIMITS.enterprise.maxBranches,
   }));
   const [isSaving, setIsSaving] = useState(false);
+  const [autoBill, setAutoBill] = useState<boolean>(billing.autoBill !== false);
 
   // Sync with context if it changes from cloud
   useEffect(() => {
@@ -95,6 +96,10 @@ function PricingCard() {
     setIsSummaryOpen(false);
     setIsHandoffOpen(true);
     setHandoffStep(0);
+
+    // Stash plan & cycle so Settings can read them back from the return URL
+    sessionStorage.setItem("lunipay_pending_plan", selectedPlan);
+    sessionStorage.setItem("lunipay_pending_cycle", billingCycle);
 
     try {
       const breakdown = calculateBreakdown();
@@ -757,6 +762,62 @@ function PricingCard() {
                           Pay via Secure Card
                           <ChevronRight className="w-4 h-4" />
                         </Button>
+
+                        {/* ── Auto-Bill Toggle ───────────────────────── */}
+                        <div className={cn(
+                          "rounded-2xl border p-4 space-y-3 transition-all",
+                          autoBill ? "bg-emerald-50/40 border-emerald-100" : "bg-amber-50/40 border-amber-200"
+                        )}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <RotateCcw className={cn("w-4 h-4", autoBill ? "text-emerald-600" : "text-amber-600")} />
+                              <span className="text-xs font-black text-zinc-900">Auto-Renewal</span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const next = !autoBill;
+                                setAutoBill(next);
+                                updateBilling({ autoBill: next });
+                                toast[next ? "success" : "warning"](next ? "Auto-renewal enabled." : "Auto-renewal disabled.", {
+                                  description: next
+                                    ? "Your subscription will renew automatically."
+                                    : "You will need to manually renew before your plan expires."
+                                });
+                              }}
+                              className={cn(
+                                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 transition-colors duration-300 ease-in-out focus:outline-none",
+                                autoBill ? "bg-emerald-500 border-emerald-500" : "bg-zinc-300 border-zinc-300"
+                              )}
+                            >
+                              <span className={cn(
+                                "pointer-events-none inline-block h-4 w-4 mt-0.5 rounded-full bg-white shadow transform transition-transform duration-300",
+                                autoBill ? "translate-x-5" : "translate-x-0.5"
+                              )} />
+                            </button>
+                          </div>
+
+                          {/* Next billing date */}
+                          {billing.renewalDate && (
+                            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                              <Calendar className="w-3.5 h-3.5 shrink-0" />
+                              <span>
+                                Next charge: <span className="font-black text-zinc-700">
+                                  {new Date(billing.renewalDate).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+                                </span>
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Warning when disabled */}
+                          {!autoBill && (
+                            <div className="flex items-start gap-2 mt-1 pt-2 border-t border-amber-200">
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                              <p className="text-[10px] text-amber-800 font-medium leading-relaxed">
+                                Auto-renewal is off. Your subscription will expire on the billing date and will not renew automatically.
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </motion.div>
                     ) : (
                       <motion.div 
@@ -869,7 +930,7 @@ function PricingCard() {
               <p className="text-xs font-bold text-zinc-400 uppercase tracking-widest leading-relaxed">
                 {handoffStep === 0 && "Preparing your secure checkout session..."}
                 {handoffStep === 1 && "Validating plan integrity and addons..."}
-                {handoffStep === 2 && "Handing off to WiPay Gateway..."}
+                {handoffStep === 2 && "Handing off to Lunipay Gateway..."}
               </p>
             </div>
 
