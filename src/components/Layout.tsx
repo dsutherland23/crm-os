@@ -460,8 +460,8 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
             </DialogContent>
           </Dialog>
 
-          {/* Bottom Section: Theme Picker + User Profile */}
-          <div className="mt-auto p-4 space-y-3">
+          {/* Bottom Section: Theme Picker + User Profile + Clock */}
+          <div className="mt-auto p-4 space-y-4">
 
             {/* ── Theme Palette ── */}
             {!isCollapsed && (
@@ -525,6 +525,22 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                 <LogOut className="w-4 h-4" />
               </Button>
             </div>
+
+            {/* ── Orbital Clock ── */}
+            <AnimatePresence>
+              {!isCollapsed && (
+                <motion.div 
+                  key="bottom-clock"
+                  initial={{ opacity: 0, scale: 0.7, y: 20 }}
+                  animate={{ opacity: 1, scale: 0.85, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.7, y: 20 }}
+                  transition={{ duration: 0.4 }}
+                  className="flex justify-center pt-2 pb-4 origin-bottom shrink-0"
+                >
+                  <OrbitalClock />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </aside>
