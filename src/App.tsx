@@ -64,6 +64,17 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [settingsTab, setSettingsTab] = useState("modules");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    return localStorage.getItem("crm_sidebar_collapsed") === "true";
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem("crm_sidebar_collapsed", String(next));
+      return next;
+    });
+  };
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [enterpriseLoading, setEnterpriseLoading] = useState(true);
   const { isModuleEnabled, setEnterpriseId, setBranding, enterpriseId, setUserRole, hasPermission, logout } = useModules();
@@ -289,8 +300,18 @@ function AppContent() {
             ) : (
               <motion.div key="authenticated-app" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="contents">
                 <div className="h-screen bg-background font-sans text-foreground antialiased transition-colors duration-300">
-                  <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} isMobileOpen={isMobileOpen} setIsMobileOpen={setIsMobileOpen} />
-                  <div className="lg:pl-72 flex flex-col h-screen">
+                  <Sidebar 
+                    activeTab={activeTab} 
+                    setActiveTab={setActiveTab} 
+                    isMobileOpen={isMobileOpen} 
+                    setIsMobileOpen={setIsMobileOpen} 
+                    isCollapsed={isSidebarCollapsed}
+                    onToggleCollapse={toggleSidebar}
+                  />
+                  <div className={cn(
+                    "flex flex-col h-screen transition-all duration-500 ease-in-out",
+                    isSidebarCollapsed ? "lg:pl-24" : "lg:pl-72"
+                  )}>
                     <Header onMenuClick={() => setIsMobileOpen(true)} setActiveTab={setActiveTab} activeTab={activeTab} />
                     <TrialBanner onUpgrade={() => { setSettingsTab("billing"); setActiveTab("settings"); }} />
                     <main className={cn("flex-1 overflow-x-hidden", activeTab === 'pos' ? "overflow-hidden" : "overflow-y-auto")}>

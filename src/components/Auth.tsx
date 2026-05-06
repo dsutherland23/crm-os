@@ -160,9 +160,6 @@ export default function Auth() {
         const count = BigInt(docSnap.data().unique_count || 0);
         setVisitorCount(count);
         localStorage.setItem("orivo_visitor_count_cache", count.toString());
-      } else {
-        // Initialize stats if they don't exist
-        setDoc(statsRef, { unique_count: 0 }, { merge: true });
       }
     }, (err: any) => {
       if (err.code !== 'permission-denied') {
@@ -170,17 +167,21 @@ export default function Auth() {
       }
     });
 
-    // Handle unique visitor logic
-    const visitorKey = "orivo_unique_visitor_id";
-    if (!localStorage.getItem(visitorKey)) {
-      localStorage.setItem(visitorKey, `v_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
+    // Handle visit logic - use sessionStorage so each new session counts as a visit.
+    // This fulfills the user's request to count everyone who visits while preventing 
+    // spamming the counter on every single component re-mount or refresh in the same session.
+    const visitKey = "orivo_visit_tracked";
+    if (!sessionStorage.getItem(visitKey)) {
+      sessionStorage.setItem(visitKey, "true");
       
-      // Attempt to increment the global unique counter
-      updateDoc(statsRef, {
+      // Use setDoc with merge:true and increment(1) to atomically increment or initialize.
+      // This is the robust way to handle global counters in Firestore without race conditions.
+      setDoc(statsRef, {
         unique_count: increment(1)
-      }).catch(() => {
-        // Fallback for first-time initialization if doc doesn't exist
-        setDoc(statsRef, { unique_count: 1 }, { merge: true }).catch(() => {});
+      }, { merge: true }).catch(err => {
+        if (err.code !== 'permission-denied') {
+          console.error("Failed to increment visitor count:", err);
+        }
       });
     }
 

@@ -71,9 +71,11 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   isMobileOpen: boolean;
   setIsMobileOpen: (open: boolean) => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen }: SidebarProps) {
+export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen, isCollapsed, onToggleCollapse }: SidebarProps) {
   const { isModuleEnabled, branding, posSession, enterpriseId, grantedOverrides, addOverride, logout, userRole, hasPermission } = useModules();
   const { setPendingAction } = usePendingAction();
   const [supportOpen, setSupportOpen] = useState(false);
@@ -149,7 +151,7 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
     }
   };
 
-  // Auto-collapse logic: If open and not interacted with for 10 seconds, close (unless active)
+  // Auto-collapse logic for support menu
   useEffect(() => {
     if (!supportOpen) return;
     const isOnSupportPage = activeTab.startsWith("support:");
@@ -217,16 +219,12 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
   ].filter(item => item.enabled);
 
   // ── Dynamic Access Control ───────────────────────────────────────
-  // Auto-redirect if user lands on a restricted page or loses access dynamically
   useEffect(() => {
     if (activeTab === "dashboard" || activeTab.startsWith("support:")) return;
-    
-    // special case for settings which requires admin
     if (activeTab === "settings" && !hasPermission("settings", "admin")) {
       setActiveTab("dashboard");
       return;
     }
-    
     if (!hasPermission(activeTab) && !grantedOverrides.includes(activeTab)) {
       setActiveTab("dashboard");
     }
@@ -247,28 +245,41 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
       </AnimatePresence>
 
       <aside className={cn(
-        "fixed inset-y-0 left-0 z-50 w-72 transition-all duration-500 ease-in-out lg:translate-x-0 p-4",
-        isMobileOpen ? "translate-x-0" : "-translate-x-full"
+        "fixed inset-y-0 left-0 z-50 transition-all duration-500 ease-in-out lg:translate-x-0 p-4",
+        isMobileOpen ? "translate-x-0 w-72" : "-translate-x-full lg:w-72",
+        isCollapsed ? "lg:w-24" : "lg:w-72"
       )}>
+        {/* Collapse Toggle Button (Desktop only) */}
+        <button
+          onClick={onToggleCollapse}
+          className="hidden lg:flex absolute right-1 top-1/2 -translate-y-1/2 w-6 h-12 bg-zinc-900 border border-zinc-800 rounded-full items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all z-50 shadow-xl group"
+          style={{ borderColor: activeTheme.border }}
+        >
+          <div className={cn("transition-transform duration-500", isCollapsed ? "rotate-0" : "rotate-180")}>
+            <ChevronRight className="w-4 h-4" />
+          </div>
+        </button>
+
         <div
-          className="h-full rounded-3xl flex flex-col overflow-hidden border shadow-2xl transition-colors duration-500"
+          className="h-full rounded-3xl flex flex-col overflow-hidden border shadow-2xl transition-all duration-500 relative"
           style={{ background: activeTheme.bg, borderColor: activeTheme.border }}
         >
+
           {/* Brand */}
-          <div className="p-8">
-            <div className="flex items-center gap-3 group cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden transition-all duration-300">
+          <div className={cn("transition-all duration-500 flex flex-col", isCollapsed ? "pt-6 pb-2 px-2 items-center" : "p-6 pt-8")}>
+            <div className={cn("flex items-center group cursor-pointer transition-all duration-500", isCollapsed ? "flex-col justify-center" : "gap-3")} onClick={() => setActiveTab('dashboard')}>
+              <div className={cn("rounded-xl flex items-center justify-center overflow-hidden transition-all duration-500 shrink-0 bg-white/5", isCollapsed ? "w-10 h-10" : "w-10 h-10")}>
                 {branding.logo ? (
-                  <img src={branding.logo} alt="Logo" className="w-full h-full object-contain" />
+                  <img src={branding.logo} alt="Logo" className="w-full h-full object-contain p-1.5" />
                 ) : (
                    <div className="w-full h-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                      <Command className="w-6 h-6" />
+                      <Command className={cn("transition-all duration-500", isCollapsed ? "w-6 h-6" : "w-6 h-6")} />
                    </div>
                 )}
               </div>
-              <div className="flex-1 min-w-0">
-                <h1 className="text-base font-bold text-white tracking-tight font-display truncate">{branding.name || 'Orivo CRM'}</h1>
-                <p className="text-[9px] text-zinc-500 uppercase tracking-[0.2em] font-bold">Enterprise Suite</p>
+              <div className={cn("transition-all duration-500 overflow-hidden", isCollapsed ? "h-0 opacity-0 mt-0 text-center" : "flex-1 min-w-0 opacity-100 mt-0")}>
+                <h1 className="text-base font-bold text-white tracking-tight font-display truncate leading-tight">{branding.name || 'Orivo CRM'}</h1>
+                <p className="text-[9px] text-zinc-500 uppercase tracking-[0.2em] font-bold truncate">Enterprise Suite</p>
               </div>
             </div>
           </div>
@@ -277,51 +288,43 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
           <div className="flex-1 px-4 overflow-y-auto overscroll-contain transition-all duration-300 hide-scrollbar scroll-smooth">
             <div className="space-y-6 py-4">
               {/* Mobile Only Branch Switcher */}
-              <div className="lg:hidden px-4 py-4 bg-zinc-800/30 rounded-2xl border border-zinc-700/30 mb-2">
-                <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-3">Operating Location</p>
-                <select 
-                  value={activeBranch} 
-                  onChange={(e) => {
-                    setActiveBranch(e.target.value);
-                    setIsMobileOpen(false);
-                  }}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none cursor-pointer"
-                >
-                  <option value="all">Global Operations</option>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-                <p className="text-[9px] text-zinc-500 mt-2 font-medium">Affects inventory & POS data visibility.</p>
-              </div>
+              {!isCollapsed && (
+                <div className="lg:hidden px-4 py-4 bg-zinc-800/30 rounded-2xl border border-zinc-700/30 mb-2">
+                  <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-3">Operating Location</p>
+                  <select 
+                    value={activeBranch} 
+                    onChange={(e) => {
+                      setActiveBranch(e.target.value);
+                      setIsMobileOpen(false);
+                    }}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none cursor-pointer"
+                  >
+                    <option value="all">Global Operations</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div>
-                <p className="px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-4">Main Menu</p>
+                <p className={cn("px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-4 transition-all duration-500 overflow-hidden", isCollapsed ? "h-0 opacity-0" : "h-auto opacity-100")}>Main Menu</p>
                 <nav className="space-y-1">
                   {menuItems.map((item) => {
                     const isExecutive = posSession?.payGrade === "EXECUTIVE";
                     const isSupervisor = posSession?.payGrade === "SUPERVISOR";
-                    
                     const isLocked = (() => {
                       if (isExecutive || userRole === "Owner") return false;
                       if (grantedOverrides.includes(item.id)) return false;
-                      
-                      // Check if they have at least viewer access to even see the button
-                      // If they have NO access, it's filtered out by .filter(item.enabled) above.
-                      // If they have viewer access, they can see it.
-                      // If it's a critical area like settings, we might still want to show it as locked for lower tiers.
-                      
                       if (item.id === "settings") return !hasPermission("settings", "admin");
-                      
                       return !hasPermission(item.id);
                     })();
-
                     const requiredGrade = item.id === "settings" ? "EXECUTIVE" : "SUPERVISOR";
 
                     return (
                       <button
                         key={item.id}
-                        title={isLocked ? `${item.label} — Requires ${requiredGrade} grade or above` : undefined}
+                        title={isCollapsed ? item.label : (isLocked ? `${item.label} — Requires ${requiredGrade} grade or above` : undefined)}
                         onClick={() => {
                           if (isLocked) {
                             setAccessPrompt({ itemLabel: item.label, targetTab: item.id });
@@ -331,107 +334,97 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                           setIsMobileOpen(false);
                         }}
                         className={cn(
-                          "w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                          "w-full flex items-center rounded-xl text-sm font-medium transition-all duration-300 group relative",
+                          isCollapsed ? "justify-center h-12 p-0" : "justify-between px-4 py-3",
                           isLocked
-                            ? "opacity-30 cursor-not-allowed text-zinc-600 hover:opacity-40 hover:bg-zinc-800/20"
+                            ? "opacity-30 cursor-not-allowed text-zinc-600"
                             : activeTab === item.id 
                               ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20" 
                               : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50"
                         )}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className={cn("flex items-center justify-center transition-all duration-500", isCollapsed ? "w-full" : "gap-3")}>
                           <item.icon className={cn(
-                            "w-5 h-5 transition-colors",
-                            isLocked ? "text-zinc-700" : activeTab === item.id ? "text-white" : "text-zinc-500 group-hover:text-zinc-300"
+                            "transition-all duration-500 shrink-0",
+                            isCollapsed ? "w-6 h-6" : "w-5 h-5",
+                            activeTab === item.id ? "text-white" : "text-zinc-500 group-hover:text-zinc-300"
                           )} />
-                          <span>{item.label}</span>
+                          <span className={cn("transition-all duration-500 overflow-hidden whitespace-nowrap", isCollapsed ? "w-0 opacity-0" : "w-auto opacity-100")}>{item.label}</span>
                         </div>
-                        {isLocked ? (
-                          <div className="relative">
-                            <Lock className="w-3 h-3 text-zinc-700" />
-                            <div className="absolute right-6 top-1/2 -translate-y-1/2 w-max max-w-[160px] px-2.5 py-1.5 bg-zinc-950 text-white text-[10px] font-bold rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-50 border border-zinc-800 scale-90 group-hover:scale-100 origin-right">
-                              Requires {requiredGrade}+
-                              <div className="absolute right-[-4px] top-1/2 -translate-y-1/2 w-2 h-2 bg-zinc-950 border-r border-t border-zinc-800 rotate-45" />
+                        {!isCollapsed && (
+                          isLocked ? (
+                            <div className="relative">
+                              <Lock className="w-3 h-3 text-zinc-700" />
+                              <div className="absolute right-6 top-1/2 -translate-y-1/2 w-max max-w-[160px] px-2.5 py-1.5 bg-zinc-950 text-white text-[10px] font-bold rounded-lg shadow-2xl opacity-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none z-50 border border-zinc-800 scale-90 group-hover:scale-100 origin-right">
+                                Requires {requiredGrade}+
+                              </div>
                             </div>
-                          </div>
-                        ) : activeTab === item.id ? (
-                          <motion.div layoutId="active-pill" className="w-1.5 h-1.5 rounded-full bg-white" />
-                        ) : null}
+                          ) : activeTab === item.id ? (
+                            <motion.div layoutId="active-pill" className="w-1.5 h-1.5 rounded-full bg-white" />
+                          ) : null
+                        )}
+                        {isCollapsed && isLocked && <Lock className="absolute top-1 right-1 w-2 h-2 text-zinc-700" />}
                       </button>
                     );
                   })}
                 </nav>
               </div>
 
-              <div className="px-4 py-4 bg-zinc-800/30 rounded-2xl border border-zinc-700/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-3 h-3 text-blue-400" />
-                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">AI Status</span>
+              {!isCollapsed && (
+                <div className="px-4 py-4 bg-zinc-800/30 rounded-2xl border border-zinc-700/30 transition-all duration-500">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Sparkles className="w-3 h-3 text-blue-400" />
+                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">AI Status</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-500">Neural Engine</span>
+                    <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0">Online</Badge>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-zinc-500">Neural Engine</span>
-                  <Badge variant="outline" className="text-[9px] bg-emerald-500/10 text-emerald-400 border-emerald-500/20 px-1.5 py-0">Online</Badge>
-                </div>
-              </div>
+              )}
 
               {/* ── SUPPORT SECTION ── */}
-              <div onMouseMove={resetInactivity}>
-                <button
-                  onClick={() => setSupportOpen(prev => !prev)}
-                  className="w-full flex items-center justify-between px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2 hover:text-zinc-400 transition-colors group"
-                >
-                  <span>Support</span>
-                  <ChevronUp className={cn(
-                    "w-3 h-3 transition-transform duration-300",
-                    supportOpen ? "rotate-0" : "rotate-180"
-                  )} />
-                </button>
+              {!isCollapsed && (
+                <div onMouseMove={resetInactivity}>
+                  <button
+                    onClick={() => setSupportOpen(prev => !prev)}
+                    className="w-full flex items-center justify-between px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2 hover:text-zinc-400 transition-colors group"
+                  >
+                    <span>Support</span>
+                    <ChevronUp className={cn(
+                      "w-3 h-3 transition-transform duration-300",
+                      supportOpen ? "rotate-0" : "rotate-180"
+                    )} />
+                  </button>
 
-                <motion.div
-                  onMouseMove={resetInactivity}
-                  initial={false}
-                  animate={{ height: supportOpen ? "auto" : 0, opacity: supportOpen ? 1 : 0 }}
-                  transition={{ duration: 0.25, ease: "easeInOut" }}
-                  style={{ overflow: "hidden" }}
-                >
-                  <nav className="space-y-0.5">
-                    {supportItems.map((item) => {
-                      const isActive = activeTab === `support:${item.id}`;
-                      return (
-                        <button
-                          key={item.id}
-                          onClick={() => handleSupportItem(item.id)}
-                          className={cn(
-                            "w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative",
-                            item.danger
-                              ? "text-zinc-600 hover:text-rose-400 hover:bg-rose-500/10"
-                              : isActive
-                              ? "bg-zinc-800 text-white"
-                              : item.accent
-                              ? "text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10"
-                              : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
-                          )}
-                        >
-                          <item.icon className={cn(
-                            "w-4 h-4 shrink-0 transition-colors",
-                            item.danger
-                              ? "text-zinc-600 group-hover:text-rose-400"
-                              : item.accent
-                              ? "text-cyan-400"
-                              : isActive
-                              ? "text-white"
-                              : "text-zinc-500 group-hover:text-zinc-300"
-                          )} />
-                          <span className="truncate">{item.label}</span>
-                          {isActive && (
-                            <motion.div layoutId="support-pill" className="ml-auto w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </nav>
-                </motion.div>
-              </div>
+                  <motion.div
+                    onMouseMove={resetInactivity}
+                    initial={false}
+                    animate={{ height: supportOpen ? "auto" : 0, opacity: supportOpen ? 1 : 0 }}
+                    transition={{ duration: 0.25, ease: "easeInOut" }}
+                    style={{ overflow: "hidden" }}
+                  >
+                    <nav className="space-y-0.5">
+                      {supportItems.map((item) => {
+                        const isActive = activeTab === `support:${item.id}`;
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => handleSupportItem(item.id)}
+                            className={cn(
+                              "w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group relative",
+                              item.danger ? "text-zinc-600 hover:text-rose-400 hover:bg-rose-500/10" : isActive ? "bg-zinc-800 text-white" : item.accent ? "text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10" : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50"
+                            )}
+                          >
+                            <item.icon className={cn("w-4 h-4 shrink-0 transition-colors", item.danger ? "text-zinc-600 group-hover:text-rose-400" : item.accent ? "text-cyan-400" : isActive ? "text-white" : "text-zinc-500 group-hover:text-zinc-300")} />
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </nav>
+                  </motion.div>
+                </div>
+              )}
 
             </div>
           </div>
@@ -448,193 +441,45 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
                 </DialogTitle>
                 <DialogDescription className="text-sm text-zinc-500 mt-1">
                   <strong className="text-zinc-700">{accessPrompt?.itemLabel}</strong> requires {accessPrompt?.targetTab === "settings" ? "EXECUTIVE" : "SUPERVISOR or EXECUTIVE"} grade access.
-                  <br /><br />
-                  Enter an authorized PIN to override and continue.
                 </DialogDescription>
               </div>
               <div className="p-6 space-y-5">
                 <div className="flex justify-center gap-3">
                   {[0,1,2,3].map(i => (
-                    <div key={i} className={cn(
-                      "w-4 h-4 rounded-full border-2 transition-all duration-150",
-                      overrideError ? "bg-rose-500 border-rose-500 animate-pulse" : overridePin.length > i ? "bg-amber-500 border-amber-500" : "border-zinc-300"
-                    )} />
+                    <div key={i} className={cn("w-4 h-4 rounded-full border-2 transition-all duration-150", overrideError ? "bg-rose-500 border-rose-500 animate-pulse" : overridePin.length > i ? "bg-amber-500 border-amber-500" : "border-zinc-300")} />
                   ))}
                 </div>
-                {overrideError && (
-                  <p className="text-center text-xs font-bold text-rose-500">{overrideError}</p>
-                )}
                 <div className="grid grid-cols-3 gap-2">
-                  {[1,2,3,4,5,6,7,8,9].map(n => (
-                    <button key={n} onClick={() => handleOverridePin(n.toString())}
-                      className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-900 font-bold text-lg hover:bg-amber-50 hover:border-amber-200 transition-all active:scale-95 shadow-sm">
-                      {n}
-                    </button>
+                  {[1,2,3,4,5,6,7,8,9,0].map(n => (
+                    <button key={n} onClick={() => handleOverridePin(n.toString())} className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-900 font-bold text-lg hover:bg-amber-50 hover:border-amber-200 transition-all active:scale-95 shadow-sm">{n}</button>
                   ))}
-                  <button onClick={() => setOverridePin("")} className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-500 text-xs font-bold uppercase tracking-widest hover:bg-zinc-50 transition-all active:scale-95">Clear</button>
-                  <button onClick={() => handleOverridePin("0")} className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-900 font-bold text-lg hover:bg-amber-50 hover:border-amber-200 transition-all active:scale-95 shadow-sm">0</button>
-                  <button onClick={() => setOverridePin(p => p.slice(0,-1))} className="h-12 rounded-xl border border-zinc-200 bg-white flex items-center justify-center hover:bg-zinc-50 transition-all active:scale-95">
-                    <X className="w-5 h-5 text-zinc-500" />
-                  </button>
+                  <button onClick={() => setOverridePin("")} className="h-12 rounded-xl border border-zinc-200 bg-white text-zinc-500 text-[10px] font-bold uppercase tracking-widest hover:bg-zinc-50 transition-all active:scale-95">Clear</button>
+                  <button onClick={() => setOverridePin(p => p.slice(0,-1))} className="h-12 rounded-xl border border-zinc-200 bg-white flex items-center justify-center hover:bg-zinc-50 transition-all active:scale-95"><X className="w-5 h-5 text-zinc-500" /></button>
                 </div>
               </div>
             </DialogContent>
           </Dialog>
-
-          {/* Delete Account Confirm Dialog */}
-          <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
-            <DialogContent className="sm:max-w-[400px] rounded-3xl border-rose-100 p-6">
-              <DialogHeader>
-                <div className="w-12 h-12 rounded-2xl bg-rose-50 flex items-center justify-center text-rose-500 mb-4 border border-rose-100">
-                  <Trash2 className="w-6 h-6" />
-                </div>
-                <DialogTitle className="text-xl font-bold text-zinc-900">Delete Account?</DialogTitle>
-                <DialogDescription className="text-sm text-zinc-500 mt-1">
-                  This action is <strong>permanent and irreversible</strong>. All your enterprise data, branches, customers, and transactions will be permanently erased.
-                  <br /><br />
-                  Please contact <strong>support@orivo.app</strong> or use the Contact Support page to initiate an account deletion request reviewed by our team.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter className="mt-6 flex gap-3 sm:justify-end">
-                <Button variant="outline" onClick={() => setShowDeleteConfirm(false)} className="rounded-xl border-zinc-200 font-bold">Cancel</Button>
-                <Button
-                  onClick={() => { setShowDeleteConfirm(false); setActiveTab("support:contact"); setIsMobileOpen(false); }}
-                  className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white shadow-lg shadow-rose-600/20 font-bold"
-                >
-                  Contact Support
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          {/* Active POS Session Indicator */}
-          {posSession && activeTab !== "pos" && (
-            <div className="mx-4 mb-2 px-4 py-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Terminal Active</p>
-                <p className="text-xs font-semibold text-zinc-300 truncate">{posSession.staffName}</p>
-                <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">{posSession.payGrade}</p>
-              </div>
-              <Lock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-            </div>
-          )}
-
-          {/* Clock */}
-          <div className="hidden lg:flex justify-center py-2">
-            <div className="scale-[0.65] origin-center h-40 flex items-center justify-center">
-              <OrbitalClock />
-            </div>
-          </div>
-
-          {/* ── Palette / Theme Picker ──────────────────────────────────────── */}
-          <div className="relative px-4 pb-2">
-            <button
-              onClick={() => setPaletteOpen(prev => !prev)}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl border transition-all duration-200 group w-full"
-              style={{
-                borderColor: activeTheme.border,
-                color: activeTheme.text,
-                opacity: 0.6
-              }}
-            >
-              <Palette className="w-3.5 h-3.5 shrink-0 group-hover:rotate-12 transition-transform duration-300" />
-              <span className="text-[10px] font-bold uppercase tracking-widest flex-1 text-left">Theme</span>
-              {/* Live color dot */}
-              <span
-                className="w-3 h-3 rounded-full border border-white/20 shadow-sm shrink-0"
-                style={{ background: activeTheme.bg, boxShadow: `0 0 6px ${activeTheme.border}` }}
-              />
-            </button>
-
-            <AnimatePresence>
-              {paletteOpen && (
-                <motion.div
-                  key="palette-popout"
-                  initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 8, scale: 0.95 }}
-                  transition={{ type: "spring", stiffness: 420, damping: 28 }}
-                  className="absolute bottom-[calc(100%+8px)] left-4 right-4 rounded-2xl border p-3 shadow-2xl z-50"
-                  style={{ background: activeTheme.bg, borderColor: activeTheme.border }}
-                >
-                  {/* Header */}
-                  <p className="text-[9px] font-black uppercase tracking-[0.25em] mb-3 px-1" style={{ color: activeTheme.text, opacity: 0.4 }}>Sidebar Color</p>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    {SIDEBAR_THEMES.map((theme) => (
-                      <button
-                        key={theme.id}
-                        onClick={() => handleThemeSelect(theme.id)}
-                        title={theme.label}
-                        className="group relative flex flex-col items-center gap-1.5 p-2 rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
-                        style={{
-                          background: sidebarTheme === theme.id ? `${theme.border}33` : "transparent",
-                          border: `1px solid ${sidebarTheme === theme.id ? theme.border : "transparent"}`,
-                        }}
-                      >
-                        {/* Swatch */}
-                        <div
-                          className="w-8 h-8 rounded-xl border-2 shadow-lg transition-all duration-200 group-hover:scale-110"
-                          style={{
-                            background: theme.bg,
-                            borderColor: theme.border,
-                            boxShadow: sidebarTheme === theme.id ? `0 0 10px ${theme.border}66` : "none"
-                          }}
-                        >
-                          {sidebarTheme === theme.id && (
-                            <motion.div
-                              layoutId="theme-check"
-                              className="w-full h-full rounded-[10px] flex items-center justify-center"
-                            >
-                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                                <path d="M1 4l2.5 2.5L9 1" stroke={theme.text} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </motion.div>
-                          )}
-                        </div>
-                        <span
-                          className="text-[8px] font-bold uppercase tracking-wider leading-none"
-                          style={{ color: theme.text, opacity: 0.6 }}
-                        >
-                          {theme.label}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Cute arrow pointing down */}
-                  <div
-                    className="absolute -bottom-[6px] left-1/2 -translate-x-1/2 w-3 h-3 rotate-45 border-r border-b"
-                    style={{ background: activeTheme.bg, borderColor: activeTheme.border }}
-                  />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
 
           {/* User Profile */}
-          <div className="p-4 mt-auto">
-            <div className="p-4 bg-zinc-800/40 rounded-2xl border border-zinc-700/30 flex items-center gap-3">
-              <Avatar className="w-10 h-10 border-2 border-zinc-700/50 ring-2 ring-blue-500/20">
+          <div className={cn("p-4 transition-all duration-500", isCollapsed ? "mt-auto items-center" : "mt-auto")}>
+            <div className={cn("bg-zinc-800/40 rounded-2xl border border-zinc-700/30 flex items-center transition-all duration-500", isCollapsed ? "p-2 justify-center flex-col gap-2" : "p-4 gap-3")}>
+              <Avatar className={cn("transition-all duration-500 border-2 border-zinc-700/50 ring-2 ring-blue-500/20 shrink-0", isCollapsed ? "w-10 h-10" : "w-10 h-10")}>
                 <AvatarImage src={auth.currentUser?.photoURL || "https://picsum.photos/seed/user/200"} />
                 <AvatarFallback className="bg-zinc-800 text-zinc-400">
                   {auth.currentUser?.displayName?.charAt(0) || auth.currentUser?.email?.charAt(0) || "U"}
                 </AvatarFallback>
               </Avatar>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-bold text-white truncate">
-                  {auth.currentUser?.displayName || "User"}
-                </p>
-                <p className="text-[10px] text-zinc-500 truncate font-mono uppercase">
-                  {auth.currentUser?.email}
-                </p>
-              </div>
+              {!isCollapsed && (
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-white truncate">{auth.currentUser?.displayName || "User"}</p>
+                  <p className="text-[10px] text-zinc-500 truncate font-mono uppercase">{auth.currentUser?.email}</p>
+                </div>
+              )}
               <Button 
                 variant="ghost" 
                 size="icon" 
                 onClick={handleProtectedLogout}
-                className="text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg"
+                className={cn("text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg shrink-0", isCollapsed ? "w-8 h-8" : "w-10 h-10")}
               >
                 <LogOut className="w-4 h-4" />
               </Button>
