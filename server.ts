@@ -636,8 +636,8 @@ async function startServer() {
         const session = await lunipay.checkout.sessions.create({
           amount: amountInCents,
           currency: "usd",
-          success_url: `${returnBase}/settings?tab=billing&payment=success&order=${orderId}`,
-          cancel_url: `${returnBase}/settings?tab=billing&payment=cancelled`,
+          success_url: `${returnBase}/?payment=success&order=${orderId}`,
+          cancel_url: `${returnBase}/?payment=cancelled`,
         });
 
         console.log(`[Lunipay] Session created for ${orderId}:`, session.url);

@@ -34,6 +34,7 @@ const Suppliers    = lazy(() => import("./components/Suppliers"));
 const Workflow     = lazy(() => import("./components/Workflow"));
 import { ModuleProvider, useModules } from "./context/ModuleContext";
 import { PendingActionProvider } from "./context/PendingActionContext";
+import { GlobalBillingNotifications } from "./components/GlobalBillingNotifications";
 import { Sparkles, Activity } from "lucide-react";
 import RipplePulseLoader from "@/components/ui/ripple-pulse-loader";
 import { Button } from "@/components/ui/button";
@@ -331,7 +332,8 @@ function AppContent() {
                   {isModuleEnabled("ai") && activeTab !== "ai" && (
                     <Dialog><DialogTrigger className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-zinc-900 text-white shadow-2xl hover:scale-110 active:scale-95 transition-all z-50 p-0 flex items-center justify-center border-none cursor-pointer"><Sparkles className="w-6 h-6 text-blue-400" /></DialogTrigger><DialogContent className="max-w-5xl h-[85vh] p-0 overflow-hidden rounded-[2rem] border-zinc-200/60 shadow-2xl"><AIInsights /></DialogContent></Dialog>
                   )}
-                  <Toaster position="top-right" />
+                  <Toaster position="top-right" expand={true} richColors closeButton />
+                  <GlobalBillingNotifications />
                   <PWAInstallPrompt />
                   <NetworkIndicator />
                 </div>
