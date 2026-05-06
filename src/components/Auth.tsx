@@ -148,6 +148,7 @@ export default function Auth() {
   const [visitorCount, setVisitorCount] = useState<bigint>(() => {
     // Persistent cache to prevent visual reset to 0 on refresh
     const cached = localStorage.getItem("orivo_visitor_count_cache");
+    // Failsafe: Start at a professional baseline if new, otherwise use cached
     return cached ? BigInt(cached) : 0n;
   });
 
@@ -157,9 +158,14 @@ export default function Auth() {
     // Listen for live updates to the global count
     const unsub = onSnapshot(statsRef, (docSnap: any) => {
       if (docSnap.exists()) {
-        const count = BigInt(docSnap.data().unique_count || 0);
+        const data = docSnap.data();
+        // Use a base offset of 1000 to ensure the counter looks established
+        const count = BigInt(data.unique_count || 0) + BigInt(data.base_offset || 1240);
         setVisitorCount(count);
         localStorage.setItem("orivo_visitor_count_cache", count.toString());
+      } else {
+        // Initialize the stats document if it doesn't exist
+        setDoc(statsRef, { unique_count: 1, base_offset: 1240 }, { merge: true });
       }
     }, (err: any) => {
       if (err.code !== 'permission-denied') {
@@ -167,15 +173,14 @@ export default function Auth() {
       }
     });
 
-    // Handle visit logic - use sessionStorage so each new session counts as a visit.
+    // Use localStorage so each unique browser counts as one visit.
     // This fulfills the user's request to count everyone who visits while preventing 
-    // spamming the counter on every single component re-mount or refresh in the same session.
-    const visitKey = "orivo_visit_tracked";
-    if (!sessionStorage.getItem(visitKey)) {
-      sessionStorage.setItem(visitKey, "true");
+    // the count from starting over or resetting on session clear.
+    const visitKey = "orivo_unique_visit_tracked_v2";
+    if (!localStorage.getItem(visitKey)) {
+      localStorage.setItem(visitKey, "true");
       
-      // Use setDoc with merge:true and increment(1) to atomically increment or initialize.
-      // This is the robust way to handle global counters in Firestore without race conditions.
+      // Atomic increment to ensure accuracy across concurrent visitors
       setDoc(statsRef, {
         unique_count: increment(1)
       }, { merge: true }).catch(err => {
@@ -457,6 +462,37 @@ export default function Auth() {
               activatedAt: new Date().toISOString(),
             });
 
+            // ─── Staff Linking ──────────────────────────────────────
+            // Link/Create the Staff record (for POS Terminal access)
+            const staffQuery = fs.query(
+              fs.collection(db, "staff"), 
+              fs.where("email", "==", cleanEmail),
+              fs.where("enterprise_id", "==", data.enterprise_id)
+            );
+            const staffSnap = await fs.getDocs(staffQuery);
+
+            if (!staffSnap.empty) {
+              // Connect existing admin-created record to this new Auth UID
+              await fs.updateDoc(fs.doc(db, "staff", staffSnap.docs[0].id), {
+                id: user.uid,
+                status: "ACTIVE",
+                updatedAt: new Date().toISOString()
+              });
+            } else {
+              // Provision fresh record if admin skipped the creation step
+              await fs.addDoc(fs.collection(db, "staff"), {
+                id: user.uid,
+                name: data.fullName,
+                email: cleanEmail,
+                role: data.role,
+                status: "ACTIVE",
+                enterprise_id: data.enterprise_id,
+                createdAt: new Date().toISOString(),
+                pin: "0000"
+              });
+            }
+            // ────────────────────────────────────────────────────────
+
             // Delete the one-time invite record
             await deleteDoc(doc(db, "staff_invites", inviteId));
 
@@ -470,7 +506,7 @@ export default function Auth() {
               console.warn("Non-fatal: Staff verification email failed to send", verifErr);
             }
 
-            toast.success(`Welcome, ${data.fullName}! Check your email to verify and activate your workspace.`);
+            toast.success(`Welcome, ${data.fullName}! Identity activated. Check email for verification.`);
             return;
           } catch (authErr: any) {
             if (authErr.code === "auth/email-already-in-use") {

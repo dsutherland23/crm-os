@@ -143,6 +143,13 @@ export default function StaffManager() {
       toast.error('Insufficient permissions to create staff.');
       return;
     }
+
+    const cleanUser = {
+      ...newUser,
+      email: newUser.email?.trim().toLowerCase() || "",
+      enterprise_id: enterpriseId
+    };
+
     const loadingToast = toast.loading(isEditing ? "Updating staff record..." : "Creating staff record...");
     try {
       if (!isEditing) {
@@ -156,19 +163,16 @@ export default function StaffManager() {
 
       if (isEditing && selectedStaffMember) {
         await setDoc(doc(db, "staff", selectedStaffMember.id), {
-          ...newUser,
-          enterprise_id: enterpriseId,
+          ...cleanUser,
           updatedAt: new Date().toISOString()
         }, { merge: true });
 
         // Only attempt auth sync if the record appears to be a real Firebase Auth UID
-        // (Firebase UIDs are exactly 28 chars; local PIN-only IDs are shorter)
         if (selectedStaffMember.id.length === 28) {
           try {
             await updateDoc(doc(db, "users", selectedStaffMember.id), { role: newUser.role });
             await setAdminRole(selectedStaffMember.id, newUser.role);
           } catch (syncErr) {
-            // Auth claims sync failed — surface a warning; don't swallow silently
             toast.warning('Profile saved, but permission sync failed. Role may not update until next login.', { duration: 6000 });
           }
         }
@@ -176,10 +180,9 @@ export default function StaffManager() {
       } else {
         const id = newUser.name.toLowerCase().replace(/\s+/g, '-') + '-' + Math.floor(Math.random() * 10000);
         await setDoc(doc(db, "staff", id), {
-          ...newUser,
+          ...cleanUser,
           status: "ACTIVE",
-          createdAt: new Date().toISOString(),
-          enterprise_id: enterpriseId
+          createdAt: new Date().toISOString()
         });
 
         await addDoc(collection(db, "audit_logs"), {

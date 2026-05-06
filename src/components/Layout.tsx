@@ -266,47 +266,47 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
         >
 
           {/* Brand */}
-          <div className={cn("transition-all duration-500 flex flex-col", isCollapsed ? "pt-6 pb-2 px-2 items-center" : "p-6 pt-8")}>
-            <div className={cn("flex items-center group cursor-pointer transition-all duration-500", isCollapsed ? "flex-col justify-center" : "gap-3")} onClick={() => setActiveTab('dashboard')}>
-              <div className={cn("rounded-xl flex items-center justify-center overflow-hidden transition-all duration-500 shrink-0 bg-white/5", isCollapsed ? "w-10 h-10" : "w-10 h-10")}>
+          <div className={cn("transition-all duration-500 shrink-0", isCollapsed ? "pt-5 pb-2 px-2" : "px-5 pt-6 pb-4")}>
+            {/* Logo + Name row */}
+            <div className={cn("flex items-center gap-3 cursor-pointer group", isCollapsed && "justify-center")} onClick={() => setActiveTab('dashboard')}>
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 overflow-hidden bg-white/5">
                 {branding.logo ? (
-                  <img src={branding.logo} alt="Logo" className="w-full h-full object-contain p-1.5" />
+                  <img src={branding.logo} alt="Logo" className="w-full h-full object-contain p-1" />
                 ) : (
-                   <div className="w-full h-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                      <Command className={cn("transition-all duration-500", isCollapsed ? "w-6 h-6" : "w-6 h-6")} />
-                   </div>
+                  <div className="w-full h-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white group-hover:scale-110 transition-transform">
+                    <Command className="w-4 h-4" />
+                  </div>
                 )}
               </div>
-              <div className={cn("transition-all duration-500 overflow-hidden", isCollapsed ? "h-0 opacity-0 mt-0 text-center" : "flex-1 min-w-0 opacity-100 mt-0")}>
-                <h1 className="text-base font-bold text-white tracking-tight font-display truncate leading-tight">{branding.name || 'Orivo CRM'}</h1>
-                <p className="text-[9px] text-zinc-500 uppercase tracking-[0.2em] font-bold truncate">Enterprise Suite</p>
-              </div>
+              {!isCollapsed && (
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-sm font-bold text-white tracking-tight leading-snug truncate">{branding.name || 'Orivo CRM'}</h1>
+                  <p className="text-[9px] text-zinc-500 uppercase tracking-[0.18em] font-bold">Enterprise Suite</p>
+                </div>
+              )}
             </div>
-          </div>
 
+            {/* Mobile Only Branch Switcher */}
+            {!isCollapsed && (
+              <div className="lg:hidden mt-3 px-3 py-3 bg-white/5 rounded-xl border border-white/10">
+                <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2">Location</p>
+                <select
+                  value={activeBranch}
+                  onChange={(e) => { setActiveBranch(e.target.value); setIsMobileOpen(false); }}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none cursor-pointer"
+                >
+                  <option value="all">Global Operations</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+          
           {/* Navigation */}
           <div className="flex-1 px-4 overflow-y-auto overscroll-contain transition-all duration-300 hide-scrollbar scroll-smooth">
             <div className="space-y-6 py-4">
-              {/* Mobile Only Branch Switcher */}
-              {!isCollapsed && (
-                <div className="lg:hidden px-4 py-4 bg-zinc-800/30 rounded-2xl border border-zinc-700/30 mb-2">
-                  <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-3">Operating Location</p>
-                  <select 
-                    value={activeBranch} 
-                    onChange={(e) => {
-                      setActiveBranch(e.target.value);
-                      setIsMobileOpen(false);
-                    }}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none cursor-pointer"
-                  >
-                    <option value="all">Global Operations</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               <div>
                 <p className={cn("px-4 text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-4 transition-all duration-500 overflow-hidden", isCollapsed ? "h-0 opacity-0" : "h-auto opacity-100")}>Main Menu</p>
                 <nav className="space-y-1">
@@ -460,10 +460,51 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
             </DialogContent>
           </Dialog>
 
-          {/* User Profile */}
-          <div className={cn("p-4 transition-all duration-500", isCollapsed ? "mt-auto items-center" : "mt-auto")}>
-            <div className={cn("bg-zinc-800/40 rounded-2xl border border-zinc-700/30 flex items-center transition-all duration-500", isCollapsed ? "p-2 justify-center flex-col gap-2" : "p-4 gap-3")}>
-              <Avatar className={cn("transition-all duration-500 border-2 border-zinc-700/50 ring-2 ring-blue-500/20 shrink-0", isCollapsed ? "w-10 h-10" : "w-10 h-10")}>
+          {/* Bottom Section: Theme Picker + User Profile */}
+          <div className="mt-auto p-4 space-y-3">
+
+            {/* ── Theme Palette ── */}
+            {!isCollapsed && (
+              <div className="relative">
+                <button
+                  onClick={() => setPaletteOpen(prev => !prev)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-zinc-400 hover:text-white"
+                >
+                  <Palette className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest flex-1 text-left">Sidebar Theme</span>
+                  <div className="w-3.5 h-3.5 rounded-full border border-white/30 shrink-0" style={{ background: activeTheme.bg }} />
+                  <span className="text-[10px] font-semibold text-zinc-500">{activeTheme.label}</span>
+                </button>
+
+                {paletteOpen && (
+                  <div className="absolute bottom-full left-0 right-0 mb-2 bg-zinc-950 border border-zinc-800 rounded-2xl shadow-2xl z-[200] overflow-hidden">
+                    <p className="px-3 pt-3 pb-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Choose Theme</p>
+                    <div className="p-2 grid grid-cols-1 gap-0.5">
+                      {SIDEBAR_THEMES.map((t) => (
+                        <button
+                          key={t.id}
+                          onClick={() => handleThemeSelect(t.id)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-left",
+                            sidebarTheme === t.id
+                              ? "bg-white/10 text-white"
+                              : "text-zinc-400 hover:text-white hover:bg-white/5"
+                          )}
+                        >
+                          <div className="w-4 h-4 rounded-full border border-white/20 shrink-0" style={{ background: t.bg }} />
+                          <span className="text-sm font-medium flex-1">{t.label}</span>
+                          {sidebarTheme === t.id && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── User Profile ── */}
+            <div className={cn("bg-zinc-800/40 rounded-2xl border border-zinc-700/30 flex items-center transition-all duration-500", isCollapsed ? "p-2 justify-center flex-col gap-2" : "p-3 gap-3")}>
+              <Avatar className="w-9 h-9 border-2 border-zinc-700/50 ring-2 ring-blue-500/20 shrink-0">
                 <AvatarImage src={auth.currentUser?.photoURL || "https://picsum.photos/seed/user/200"} />
                 <AvatarFallback className="bg-zinc-800 text-zinc-400">
                   {auth.currentUser?.displayName?.charAt(0) || auth.currentUser?.email?.charAt(0) || "U"}
@@ -472,14 +513,14 @@ export function Sidebar({ activeTab, setActiveTab, isMobileOpen, setIsMobileOpen
               {!isCollapsed && (
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-white truncate">{auth.currentUser?.displayName || "User"}</p>
-                  <p className="text-[10px] text-zinc-500 truncate font-mono uppercase">{auth.currentUser?.email}</p>
+                  <p className="text-[10px] text-zinc-500 truncate font-mono">{auth.currentUser?.email}</p>
                 </div>
               )}
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={handleProtectedLogout}
-                className={cn("text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg shrink-0", isCollapsed ? "w-8 h-8" : "w-10 h-10")}
+                className={cn("text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg shrink-0", isCollapsed ? "w-8 h-8" : "w-8 h-8")}
               >
                 <LogOut className="w-4 h-4" />
               </Button>
@@ -576,10 +617,19 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
   // ── Shift Lock Overlay Logic ────────────────────────────────────
   const [elapsed, setElapsed] = useState(0);
   const [overTime, setOverTime] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+  const [resumePin, setResumePin] = useState("");
+  const [resumeError, setResumeError] = useState("");
   const isOnShiftBreak = posSession && posSession.shiftStatus !== "ACTIVE";
 
   useEffect(() => {
-    if (!isOnShiftBreak || !posSession?.statusSince) { setElapsed(0); setOverTime(false); return; }
+    if (!isOnShiftBreak || !posSession?.statusSince) { 
+      setElapsed(0); 
+      setOverTime(false); 
+      setIsResuming(false);
+      setResumePin("");
+      return; 
+    }
     const tick = setInterval(() => {
       const secs = Math.floor((Date.now() - new Date(posSession.statusSince).getTime()) / 1000);
       setElapsed(secs);
@@ -592,22 +642,44 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
     return () => clearInterval(tick);
   }, [isOnShiftBreak, posSession?.statusSince, posSession?.shiftStatus, shiftTimePolicies]);
 
+  const handleResumePin = async (digit: string) => {
+    if (resumePin.length >= 4) return;
+    const next = resumePin + digit;
+    setResumePin(next);
+    
+    if (next.length === 4) {
+      if (next === posSession?.staffData?.pin || next === posSession?.staffData?._pinHash) {
+        await handleReturnToWork();
+      } else {
+        setResumeError("Invalid PIN");
+        setTimeout(() => { setResumePin(""); setResumeError(""); }, 1000);
+      }
+    }
+  };
+
   const handleReturnToWork = async () => {
     if (!posSession?.sessionId) return;
+    const loadingToast = toast.loading("Resuming shift...");
     try {
       const newStatus = "ACTIVE";
       await updateDoc(doc(db, "pos_sessions", posSession.sessionId), {
-        status: newStatus, lastActivity: new Date().toISOString(), enterprise_id: enterpriseId
+        status: newStatus, 
+        lastActivity: new Date().toISOString(), 
+        enterprise_id: enterpriseId
       });
       await addDoc(collection(db, "audit_logs"), {
         action: "Shift Status Change",
         details: `${posSession.staffName} returned to work from ${posSession.shiftStatus}`,
-        timestamp: new Date().toISOString(), user: posSession.staffName, enterprise_id: enterpriseId
+        timestamp: new Date().toISOString(), 
+        user: posSession.staffName, 
+        enterprise_id: enterpriseId
       });
       updateShiftStatus(newStatus);
-      toast.success("Welcome back! Status set to Active.");
+      setIsResuming(false);
+      setResumePin("");
+      toast.success("Welcome back! Terminal unlocked.", { id: loadingToast });
     } catch(e: any) { 
-       toast.error(e.message?.includes("permissions") ? "Permission Denied" : "Failed to update status."); 
+       toast.error("Resume failed: " + (e.message?.includes("permissions") ? "Permission Denied" : "System Error"), { id: loadingToast }); 
     }
   };
 
@@ -644,76 +716,129 @@ export function Header({ onMenuClick, setActiveTab, activeTab }: { onMenuClick: 
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="w-full max-w-lg space-y-12 text-center"
+              className="w-full max-w-xl space-y-12 text-center"
             >
               <div className="space-y-4">
                 <Badge className={cn("px-4 py-1.5 rounded-full font-bold text-xs uppercase tracking-[0.2em]", currentMeta.badgeCls)}>
                   {currentMeta.label}
                 </Badge>
                 <h2 className="text-5xl font-black text-white tracking-tight flex items-center justify-center gap-4">
-                  {currentMeta.emoji} Status Locked
+                  {currentMeta.emoji} Terminal Locked
                 </h2>
-                <p className="text-zinc-400 font-medium">Please select Return to Work once your session is complete.</p>
+                <p className="text-zinc-400 font-medium">Authentication required to resume your session.</p>
               </div>
 
-              <div className="relative flex items-center justify-center py-12">
-                <div className={cn(
-                  "w-64 h-64 rounded-full border-4 border-zinc-900 flex flex-col items-center justify-center relative transition-all duration-500",
-                  currentMeta.ringColor,
-                  overTime && "animate-pulse scale-105 ring-8 ring-rose-500/30 border-rose-900"
-                )}>
-                  <span className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] absolute top-12">Elapsed Time</span>
-                  <span className={cn("text-6xl font-black tracking-tighter", currentMeta.textColor, overTime && "text-rose-400")}>
-                    {fmtSecs(elapsed)}
-                  </span>
-                  {overTime && (
-                    <motion.span 
-                      animate={{ opacity: [0.4, 1, 0.4] }}
-                      transition={{ duration: 1, repeat: Infinity }}
-                      className="text-rose-400 text-[10px] font-black uppercase tracking-widest absolute bottom-12"
+              {!isResuming ? (
+                <div className="flex flex-col items-center gap-8 animate-in fade-in zoom-in duration-500">
+                  <div className="relative flex items-center justify-center">
+                    <div className={cn(
+                      "w-64 h-64 rounded-full border-4 border-zinc-900 flex flex-col items-center justify-center relative transition-all duration-500",
+                      currentMeta.ringColor,
+                      overTime && "animate-pulse scale-105 ring-8 ring-rose-500/30 border-rose-900"
+                    )}>
+                      <span className="text-zinc-500 text-[10px] font-bold uppercase tracking-[0.3em] absolute top-12">Elapsed Time</span>
+                      <span className={cn("text-6xl font-black tracking-tighter", currentMeta.textColor, overTime && "text-rose-400")}>
+                        {fmtSecs(elapsed)}
+                      </span>
+                      {overTime && (
+                        <motion.span 
+                          animate={{ opacity: [0.4, 1, 0.4] }}
+                          transition={{ duration: 1, repeat: Infinity }}
+                          className="text-rose-400 text-[10px] font-black uppercase tracking-widest absolute bottom-12"
+                        >
+                          Over Allotted Time
+                        </motion.span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
+                    <Button 
+                      size="lg"
+                      className="h-20 rounded-3xl bg-blue-600 text-white hover:bg-blue-500 font-black text-lg transition-all active:scale-95 shadow-2xl shadow-blue-600/20 col-span-1 sm:col-span-2"
+                      onClick={() => setIsResuming(true)}
                     >
-                      Over Allotted Time
-                    </motion.span>
-                  )}
+                      <Zap className="w-5 h-5 mr-3 fill-current" />
+                      Resume Back Shift
+                    </Button>
+                    <Button 
+                      size="lg"
+                      variant="outline"
+                      className="h-14 rounded-2xl border-zinc-800 bg-zinc-900/50 text-white hover:bg-zinc-800 font-bold text-sm transition-all"
+                      onClick={() => {
+                        setActiveTab?.("pos");
+                        updateShiftStatus("ACTIVE");
+                        setPendingAction({ module: "pos", action: "CLOSE_REGISTER" });
+                      }}
+                    >
+                      <ClipboardCheck className="w-4 h-4 mr-2" />
+                      Registry Check Off
+                    </Button>
+                    <Button 
+                      size="lg"
+                      variant="outline"
+                      className="h-14 rounded-2xl border-zinc-800 bg-zinc-900/50 text-white hover:bg-rose-900/20 hover:text-rose-400 hover:border-rose-900 font-bold text-sm transition-all"
+                      onClick={handleProtectedLogout}
+                    >
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Sign Out
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-center gap-4">
+                      {[0, 1, 2, 3].map((index) => (
+                        <div key={index} className={cn(
+                          "w-4 h-4 rounded-full border-2 transition-all duration-200", 
+                          resumeError ? "bg-rose-500 border-rose-500 animate-bounce" :
+                          resumePin.length > index ? "bg-white border-white scale-110 shadow-[0_0_15px_rgba(255,255,255,0.5)]" : "border-white/20"
+                        )} />
+                      ))}
+                    </div>
+                    <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest">
+                      Enter PIN for <span className="text-white">{posSession?.staffName}</span>
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 w-full max-w-[320px]">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, "C", 0, "←"].map((btn) => (
+                      <Button
+                        key={btn}
+                        variant="outline"
+                        onClick={() => {
+                          if (btn === "C") setResumePin("");
+                          else if (btn === "←") setResumePin(p => p.slice(0, -1));
+                          else handleResumePin(btn.toString());
+                        }}
+                        className="h-16 rounded-2xl bg-white/5 border-white/10 text-white text-xl font-black hover:bg-white/10 transition-all active:scale-95"
+                      >
+                        {btn}
+                      </Button>
+                    ))}
+                  </div>
+
+                  <Button 
+                    variant="ghost" 
+                    className="text-zinc-500 hover:text-white font-bold"
+                    onClick={() => { setIsResuming(false); setResumePin(""); }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
+              
+              <div className="pt-8 border-t border-white/5 flex flex-col items-center gap-2">
+                <p className="text-zinc-600 text-[10px] font-black tracking-widest uppercase">
+                  Secured Shift Resilience Engine v2.0
+                </p>
+                <div className="flex items-center gap-4 text-zinc-700 text-[9px] font-bold">
+                  <span>AES-256 ENCRYPTED</span>
+                  <span>•</span>
+                  <span>SESSION ID: {posSession?.sessionId?.substring(0,8).toUpperCase()}</span>
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Button 
-                  size="lg"
-                  className="h-16 rounded-2xl bg-white text-zinc-950 hover:bg-zinc-200 font-black text-sm transition-all active:scale-95 shadow-2xl shadow-white/10"
-                  onClick={handleReturnToWork}
-                >
-                  <Zap className="w-4 h-4 mr-2 fill-current" />
-                  Return to Work
-                </Button>
-                <Button 
-                  size="lg"
-                  variant="outline"
-                  className="h-16 rounded-2xl border-zinc-800 bg-zinc-900/50 text-white hover:bg-zinc-800 font-bold text-sm transition-all"
-                  onClick={() => {
-                    setActiveTab?.("pos");
-                    updateShiftStatus("ACTIVE");
-                    setPendingAction({ module: "pos", action: "CLOSE_REGISTER" });
-                  }}
-                >
-                  <ClipboardCheck className="w-4 h-4 mr-2" />
-                  Registry Check Off
-                </Button>
-                <Button 
-                  size="lg"
-                  variant="outline"
-                  className="h-16 rounded-2xl border-zinc-800 bg-zinc-900/50 text-white hover:bg-rose-900/20 hover:text-rose-400 hover:border-rose-900 font-bold text-sm transition-all"
-                  onClick={handleProtectedLogout}
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sign Out of Website
-                </Button>
-              </div>
-              
-              <p className="text-zinc-600 text-[10px] font-medium tracking-widest uppercase">
-                Enterprise ID: {enterpriseId?.substring(0,12)}
-              </p>
             </motion.div>
           </motion.div>
         )}
